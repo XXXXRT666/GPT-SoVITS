@@ -760,6 +760,8 @@ class TTS:
                                                                         prompt_text, 
                                                                         prompt_lang,
                                                                         self.configs.version)
+                self.prompt_cache["prompt_text"] = prompt_text
+                self.prompt_cache["prompt_lang"] = prompt_lang
                 self.prompt_cache["phones"] = phones
                 self.prompt_cache["bert_features"] = bert_features
                 self.prompt_cache["norm_text"] = norm_text
