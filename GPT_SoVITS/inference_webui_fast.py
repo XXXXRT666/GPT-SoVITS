@@ -94,7 +94,7 @@ cut_method = {
     i18n("按标点符号切"): "cut5",
 }
 
-tts_config = TTS_Config("GPT_SoVITS/configs/tts_infer.yaml")
+tts_config = TTS_Config("GPT_SoVITS/configs/Cfg.yaml")
 tts_config.device = device
 tts_config.is_half = is_half
 tts_config.version = version
@@ -166,6 +166,7 @@ def change_choices():
 
 pretrained_sovits_name=["GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth", "GPT_SoVITS/pretrained_models/s2G488k.pth"]
 pretrained_gpt_name=["GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt", "GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt"]
+
 _ =[[],[]]
 for i in range(2):
     if os.path.exists(pretrained_gpt_name[i]):
@@ -194,9 +195,10 @@ def get_weights_names(GPT_weight_root, SoVITS_weight_root):
 SoVITS_names, GPT_names = get_weights_names(GPT_weight_root, SoVITS_weight_root)
 
 
-
 def change_sovits_weights(sovits_path,prompt_language=None,text_language=None):
     tts_pipeline.init_vits_weights(sovits_path)
+    tts_config.vits_weights_path = sovits_path
+    tts_config.save_configs()
     global version, dict_language
     dict_language = dict_language_v1 if tts_pipeline.configs.version =='v1' else dict_language_v2
     if prompt_language is not None and text_language is not None:
@@ -211,9 +213,12 @@ def change_sovits_weights(sovits_path,prompt_language=None,text_language=None):
             text_update = {'__type__':'update', 'value':''}
             text_language_update = {'__type__':'update', 'value':i18n("中文")}
         return  {'__type__':'update', 'choices':list(dict_language.keys())}, {'__type__':'update', 'choices':list(dict_language.keys())}, prompt_text_update, prompt_language_update, text_update, text_language_update
+    
+    
+def change_gpt_weights(gpt_path):
+    tts_pipeline.init_t2s_weights(gpt_path)
 
-
-
+    
 with gr.Blocks(title="GPT-SoVITS WebUI") as app:
     gr.Markdown(
         value=i18n("本软件以MIT协议开源, 作者不对软件具备任何控制力, 使用软件者、传播软件导出的声音者自负全责. <br>如不认可该条款, 则不能使用或引用软件包内任何代码和文件. 详见根目录<b>LICENSE</b>.")
@@ -301,7 +306,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
         )
         stop_infer.click(tts_pipeline.stop, [], [])
         SoVITS_dropdown.change(change_sovits_weights, [SoVITS_dropdown,prompt_language,text_language], [prompt_language,text_language,prompt_text,prompt_language,text,text_language])
-        GPT_dropdown.change(tts_pipeline.init_t2s_weights, [GPT_dropdown], [])
+        GPT_dropdown.change(change_gpt_weights, [GPT_dropdown], [])
 
     with gr.Group():
         gr.Markdown(value=i18n("文本切分工具。太长的文本合成出来效果不一定好，所以太长建议先切。合成会根据文本的换行分开合成再拼起来。"))

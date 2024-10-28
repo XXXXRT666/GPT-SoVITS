@@ -1,12 +1,12 @@
 """
 # WebAPI文档
 
-` python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml `
+` python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/Cfg.yaml `
 
 ## 执行参数:
     `-a` - `绑定地址, 默认"127.0.0.1"`
     `-p` - `绑定端口, 默认9880`
-    `-c` - `TTS配置文件路径, 默认"GPT_SoVITS/configs/tts_infer.yaml"`
+    `-c` - `TTS配置文件路径, 默认"GPT_SoVITS/configs/Cfg.yaml"`
 
 ## 调用:
 
@@ -109,6 +109,7 @@ import subprocess
 import wave
 import signal
 import numpy as np
+import torch
 import soundfile as sf
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -124,23 +125,37 @@ from pydantic import BaseModel
 i18n = I18nAuto()
 cut_method_names = get_cut_method_names()
 
+if torch.cuda.is_available():
+    device = "cuda"
+# elif torch.backends.mps.is_available():
+#     device = "mps"
+else:
+    device = "cpu"
+
 parser = argparse.ArgumentParser(description="GPT-SoVITS api")
-parser.add_argument("-c", "--tts_config", type=str, default="GPT_SoVITS/configs/tts_infer.yaml", help="tts_infer路径")
+parser.add_argument("-c", "--tts_config", type=str, default="GPT_SoVITS/configs/Cfg.yaml", help="tts_infer路径")
 parser.add_argument("-a", "--bind_addr", type=str, default="127.0.0.1", help="default: 127.0.0.1")
 parser.add_argument("-p", "--port", type=int, default="9880", help="default: 9880")
+parser.add_argument("-d", "--device", type=str, default=device, help="推理设备")
+parser.add_argument("-hp", "--half_precision", action="store_true", default=torch.cuda.is_available(), help="使用半精度")
+
 args = parser.parse_args()
 config_path = args.tts_config
-# device = args.device
 port = args.port
 host = args.bind_addr
+device = args.device
+is_half = args.half_precision
 argv = sys.argv
 
 if config_path in [None, ""]:
-    config_path = "GPT-SoVITS/configs/tts_infer.yaml"
+    config_path = "GPT_SoVITS/configs/Cfg.yaml"
 
 tts_config = TTS_Config(config_path)
-print(tts_config)
+tts_config.device = device
+tts_config.is_half = is_half
+tts_config.save_configs(config_path)
 tts_pipeline = TTS(tts_config)
+print(tts_config)
 
 APP = FastAPI()
 class TTS_Request(BaseModel):

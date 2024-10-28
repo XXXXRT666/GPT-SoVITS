@@ -3,7 +3,6 @@ import ffmpeg
 import numpy as np
 import gradio as gr
 from tools.i18n.i18n import I18nAuto
-import pandas as pd
 i18n = I18nAuto(language=os.environ.get('language','Auto'))
 
 def load_audio(file, sr):
@@ -101,6 +100,7 @@ def check_details(path_list=None,is_train=False,is_dataset_processing=False):
         path_list.append(os.path.join(path_list[0],'5-wav32k'))
         path_list.append(os.path.join(path_list[0],'6-name2semantic.tsv'))
         phone_path, hubert_path, wav_path, semantic_path = path_list[1:]
+        import pandas as pd
         with open(phone_path,'r',encoding='utf-8') as f:
             if f.read(1):...
             else:gr.Warning(i18n('缺少音素数据集'))
@@ -113,3 +113,26 @@ def check_details(path_list=None,is_train=False,is_dataset_processing=False):
         )
         if len(df) >= 1:...
         else:gr.Warning(i18n('缺少语义数据集'))
+
+def check_infer_device():
+    import torch
+    is_half = True
+    if torch.cuda.is_available():
+        infer_device = "cuda"
+    else:
+        infer_device = "cpu"
+        
+    if infer_device == "cuda":
+        gpu_name = torch.cuda.get_device_name(0)
+        if (
+                ("16" in gpu_name and "V100" not in gpu_name.upper())
+                or "P40" in gpu_name.upper()
+                or "P10" in gpu_name.upper()
+                or "1060" in gpu_name
+                or "1070" in gpu_name
+                or "1080" in gpu_name
+        ):
+            is_half=False
+
+    if(infer_device=="cpu"):is_half=False
+    return infer_device, is_half
