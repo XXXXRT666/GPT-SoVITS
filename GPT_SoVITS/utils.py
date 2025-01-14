@@ -18,7 +18,7 @@ logging.getLogger("matplotlib").setLevel(logging.ERROR)
 
 MATPLOTLIB_FLAG = False
 
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging
 
 
@@ -27,11 +27,7 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, skip_optimizer=False
     checkpoint_dict = torch.load(checkpoint_path, map_location="cpu")
     iteration = checkpoint_dict["iteration"]
     learning_rate = checkpoint_dict["learning_rate"]
-    if (
-        optimizer is not None
-        and not skip_optimizer
-        and checkpoint_dict["optimizer"] is not None
-    ):
+    if optimizer is not None and not skip_optimizer and checkpoint_dict["optimizer"] is not None:
         optimizer.load_state_dict(checkpoint_dict["optimizer"])
     saved_state_dict = checkpoint_dict["model"]
     if hasattr(model, "module"):
@@ -50,35 +46,31 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, skip_optimizer=False
             )
         except:
             traceback.print_exc()
-            print(
-                "error, %s is not in the checkpoint" % k
-            )  # shape不对也会，比如text_embedding当cleaner修改时
+            print("error, %s is not in the checkpoint" % k)  # shape不对也会，比如text_embedding当cleaner修改时
             new_state_dict[k] = v
     if hasattr(model, "module"):
         model.module.load_state_dict(new_state_dict)
     else:
         model.load_state_dict(new_state_dict)
     print("load ")
-    logger.info(
-        "Loaded checkpoint '{}' (iteration {})".format(checkpoint_path, iteration)
-    )
+    logger.info("Loaded checkpoint '{}' (iteration {})".format(checkpoint_path, iteration))
     return model, optimizer, learning_rate, iteration
+
 
 from time import time as ttime
 import shutil
-def my_save(fea,path):#####fix issue: torch.save doesn't support chinese path
-    dir=os.path.dirname(path)
-    name=os.path.basename(path)
-    tmp_path="%s.pth"%(ttime())
-    torch.save(fea,tmp_path)
-    shutil.move(tmp_path,"%s/%s"%(dir,name))
+
+
+def my_save(fea, path):  #####fix issue: torch.save doesn't support chinese path
+    dir = os.path.dirname(path)
+    name = os.path.basename(path)
+    tmp_path = "%s.pth" % (ttime())
+    torch.save(fea, tmp_path)
+    shutil.move(tmp_path, "%s/%s" % (dir, name))
+
 
 def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path):
-    logger.info(
-        "Saving model and optimizer state at iteration {} to {}".format(
-            iteration, checkpoint_path
-        )
-    )
+    logger.info("Saving model and optimizer state at iteration {} to {}".format(iteration, checkpoint_path))
     if hasattr(model, "module"):
         state_dict = model.module.state_dict()
     else:
@@ -130,7 +122,7 @@ def plot_spectrogram_to_numpy(spectrogram):
         matplotlib.use("Agg")
         MATPLOTLIB_FLAG = True
         mpl_logger = logging.getLogger("matplotlib")
-        mpl_logger.setLevel(logging.WARNING)
+        mpl_logger.setLevel(logging.ERROR)
     import matplotlib.pylab as plt
     import numpy as np
 
@@ -142,7 +134,7 @@ def plot_spectrogram_to_numpy(spectrogram):
     plt.tight_layout()
 
     fig.canvas.draw()
-    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
+    data = np.fromstring(fig.canvas.tostring_argb(), dtype=np.uint8, sep="")
     data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     plt.close()
     return data
@@ -156,14 +148,12 @@ def plot_alignment_to_numpy(alignment, info=None):
         matplotlib.use("Agg")
         MATPLOTLIB_FLAG = True
         mpl_logger = logging.getLogger("matplotlib")
-        mpl_logger.setLevel(logging.WARNING)
+        mpl_logger.setLevel(logging.ERROR)
     import matplotlib.pylab as plt
     import numpy as np
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    im = ax.imshow(
-        alignment.transpose(), aspect="auto", origin="lower", interpolation="none"
-    )
+    im = ax.imshow(alignment.transpose(), aspect="auto", origin="lower", interpolation="none")
     fig.colorbar(im, ax=ax)
     xlabel = "Decoder timestep"
     if info is not None:
@@ -173,7 +163,7 @@ def plot_alignment_to_numpy(alignment, info=None):
     plt.tight_layout()
 
     fig.canvas.draw()
-    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
+    data = np.fromstring(fig.canvas.tostring_argb(), dtype=np.uint8, sep="")
     data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     plt.close()
     return data
@@ -199,9 +189,7 @@ def get_hparams(init=True, stage=1):
         default="./configs/s2.json",
         help="JSON file for configuration",
     )
-    parser.add_argument(
-        "-p", "--pretrain", type=str, required=False, default=None, help="pretrain dir"
-    )
+    parser.add_argument("-p", "--pretrain", type=str, required=False, default=None, help="pretrain dir")
     parser.add_argument(
         "-rs",
         "--resume_step",
@@ -250,11 +238,7 @@ def clean_checkpoints(path_to_models="logs/44k/", n_ckpts_to_keep=2, sort_by_tim
     """
     import re
 
-    ckpts_files = [
-        f
-        for f in os.listdir(path_to_models)
-        if os.path.isfile(os.path.join(path_to_models, f))
-    ]
+    ckpts_files = [f for f in os.listdir(path_to_models) if os.path.isfile(os.path.join(path_to_models, f))]
     name_key = lambda _f: int(re.compile("._(\d+)\.pth").match(_f).group(1))
     time_key = lambda _f: os.path.getmtime(os.path.join(path_to_models, _f))
     sort_key = time_key if sort_by_time else name_key
@@ -262,10 +246,7 @@ def clean_checkpoints(path_to_models="logs/44k/", n_ckpts_to_keep=2, sort_by_tim
         [f for f in ckpts_files if f.startswith(_x) and not f.endswith("_0.pth")],
         key=sort_key,
     )
-    to_del = [
-        os.path.join(path_to_models, fn)
-        for fn in (x_sorted("G")[:-n_ckpts_to_keep] + x_sorted("D")[:-n_ckpts_to_keep])
-    ]
+    to_del = [os.path.join(path_to_models, fn) for fn in (x_sorted("G")[:-n_ckpts_to_keep] + x_sorted("D")[:-n_ckpts_to_keep])]
     del_info = lambda fn: logger.info(f".. Free up space by deleting ckpt {fn}")
     del_routine = lambda x: [os.remove(x), del_info(x)]
     rs = [del_routine(fn) for fn in to_del]
@@ -294,11 +275,7 @@ def get_hparams_from_file(config_path):
 def check_git_hash(model_dir):
     source_dir = os.path.dirname(os.path.realpath(__file__))
     if not os.path.exists(os.path.join(source_dir, ".git")):
-        logger.warn(
-            "{} is not a git repository, therefore hash value comparison will be ignored.".format(
-                source_dir
-            )
-        )
+        logger.warn("{} is not a git repository, therefore hash value comparison will be ignored.".format(source_dir))
         return
 
     cur_hash = subprocess.getoutput("git rev-parse HEAD")
@@ -307,11 +284,7 @@ def check_git_hash(model_dir):
     if os.path.exists(path):
         saved_hash = open(path).read()
         if saved_hash != cur_hash:
-            logger.warn(
-                "git hash values are different. {}(saved) != {}(current)".format(
-                    saved_hash[:8], cur_hash[:8]
-                )
-            )
+            logger.warn("git hash values are different. {}(saved) != {}(current)".format(saved_hash[:8], cur_hash[:8]))
     else:
         open(path, "w").write(cur_hash)
 
@@ -364,8 +337,4 @@ class HParams:
 
 
 if __name__ == "__main__":
-    print(
-        load_wav_to_torch(
-            "/home/fish/wenetspeech/dataset_vq/Y0000022499_wHFSeHEx9CM/S00261.flac"
-        )
-    )
+    print(load_wav_to_torch("/home/fish/wenetspeech/dataset_vq/Y0000022499_wHFSeHEx9CM/S00261.flac"))

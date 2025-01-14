@@ -1,17 +1,11 @@
 """
 # api.py usage
 
-` python api.py -dr "123.wav" -dt "一二三。" -dl "zh" `
+` python api.py -c <Cfg File Path>
 
 ## 执行参数:
 
-`-s` - `SoVITS模型路径, 可在 config.py 中指定`
-`-g` - `GPT模型路径, 可在 config.py 中指定`
-
-调用请求缺少参考音频时使用
-`-dr` - `默认参考音频路径`
-`-dt` - `默认参考音频文本`
-`-dl` - `默认参考音频语种, "中文","英文","日文","韩文","粤语,"zh","en","ja","ko","yue"`
+-c `TTS配置文件路径, 默认"GPT_SoVITS/configs/Cfg.yaml"`
 
 `-d` - `推理设备, "cuda","cpu"`
 `-a` - `绑定地址, 默认"127.0.0.1"`
@@ -167,8 +161,8 @@ from AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from text import cleaned_text_to_sequence
 from text.cleaner import clean_text
 from module.mel_processing import spectrogram_torch
-from tools.my_utils import load_audio
-import config as global_config
+from tools.my_utils import load_audio, DictToAttrRecursive
+from Cfg import Cfg
 import logging
 import subprocess
 
@@ -382,34 +376,6 @@ def get_phones_and_bert(text,language,version,final=False):
         return get_phones_and_bert("." + text,language,version,final=True)
 
     return phones,bert.to(torch.float16 if is_half == True else torch.float32),norm_text
-
-
-class DictToAttrRecursive(dict):
-    def __init__(self, input_dict):
-        super().__init__(input_dict)
-        for key, value in input_dict.items():
-            if isinstance(value, dict):
-                value = DictToAttrRecursive(value)
-            self[key] = value
-            setattr(self, key, value)
-
-    def __getattr__(self, item):
-        try:
-            return self[item]
-        except KeyError:
-            raise AttributeError(f"Attribute {item} not found")
-
-    def __setattr__(self, key, value):
-        if isinstance(value, dict):
-            value = DictToAttrRecursive(value)
-        super(DictToAttrRecursive, self).__setitem__(key, value)
-        super().__setattr__(key, value)
-
-    def __delattr__(self, item):
-        try:
-            del self[item]
-        except KeyError:
-            raise AttributeError(f"Attribute {item} not found")
 
 
 def get_spepc(hps, filename):
@@ -745,30 +711,10 @@ logging.config.dictConfig(uvicorn.config.LOGGING_CONFIG)
 logger = logging.getLogger('uvicorn')
 
 # 获取配置
-g_config = global_config.Config()
 
 # 获取参数
 parser = argparse.ArgumentParser(description="GPT-SoVITS api")
-
-parser.add_argument("-s", "--sovits_path", type=str, default=g_config.sovits_path, help="SoVITS模型路径")
-parser.add_argument("-g", "--gpt_path", type=str, default=g_config.gpt_path, help="GPT模型路径")
-parser.add_argument("-dr", "--default_refer_path", type=str, default="", help="默认参考音频路径")
-parser.add_argument("-dt", "--default_refer_text", type=str, default="", help="默认参考音频文本")
-parser.add_argument("-dl", "--default_refer_language", type=str, default="", help="默认参考音频语种")
-parser.add_argument("-d", "--device", type=str, default=g_config.infer_device, help="cuda / cpu")
-parser.add_argument("-a", "--bind_addr", type=str, default="0.0.0.0", help="default: 0.0.0.0")
-parser.add_argument("-p", "--port", type=int, default=g_config.api_port, help="default: 9880")
-parser.add_argument("-fp", "--full_precision", action="store_true", default=False, help="覆盖config.is_half为False, 使用全精度")
-parser.add_argument("-hp", "--half_precision", action="store_true", default=False, help="覆盖config.is_half为True, 使用半精度")
-# bool值的用法为 `python ./api.py -fp ...`
-# 此时 full_precision==True, half_precision==False
-parser.add_argument("-sm", "--stream_mode", type=str, default="close", help="流式返回模式, close / normal / keepalive")
-parser.add_argument("-mt", "--media_type", type=str, default="wav", help="音频编码格式, wav / ogg / aac")
-parser.add_argument("-st", "--sub_type", type=str, default="int16", help="音频数据类型, int16 / int32")
-parser.add_argument("-cp", "--cut_punc", type=str, default="", help="文本切分符号设定, 符号范围,.;?!、，。？！；：…")
-# 切割常用分句符为 `python ./api.py -cp ".?!。？！"`
-parser.add_argument("-hb", "--hubert_path", type=str, default=g_config.cnhubert_path, help="覆盖config.cnhubert_path")
-parser.add_argument("-b", "--bert_path", type=str, default=g_config.bert_path, help="覆盖config.bert_path")
+parser.add_argument("-c", "--cfg_path", type=str, default="GPT_SoVITS/configs/Cfg.yaml", help="配置文件路径")
 
 args = parser.parse_args()
 sovits_path = args.sovits_path

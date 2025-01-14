@@ -1,0 +1,100 @@
+from typing import Optional, Literal, Tuple, Annotated, Union, List
+from dataclasses import dataclass
+
+import numpy as np
+from numpy.typing import NDArray
+from pydantic import BaseModel, Field
+
+from cfg import Speaker, Prompt
+
+
+@dataclass
+class TTSRequest:
+    text: str
+    text_lang: str
+
+    text_split_method: Optional[str] = None
+    top_k: Optional[int] = None
+    top_p: Optional[float] = None
+    temperature: Optional[float] = None
+    repetition_penalty: Optional[float] = None
+    speed_factor: Optional[float] = None
+    fragment_interval: Optional[float] = None
+
+    batch_size: Optional[int] = None
+    batch_threshold: Optional[float] = None
+    split_bucket: Optional[bool] = None
+    parallel_infer: Optional[bool] = None
+    return_fragment: Optional[bool] = None
+
+    seed: int = -1
+    no_prompt_text: bool = False
+
+
+@dataclass
+class TTSResponse_Success:
+    audio: Tuple[int, NDArray[np.int16]]
+
+
+@dataclass
+class TTSResponse_Segment:
+    audio: Tuple[int, NDArray[np.int16]]
+
+
+@dataclass
+class TTSResponse_Failed:
+    exception: Exception = Exception()
+    tracebacks: str = ""
+
+
+TTSResponse = Union[TTSResponse_Success, TTSResponse_Segment, TTSResponse_Failed]
+
+
+class TTS_Request_API(BaseModel):
+    text: str = Field(examples=["I like playing Genshin Impact.", "犯大吴疆土者,盛必击而破之。"], description="Text to Synthesize")
+    text_lang: str = Field(examples=["en", "all_zh"], description="The Language of the Text")
+    speaker_name: str = Field(
+        default="API_Batch", description="The Speaker for Synthesizing, See cfg.py --> SpeakerCfg and Speakers.json for More Information"
+    )
+
+    ref_audio_path: Optional[str] = Field(None, description="Reference Audio Path for TTS, Optional If Provided in Speaker Setting(Prompt)")
+    prompt_lang: Optional[str] = Field(None, description="Language of Reference Audio")
+    prompt_text: Optional[str] = Field(None, description="Text of Reference Audio")
+    aux_ref_audio_paths: Optional[Annotated[List[str], Field(min_items=0, max_items=10)]] = Field(
+        None, description="Auxiliary Reference Audio Paths for Voice Fusion"
+    )
+
+    text_split_method: Optional[Literal["cut0", "cut1", "cut2", "cut3", "cut4", "cut5"]] = Field(
+        default=None, examples=["cut1"], description="Check text_segmentation_method.py for Details"
+    )
+    top_k: Optional[Annotated[int, Field(ge=1, le=100)]] = Field(
+        default=None, examples=[5], description="Limits Sampling to the Top-k Most Likely Tokens."
+    )
+    top_p: Optional[Annotated[float, Field(ge=0.01, le=1.0)]] = Field(
+        default=None, examples=[1.0], description="Samples from the Smallest Set of Tokens with a Cumulative Probability ≥ P"
+    )
+    temperature: Optional[Annotated[float, Field(ge=0.01, le=1.0)]] = Field(default=None, examples=[1.0], description="Randomness Control")
+    repetition_penalty: Optional[Annotated[float, Field(ge=0.9, le=2.0)]] = Field(
+        default=None, examples=[1.35], description="Penalty for Generating Repetitive Text."
+    )
+    fragment_interval: Optional[Annotated[float, Field(ge=0.01, le=4.0)]] = Field(
+        default=None, examples=[0.3], description="Time Intervals between Each Batch"
+    )
+    speed_factor: Optional[Annotated[float, Field(ge=0.6, le=1.4)]] = Field(default=None, examples=[1.0], description="Speech Speed")
+
+    parallel_infer: Optional[bool] = Field(default=None, examples=[True], description="Batch Inference")
+    streaming_mode: Optional[bool] = Field(default=None, examples=[False], description="Return Audio in Streaming Response")
+    batch_size: Optional[int] = Field(default=None, examples=[5], description="Numbers of Text Items in Each Batch")
+    batch_threshold: Optional[Annotated[float, Field(ge=0.01, le=1.0)]] = Field(default=0.75, examples=[0.75])
+    split_bucket: bool = True
+
+    media_type: Optional[Literal["raw", "wav", "aac", "ogg"]] = Field(default=None, examples=["wav"], description="Media Format for Audio")
+    seed: Optional[Annotated[int, Field(ge=-1)]] = Field(-1, description="Random Seed")
+
+
+class SpeakerAPI(BaseModel):
+    speaker_name: Optional[str] = Field(None, description="Name of Speaker")
+    t2s_path: Optional[str] = Field(None, description="Path of the GPT Model")
+    vits_path: Optional[str] = Field(None, description="Path of the SoVITS Model")
+    version: Literal["v1", "v2"] = Field("v2", description="Version of the Model")
+    prompt: Optional[Prompt] = Field(default=None, description="Prompt for the this Speaker, Optional")
