@@ -5,12 +5,13 @@ exp_name = os.environ.get("exp_name")
 i_part = os.environ.get("i_part")
 all_parts = os.environ.get("all_parts")
 if "_CUDA_VISIBLE_DEVICES" in os.environ:
-     os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["_CUDA_VISIBLE_DEVICES"]
+    os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["_CUDA_VISIBLE_DEVICES"]
 opt_dir = os.environ.get("opt_dir")
 pretrained_s2G = os.environ.get("pretrained_s2G")
 s2config_path = os.environ.get("s2config_path")
-version=os.environ.get("version","v2")
+version = os.environ.get("version", "v2")
 import torch
+
 is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
 import math, traceback
 import multiprocessing
@@ -23,8 +24,9 @@ import torch.multiprocessing as mp
 from glob import glob
 from tqdm import tqdm
 import logging, librosa, utils
-from module.models import SynthesizerTrn
+from GPT_SoVITS.module.models import SynthesizerTrn
 from tools.my_utils import clean_path
+
 logging.getLogger("numba").setLevel(logging.WARNING)
 # from config import pretrained_s2G
 
@@ -35,8 +37,10 @@ logging.getLogger("numba").setLevel(logging.WARNING)
 # os.environ["CUDA_VISIBLE_DEVICES"]=sys.argv[5]
 # opt_dir="/data/docker/liujing04/gpt-vits/fine_tune_dataset/%s"%exp_name
 
-if os.path.exists(pretrained_s2G):...
-else:raise FileNotFoundError(pretrained_s2G)
+if os.path.exists(pretrained_s2G):
+    ...
+else:
+    raise FileNotFoundError(pretrained_s2G)
 
 hubert_dir = "%s/4-cnhubert" % (opt_dir)
 semantic_path = "%s/6-name2semantic-%s.tsv" % (opt_dir, i_part)
@@ -51,11 +55,7 @@ if os.path.exists(semantic_path) == False:
         device = "cpu"
     hps = utils.get_hparams_from_file(s2config_path)
     vq_model = SynthesizerTrn(
-        hps.data.filter_length // 2 + 1,
-        hps.train.segment_size // hps.data.hop_length,
-        n_speakers=hps.data.n_speakers,
-        version=version,
-        **hps.model
+        hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers=hps.data.n_speakers, version=version, **hps.model
     )
     if is_half == True:
         vq_model = vq_model.half().to(device)
@@ -64,11 +64,7 @@ if os.path.exists(semantic_path) == False:
     vq_model.eval()
     # utils.load_checkpoint(utils.latest_checkpoint_path(hps.s2_ckpt_dir, "G_*.pth"), vq_model, None, True)
     # utils.load_checkpoint(pretrained_s2G, vq_model, None, True)
-    print(
-        vq_model.load_state_dict(
-            torch.load(pretrained_s2G, map_location="cpu")["weight"], strict=False
-        )
-    )
+    print(vq_model.load_state_dict(torch.load(pretrained_s2G, map_location="cpu")["weight"], strict=False))
 
     def name2go(wav_name, lines):
         hubert_path = "%s/%s.pt" % (hubert_dir, wav_name)
@@ -92,7 +88,7 @@ if os.path.exists(semantic_path) == False:
         try:
             # wav_name,text=line.split("\t")
             wav_name, spk_name, language, text = line.split("|")
-            wav_name=clean_path(wav_name)
+            wav_name = clean_path(wav_name)
             wav_name = os.path.basename(wav_name)
             # name2go(name,lines1)
             name2go(wav_name, lines1)

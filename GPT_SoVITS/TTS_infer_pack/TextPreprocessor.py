@@ -8,12 +8,12 @@ sys.path.append(now_dir)
 import re
 import torch
 import LangSegment
-from text import chinese
+from GPT_SoVITS.text import chinese
 from typing import Dict, List, Tuple
-from text.cleaner import clean_text
-from text import cleaned_text_to_sequence
+from GPT_SoVITS.text.cleaner import clean_text
+from GPT_SoVITS.text import cleaned_text_to_sequence
 from transformers import AutoModelForMaskedLM, AutoTokenizer
-from TTS_infer_pack.text_segmentation_method import split_big_text, splits, get_method as get_seg_method
+from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import split_big_text, splits, get_method as get_seg_method
 
 from tools.i18n.i18n import I18nAuto, scan_language_list
 

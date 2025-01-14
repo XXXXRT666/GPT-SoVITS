@@ -7,8 +7,8 @@ from typing import Union, Callable, Optional
 from tools.i18n.i18n import I18nAuto
 from cfg import Speakers_Cfg, Inference_WebUI_Cfg, API_Batch_Cfg, Speaker, Prompt, Cfg
 from schema import TTSRequest, TTSResponse_Failed, TTSResponse_Success, TTSResponse_Segment
-from .text_segmentation_method import splits
-from .TTS import TTS
+from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import splits
+from GPT_SoVITS.TTS_infer_pack import TTS
 
 i18n = I18nAuto()
 

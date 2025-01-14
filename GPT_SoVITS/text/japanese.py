@@ -2,9 +2,12 @@
 import re
 import os
 import hashlib
+
 try:
     import pyopenjtalk
+
     current_file_path = os.path.dirname(__file__)
+
     def get_hash(fp: str) -> str:
         hash_md5 = hashlib.md5()
         with open(fp, "rb") as f:
@@ -17,30 +20,28 @@ try:
     USERDIC_HASH_PATH = os.path.join(current_file_path, "ja_userdic", "userdict.md5")
     # 如果没有用户词典，就生成一个；如果有，就检查md5，如果不一样，就重新生成
     if os.path.exists(USERDIC_CSV_PATH):
-        if not os.path.exists(USERDIC_BIN_PATH) or get_hash(USERDIC_CSV_PATH) != open(USERDIC_HASH_PATH, "r",encoding='utf-8').read():
+        if not os.path.exists(USERDIC_BIN_PATH) or get_hash(USERDIC_CSV_PATH) != open(USERDIC_HASH_PATH, "r", encoding="utf-8").read():
             pyopenjtalk.mecab_dict_index(USERDIC_CSV_PATH, USERDIC_BIN_PATH)
-            with open(USERDIC_HASH_PATH, "w", encoding='utf-8') as f:
+            with open(USERDIC_HASH_PATH, "w", encoding="utf-8") as f:
                 f.write(get_hash(USERDIC_CSV_PATH))
 
     if os.path.exists(USERDIC_BIN_PATH):
-        pyopenjtalk.update_global_jtalk_with_user_dict(USERDIC_BIN_PATH)   
+        pyopenjtalk.update_global_jtalk_with_user_dict(USERDIC_BIN_PATH)
 except Exception as e:
     # print(e)
     import pyopenjtalk
+
     # failed to load user dictionary, ignore.
     pass
 
 
-from text.symbols import punctuation
+from GPT_SoVITS.text.symbols import punctuation
+
 # Regular expression matching Japanese without punctuation marks:
-_japanese_characters = re.compile(
-    r"[A-Za-z\d\u3005\u3040-\u30ff\u4e00-\u9fff\uff11-\uff19\uff21-\uff3a\uff41-\uff5a\uff66-\uff9d]"
-)
+_japanese_characters = re.compile(r"[A-Za-z\d\u3005\u3040-\u30ff\u4e00-\u9fff\uff11-\uff19\uff21-\uff3a\uff41-\uff5a\uff66-\uff9d]")
 
 # Regular expression matching non-Japanese characters or punctuation marks:
-_japanese_marks = re.compile(
-    r"[^A-Za-z\d\u3005\u3040-\u30ff\u4e00-\u9fff\uff11-\uff19\uff21-\uff3a\uff41-\uff5a\uff66-\uff9d]"
-)
+_japanese_marks = re.compile(r"[^A-Za-z\d\u3005\u3040-\u30ff\u4e00-\u9fff\uff11-\uff19\uff21-\uff3a\uff41-\uff5a\uff66-\uff9d]")
 
 # List of (symbol, Japanese) pairs for marks:
 _symbols_to_japanese = [(re.compile("%s" % x[0]), x[1]) for x in [("％", "パーセント")]]
@@ -89,9 +90,9 @@ def post_replace_ph(ph):
 
 
 def replace_consecutive_punctuation(text):
-    punctuations = ''.join(re.escape(p) for p in punctuation)
-    pattern = f'([{punctuations}])([{punctuations}])+'
-    result = re.sub(pattern, r'\1', text)
+    punctuations = "".join(re.escape(p) for p in punctuation)
+    pattern = f"([{punctuations}])([{punctuations}])+"
+    result = re.sub(pattern, r"\1", text)
     return result
 
 
@@ -118,7 +119,7 @@ def preprocess_jap(text, with_prosody=False):
                 text += p.split(" ")
 
         if i < len(marks):
-            if marks[i] == " ":# 防止意外的UNK
+            if marks[i] == " ":  # 防止意外的UNK
                 continue
             text += [marks[i].replace(" ", "")]
     return text
@@ -130,6 +131,7 @@ def text_normalize(text):
     # 避免重复标点引起的参考泄露
     text = replace_consecutive_punctuation(text)
     return text
+
 
 # Copied from espnet https://github.com/espnet/espnet/blob/master/espnet2/text/phoneme_tokenizer.py
 def pyopenjtalk_g2p_prosody(text, drop_unvoiced_vowels=True):
@@ -207,12 +209,14 @@ def pyopenjtalk_g2p_prosody(text, drop_unvoiced_vowels=True):
 
     return phones
 
+
 # Copied from espnet https://github.com/espnet/espnet/blob/master/espnet2/text/phoneme_tokenizer.py
 def _numeric_feature_by_regex(regex, s):
     match = re.search(regex, s)
     if match is None:
         return -50
     return int(match.group(1))
+
 
 def g2p(norm_text, with_prosody=True):
     phones = preprocess_jap(norm_text, with_prosody)

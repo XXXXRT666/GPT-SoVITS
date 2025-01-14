@@ -13,7 +13,7 @@ import typing as tp
 import torch
 from torch import nn
 
-from module.core_vq import ResidualVectorQuantization
+from GPT_SoVITS.module.core_vq import ResidualVectorQuantization
 
 
 @dataclass
@@ -85,17 +85,11 @@ class ResidualVectorQuantizer(nn.Module):
         """
         n_q = n_q if n_q else self.n_q
         if layers and max(layers) >= n_q:
-            raise ValueError(
-                f"Last layer index in layers: A {max(layers)}. Number of quantizers in RVQ: B {self.n_q}. A must less than B."
-            )
-        quantized, codes, commit_loss, quantized_list = self.vq(
-            x, n_q=n_q, layers=layers
-        )
+            raise ValueError(f"Last layer index in layers: A {max(layers)}. Number of quantizers in RVQ: B {self.n_q}. A must less than B.")
+        quantized, codes, commit_loss, quantized_list = self.vq(x, n_q=n_q, layers=layers)
         return quantized, codes, torch.mean(commit_loss), quantized_list
 
-    def encode(
-        self, x: torch.Tensor, n_q: tp.Optional[int] = None, st: tp.Optional[int] = None
-    ) -> torch.Tensor:
+    def encode(self, x: torch.Tensor, n_q: tp.Optional[int] = None, st: tp.Optional[int] = None) -> torch.Tensor:
         """Encode a given input tensor with the specified sample rate at the given bandwidth.
         The RVQ encode method sets the appropriate number of quantizer to use
         and returns indices for each quantizer.

@@ -1,6 +1,8 @@
 import warnings
+
 warnings.filterwarnings("ignore")
 import utils, os
+
 hps = utils.get_hparams(stage=2)
 os.environ["CUDA_VISIBLE_DEVICES"] = hps.train.gpu_numbers.replace("-", ",")
 import torch
@@ -18,19 +20,19 @@ logging.getLogger("matplotlib").setLevel(logging.INFO)
 logging.getLogger("h5py").setLevel(logging.INFO)
 logging.getLogger("numba").setLevel(logging.INFO)
 from random import randint
-from module import commons
+from GPT_SoVITS.module import commons
 
-from module.data_utils import (
+from GPT_SoVITS.module.data_utils import (
     TextAudioSpeakerLoader,
     TextAudioSpeakerCollate,
     DistributedBucketSampler,
 )
-from module.models import (
+from GPT_SoVITS.module.models import (
     SynthesizerTrn,
     MultiPeriodDiscriminator,
 )
-from module.losses import generator_loss, discriminator_loss, feature_loss, kl_loss
-from module.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+from GPT_SoVITS.module.losses import generator_loss, discriminator_loss, feature_loss, kl_loss
+from GPT_SoVITS.module.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
 from process_ckpt import savee
 
 torch.backends.cudnn.benchmark = False
@@ -74,7 +76,7 @@ def run(rank, n_gpus, hps):
         writer_eval = SummaryWriter(log_dir=os.path.join(hps.s2_ckpt_dir, "eval"))
 
     dist.init_process_group(
-        backend = "gloo" if os.name == "nt" or not torch.cuda.is_available() else "nccl",
+        backend="gloo" if os.name == "nt" or not torch.cuda.is_available() else "nccl",
         init_method="env://",
         world_size=n_gpus,
         rank=rank,
@@ -128,19 +130,27 @@ def run(rank, n_gpus, hps):
     #                              batch_size=1, pin_memory=True,
     #                              drop_last=False, collate_fn=collate_fn)
 
-    net_g = SynthesizerTrn(
-        hps.data.filter_length // 2 + 1,
-        hps.train.segment_size // hps.data.hop_length,
-        n_speakers=hps.data.n_speakers,
-        **hps.model,
-    ).cuda(rank) if torch.cuda.is_available() else SynthesizerTrn(
-        hps.data.filter_length // 2 + 1,
-        hps.train.segment_size // hps.data.hop_length,
-        n_speakers=hps.data.n_speakers,
-        **hps.model,
-    ).to(device)
+    net_g = (
+        SynthesizerTrn(
+            hps.data.filter_length // 2 + 1,
+            hps.train.segment_size // hps.data.hop_length,
+            n_speakers=hps.data.n_speakers,
+            **hps.model,
+        ).cuda(rank)
+        if torch.cuda.is_available()
+        else SynthesizerTrn(
+            hps.data.filter_length // 2 + 1,
+            hps.train.segment_size // hps.data.hop_length,
+            n_speakers=hps.data.n_speakers,
+            **hps.model,
+        ).to(device)
+    )
 
-    net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank) if torch.cuda.is_available() else MultiPeriodDiscriminator(hps.model.use_spectral_norm).to(device)
+    net_d = (
+        MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
+        if torch.cuda.is_available()
+        else MultiPeriodDiscriminator(hps.model.use_spectral_norm).to(device)
+    )
     for name, param in net_g.named_parameters():
         if not param.requires_grad:
             print(name, "not requires_grad")
@@ -212,38 +222,34 @@ def run(rank, n_gpus, hps):
         # traceback.print_exc()
         epoch_str = 1
         global_step = 0
-        if hps.train.pretrained_s2G != ""and hps.train.pretrained_s2G != None and os.path.exists(hps.train.pretrained_s2G):
+        if hps.train.pretrained_s2G != "" and hps.train.pretrained_s2G != None and os.path.exists(hps.train.pretrained_s2G):
             if rank == 0:
                 logger.info("loaded pretrained %s" % hps.train.pretrained_s2G)
             print(
                 net_g.module.load_state_dict(
                     torch.load(hps.train.pretrained_s2G, map_location="cpu")["weight"],
                     strict=False,
-                ) if torch.cuda.is_available() else net_g.load_state_dict(
+                )
+                if torch.cuda.is_available()
+                else net_g.load_state_dict(
                     torch.load(hps.train.pretrained_s2G, map_location="cpu")["weight"],
                     strict=False,
                 )
             )  ##测试不加载优化器
-        if hps.train.pretrained_s2D != ""and hps.train.pretrained_s2D != None and os.path.exists(hps.train.pretrained_s2D):
+        if hps.train.pretrained_s2D != "" and hps.train.pretrained_s2D != None and os.path.exists(hps.train.pretrained_s2D):
             if rank == 0:
                 logger.info("loaded pretrained %s" % hps.train.pretrained_s2D)
             print(
-                net_d.module.load_state_dict(
-                    torch.load(hps.train.pretrained_s2D, map_location="cpu")["weight"]
-                ) if torch.cuda.is_available() else net_d.load_state_dict(
-                    torch.load(hps.train.pretrained_s2D, map_location="cpu")["weight"]
-                )
+                net_d.module.load_state_dict(torch.load(hps.train.pretrained_s2D, map_location="cpu")["weight"])
+                if torch.cuda.is_available()
+                else net_d.load_state_dict(torch.load(hps.train.pretrained_s2D, map_location="cpu")["weight"])
             )
 
     # scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
     # scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
 
-    scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
-        optim_g, gamma=hps.train.lr_decay, last_epoch=-1
-    )
-    scheduler_d = torch.optim.lr_scheduler.ExponentialLR(
-        optim_d, gamma=hps.train.lr_decay, last_epoch=-1
-    )
+    scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=-1)
+    scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hps.train.lr_decay, last_epoch=-1)
     for _ in range(epoch_str):
         scheduler_g.step()
         scheduler_d.step()
@@ -282,9 +288,7 @@ def run(rank, n_gpus, hps):
         scheduler_d.step()
 
 
-def train_and_evaluate(
-    rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers
-):
+def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers):
     net_g, net_d = nets
     optim_g, optim_d = optims
     # scheduler_g, scheduler_d = schedulers
@@ -308,18 +312,12 @@ def train_and_evaluate(
         text_lengths,
     ) in enumerate(tqdm(train_loader)):
         if torch.cuda.is_available():
-            spec, spec_lengths = spec.cuda(rank, non_blocking=True), spec_lengths.cuda(
-                rank, non_blocking=True
-            )
-            y, y_lengths = y.cuda(rank, non_blocking=True), y_lengths.cuda(
-                rank, non_blocking=True
-            )
+            spec, spec_lengths = spec.cuda(rank, non_blocking=True), spec_lengths.cuda(rank, non_blocking=True)
+            y, y_lengths = y.cuda(rank, non_blocking=True), y_lengths.cuda(rank, non_blocking=True)
             ssl = ssl.cuda(rank, non_blocking=True)
             ssl.requires_grad = False
             # ssl_lengths = ssl_lengths.cuda(rank, non_blocking=True)
-            text, text_lengths = text.cuda(rank, non_blocking=True), text_lengths.cuda(
-                rank, non_blocking=True
-            )
+            text, text_lengths = text.cuda(rank, non_blocking=True), text_lengths.cuda(rank, non_blocking=True)
         else:
             spec, spec_lengths = spec.to(device), spec_lengths.to(device)
             y, y_lengths = y.to(device), y_lengths.to(device)
@@ -347,9 +345,7 @@ def train_and_evaluate(
                 hps.data.mel_fmin,
                 hps.data.mel_fmax,
             )
-            y_mel = commons.slice_segments(
-                mel, ids_slice, hps.train.segment_size // hps.data.hop_length
-            )
+            y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
             y_hat_mel = mel_spectrogram_torch(
                 y_hat.squeeze(1),
                 hps.data.filter_length,
@@ -361,16 +357,12 @@ def train_and_evaluate(
                 hps.data.mel_fmax,
             )
 
-            y = commons.slice_segments(
-                y, ids_slice * hps.data.hop_length, hps.train.segment_size
-            )  # slice
+            y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size)  # slice
 
             # Discriminator
             y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
             with autocast(enabled=False):
-                loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
-                    y_d_hat_r, y_d_hat_g
-                )
+                loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(y_d_hat_r, y_d_hat_g)
                 loss_disc_all = loss_disc
         optim_d.zero_grad()
         scaler.scale(loss_disc_all).backward()
@@ -400,11 +392,7 @@ def train_and_evaluate(
             if global_step % hps.train.log_interval == 0:
                 lr = optim_g.param_groups[0]["lr"]
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, kl_ssl, loss_kl]
-                logger.info(
-                    "Train Epoch: {} [{:.0f}%]".format(
-                        epoch, 100.0 * batch_idx / len(train_loader)
-                    )
-                )
+                logger.info("Train Epoch: {} [{:.0f}%]".format(epoch, 100.0 * batch_idx / len(train_loader)))
                 logger.info([x.item() for x in losses] + [global_step, lr])
 
                 scalar_dict = {
@@ -427,18 +415,10 @@ def train_and_evaluate(
                 # scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
                 # scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
                 image_dict = {
-                    "slice/mel_org": utils.plot_spectrogram_to_numpy(
-                        y_mel[0].data.cpu().numpy()
-                    ),
-                    "slice/mel_gen": utils.plot_spectrogram_to_numpy(
-                        y_hat_mel[0].data.cpu().numpy()
-                    ),
-                    "all/mel": utils.plot_spectrogram_to_numpy(
-                        mel[0].data.cpu().numpy()
-                    ),
-                    "all/stats_ssl": utils.plot_spectrogram_to_numpy(
-                        stats_ssl[0].data.cpu().numpy()
-                    ),
+                    "slice/mel_org": utils.plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
+                    "slice/mel_gen": utils.plot_spectrogram_to_numpy(y_hat_mel[0].data.cpu().numpy()),
+                    "all/mel": utils.plot_spectrogram_to_numpy(mel[0].data.cpu().numpy()),
+                    "all/stats_ssl": utils.plot_spectrogram_to_numpy(stats_ssl[0].data.cpu().numpy()),
                 }
                 utils.summarize(
                     writer=writer,
@@ -454,18 +434,14 @@ def train_and_evaluate(
                 optim_g,
                 hps.train.learning_rate,
                 epoch,
-                os.path.join(
-                    "%s/logs_s2" % hps.data.exp_dir, "G_{}.pth".format(global_step)
-                ),
+                os.path.join("%s/logs_s2" % hps.data.exp_dir, "G_{}.pth".format(global_step)),
             )
             utils.save_checkpoint(
                 net_d,
                 optim_d,
                 hps.train.learning_rate,
                 epoch,
-                os.path.join(
-                    "%s/logs_s2" % hps.data.exp_dir, "D_{}.pth".format(global_step)
-                ),
+                os.path.join("%s/logs_s2" % hps.data.exp_dir, "D_{}.pth".format(global_step)),
             )
         else:
             utils.save_checkpoint(
@@ -473,18 +449,14 @@ def train_and_evaluate(
                 optim_g,
                 hps.train.learning_rate,
                 epoch,
-                os.path.join(
-                    "%s/logs_s2" % hps.data.exp_dir, "G_{}.pth".format(233333333333)
-                ),
+                os.path.join("%s/logs_s2" % hps.data.exp_dir, "G_{}.pth".format(233333333333)),
             )
             utils.save_checkpoint(
                 net_d,
                 optim_d,
                 hps.train.learning_rate,
                 epoch,
-                os.path.join(
-                    "%s/logs_s2" % hps.data.exp_dir, "D_{}.pth".format(233333333333)
-                ),
+                os.path.join("%s/logs_s2" % hps.data.exp_dir, "D_{}.pth".format(233333333333)),
             )
         if rank == 0 and hps.train.if_save_every_weights == True:
             if hasattr(net_g, "module"):
@@ -538,10 +510,10 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                 ssl = ssl.to(device)
                 text, text_lengths = text.to(device), text_lengths.to(device)
             for test in [0, 1]:
-                y_hat, mask, *_ = generator.module.infer(
-                    ssl, spec, spec_lengths, text, text_lengths, test=test
-                ) if torch.cuda.is_available() else generator.infer(
-                    ssl, spec, spec_lengths, text, text_lengths, test=test
+                y_hat, mask, *_ = (
+                    generator.module.infer(ssl, spec, spec_lengths, text, text_lengths, test=test)
+                    if torch.cuda.is_available()
+                    else generator.infer(ssl, spec, spec_lengths, text, text_lengths, test=test)
                 )
                 y_hat_lengths = mask.sum([1, 2]).long() * hps.data.hop_length
 
@@ -563,23 +535,9 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                     hps.data.mel_fmin,
                     hps.data.mel_fmax,
                 )
-                image_dict.update(
-                    {
-                        f"gen/mel_{batch_idx}_{test}": utils.plot_spectrogram_to_numpy(
-                            y_hat_mel[0].cpu().numpy()
-                        )
-                    }
-                )
-                audio_dict.update(
-                    {f"gen/audio_{batch_idx}_{test}": y_hat[0, :, : y_hat_lengths[0]]}
-                )
-                image_dict.update(
-                    {
-                        f"gt/mel_{batch_idx}": utils.plot_spectrogram_to_numpy(
-                            mel[0].cpu().numpy()
-                        )
-                    }
-                )
+                image_dict.update({f"gen/mel_{batch_idx}_{test}": utils.plot_spectrogram_to_numpy(y_hat_mel[0].cpu().numpy())})
+                audio_dict.update({f"gen/audio_{batch_idx}_{test}": y_hat[0, :, : y_hat_lengths[0]]})
+                image_dict.update({f"gt/mel_{batch_idx}": utils.plot_spectrogram_to_numpy(mel[0].cpu().numpy())})
                 audio_dict.update({f"gt/audio_{batch_idx}": y[0, :, : y_lengths[0]]})
 
         # y_hat, mask, *_ = generator.module.infer(ssl, spec_lengths, speakers, y=None)

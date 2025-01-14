@@ -8,9 +8,9 @@ import torch
 import torch.utils.data
 from tqdm import tqdm
 
-from module import commons
-from module.mel_processing import spectrogram_torch
-from text import cleaned_text_to_sequence
+from GPT_SoVITS.module import commons
+from GPT_SoVITS.module.mel_processing import spectrogram_torch
+from GPT_SoVITS.text import cleaned_text_to_sequence
 from utils import load_wav_to_torch, load_filepaths_and_text
 import torch.nn.functional as F
 from functools import lru_cache
@@ -18,7 +18,10 @@ import requests
 from scipy.io import wavfile
 from io import BytesIO
 from tools.my_utils import load_audio
-version = os.environ.get('version',None)
+
+version = os.environ.get("version", None)
+
+
 # ZeroDivisionError fixed by Tybost (https://github.com/RVC-Boss/GPT-SoVITS/issues/79)
 class TextAudioSpeakerLoader(torch.utils.data.Dataset):
     """
@@ -43,7 +46,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         for line in lines:
             tmp = line.split("\t")
-            if (len(tmp) != 4):
+            if len(tmp) != 4:
                 continue
             self.phoneme_data[tmp[0]] = [tmp[1]]
 
@@ -51,7 +54,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         tmp = self.audiopaths_sid_text
         leng = len(tmp)
         min_num = 100
-        if (leng < min_num):
+        if leng < min_num:
             self.audiopaths_sid_text = []
             for _ in range(max(2, int(min_num / leng))):
                 self.audiopaths_sid_text += tmp
@@ -76,7 +79,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         for audiopath in tqdm(self.audiopaths_sid_text):
             try:
                 phoneme = self.phoneme_data[audiopath][0]
-                phoneme = phoneme.split(' ')
+                phoneme = phoneme.split(" ")
                 phoneme_ids = cleaned_text_to_sequence(phoneme, version)
             except Exception:
                 print(f"{audiopath} not in self.phoneme_data !")
@@ -111,7 +114,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
             spec, wav = self.get_audio("%s/%s" % (self.path5, audiopath))
             with torch.no_grad():
                 ssl = torch.load("%s/%s.pt" % (self.path4, audiopath), map_location="cpu")
-                if (ssl.shape[-1] != spec.shape[-1]):
+                if ssl.shape[-1] != spec.shape[-1]:
                     typee = ssl.dtype
                     ssl = F.pad(ssl.float(), (0, 1), mode="replicate").to(typee)
                 ssl.requires_grad = False
@@ -129,8 +132,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         audio = torch.FloatTensor(audio_array)  # /32768
         audio_norm = audio
         audio_norm = audio_norm.unsqueeze(0)
-        spec = spectrogram_torch(audio_norm, self.filter_length, self.sampling_rate, self.hop_length, self.win_length,
-                                  center=False)
+        spec = spectrogram_torch(audio_norm, self.filter_length, self.sampling_rate, self.hop_length, self.win_length, center=False)
         spec = torch.squeeze(spec, 0)
         return spec, audio_norm
 
@@ -146,12 +148,11 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         return len(self.audiopaths_sid_text)
 
     def random_slice(self, ssl, wav, mel):
-        assert abs(ssl.shape[-1] - wav.shape[-1] // self.hop_length) < 3, (
-        "first", ssl.shape, wav.shape)
+        assert abs(ssl.shape[-1] - wav.shape[-1] // self.hop_length) < 3, ("first", ssl.shape, wav.shape)
 
         len_mel = mel.shape[1]
         if self.val:
-            reference_mel = mel[:, :len_mel // 3]
+            reference_mel = mel[:, : len_mel // 3]
             return reference_mel, ssl, wav, mel
         dir = random.randint(0, 1)
         sep_point = random.randint(int(len_mel // 3), int(len_mel // 3 * 2))
@@ -159,22 +160,29 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         if dir == 0:
             reference_mel = mel[:, :sep_point]
             ssl = ssl[:, :, sep_point:]
-            wav2 = wav[:, sep_point * self.hop_length:]
+            wav2 = wav[:, sep_point * self.hop_length :]
             mel = mel[:, sep_point:]
         else:
             reference_mel = mel[:, sep_point:]
             ssl = ssl[:, :, :sep_point]
-            wav2 = wav[:, :sep_point * self.hop_length]
+            wav2 = wav[:, : sep_point * self.hop_length]
             mel = mel[:, :sep_point]
 
         assert abs(ssl.shape[-1] - wav2.shape[-1] // self.hop_length) < 3, (
-        ssl.shape, wav.shape, wav2.shape, mel.shape, sep_point, self.hop_length, sep_point * self.hop_length, dir)
+            ssl.shape,
+            wav.shape,
+            wav2.shape,
+            mel.shape,
+            sep_point,
+            self.hop_length,
+            sep_point * self.hop_length,
+            dir,
+        )
         return reference_mel, ssl, wav2, mel
 
 
-class TextAudioSpeakerCollate():
-    """ Zero-pads model inputs and targets
-    """
+class TextAudioSpeakerCollate:
+    """Zero-pads model inputs and targets"""
 
     def __init__(self, return_ids=False):
         self.return_ids = return_ids
@@ -186,9 +194,7 @@ class TextAudioSpeakerCollate():
         batch: [text_normalized, spec_normalized, wav_normalized, sid]
         """
         # Right zero-pad all one-hot text sequences to max input length
-        _, ids_sorted_decreasing = torch.sort(
-            torch.LongTensor([x[1].size(1) for x in batch]),
-            dim=0, descending=True)
+        _, ids_sorted_decreasing = torch.sort(torch.LongTensor([x[1].size(1) for x in batch]), dim=0, descending=True)
 
         max_ssl_len = max([x[0].size(2) for x in batch])
         max_ssl_len = int(2 * ((max_ssl_len // 2) + 1))
@@ -216,19 +222,19 @@ class TextAudioSpeakerCollate():
             row = batch[ids_sorted_decreasing[i]]
 
             ssl = row[0]
-            ssl_padded[i, :, :ssl.size(2)] = ssl[0, :, :]
+            ssl_padded[i, :, : ssl.size(2)] = ssl[0, :, :]
             ssl_lengths[i] = ssl.size(2)
 
             spec = row[1]
-            spec_padded[i, :, :spec.size(1)] = spec
+            spec_padded[i, :, : spec.size(1)] = spec
             spec_lengths[i] = spec.size(1)
 
             wav = row[2]
-            wav_padded[i, :, :wav.size(1)] = wav
+            wav_padded[i, :, : wav.size(1)] = wav
             wav_lengths[i] = wav.size(1)
 
             text = row[3]
-            text_padded[i, :text.size(0)] = text
+            text_padded[i, : text.size(0)] = text
             text_lengths[i] = text.size(0)
 
         return ssl_padded, ssl_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, text_padded, text_lengths
@@ -297,12 +303,12 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
             num_samples_bucket = self.num_samples_per_bucket[i]
 
             rem = num_samples_bucket - len_bucket
-            ids_bucket = ids_bucket + ids_bucket * (rem // len_bucket) + ids_bucket[:(rem % len_bucket)]
+            ids_bucket = ids_bucket + ids_bucket * (rem // len_bucket) + ids_bucket[: (rem % len_bucket)]
 
-            ids_bucket = ids_bucket[self.rank::self.num_replicas]
+            ids_bucket = ids_bucket[self.rank :: self.num_replicas]
 
             for j in range(len(ids_bucket) // self.batch_size):
-                batch = [bucket[idx] for idx in ids_bucket[j * self.batch_size:(j + 1) * self.batch_size]]
+                batch = [bucket[idx] for idx in ids_bucket[j * self.batch_size : (j + 1) * self.batch_size]]
                 batches.append(batch)
 
         if self.shuffle:
