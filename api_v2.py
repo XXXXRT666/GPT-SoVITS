@@ -105,9 +105,8 @@ import argparse
 import subprocess
 import wave
 import signal
-import json
 from io import BytesIO
-from typing import Generator, Optional, cast, Annotated, Tuple, Literal
+from typing import Generator, Optional, Annotated, Tuple, Literal
 
 import torch
 import uvicorn
@@ -118,14 +117,14 @@ from numpy import int16
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse, PlainTextResponse
-from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTS_Engine
 from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import get_method_names as get_cut_method_names
 from schema import TTS_Request_API, TTSResponse_Failed, SpeakerAPI
 from tools.i18n.i18n import I18nAuto
-from cfg import Prompt, Speaker
+from cfg import Prompt
 
 i18n = I18nAuto()
 cut_method_names = get_cut_method_names()
@@ -345,7 +344,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @APP.exception_handler(StarletteHTTPException)
 async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
     print(f"HTTP Error: {str(exc)}")
-    return PlainTextResponse(exc.detail)
+    return PlainTextResponse(exc.detail, media_type="text/plain; charset=utf-8")
 
 
 @APP.exception_handler(404)
@@ -361,6 +360,14 @@ async def redirect_root_to_docs_get():
 @APP.post("/", include_in_schema=False)
 async def redirect_root_to_doc_post():
     return RedirectResponse(url="/docs")
+
+
+@APP.middleware("http")
+async def add_charset_to_json_response(request: Request, call_next):
+    response = await call_next(request)
+    if isinstance(response, JSONResponse):
+        response.headers["Content-Type"] = "application/json; charset=utf-8"
+    return response
 
 
 @APP.get("/tts", tags=["TTS"], summary="TTS_GET_Endpoint")
