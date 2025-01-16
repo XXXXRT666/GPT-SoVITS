@@ -74,6 +74,7 @@ class TTSEngine:
             "norm_text": None,
             "aux_ref_audio_paths": [],
         }
+        self.tts.prompt_cache = self.prompt_cache
 
     def set_vits(self, vits_path: str):
         self.tts.init_vits_weights(vits_path)

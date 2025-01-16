@@ -27,7 +27,7 @@ def main():
     host = tts_engine.configs.host
     port = tts_engine.configs.port
 
-    APP.state.tts_engine = tts_engine
+    APP.state.TTSEngine = tts_engine
 
     try:
         uvicorn_config = uvicorn.Config(app=APP, host=host, port=port, log_level="info", access_log=False)
