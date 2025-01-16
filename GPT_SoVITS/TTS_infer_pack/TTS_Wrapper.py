@@ -1,23 +1,29 @@
 import gc
 import os
 import traceback
+import tempfile
+import wave
 from functools import partial
 from typing import Union, Callable, Optional
 
+import numpy as np
+from tools.cfg import Speakers_Cfg, Inference_WebUI_Cfg, API_Batch_Cfg, Speaker, Prompt, Cfg
 from tools.i18n.i18n import I18nAuto
-from cfg import Speakers_Cfg, Inference_WebUI_Cfg, API_Batch_Cfg, Speaker, Prompt, Cfg
-from schema import TTSRequest, TTSResponse_Failed, TTSResponse_Success, TTSResponse_Segment
+from tools.server.schema import TTSRequest, TTSResponseFailed, TTSResponseSuccess, TTSResponseSegment
 from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import splits
-from GPT_SoVITS.TTS_infer_pack import TTS
+from GPT_SoVITS.TTS_infer_pack.TTS import TTS
 
 i18n = I18nAuto()
 
 
-def default_exception_handler(*args, **kwds):
+def default_exception_handler(tts_response: TTSResponseFailed):
+    print(tts_response.exception)
+    if tts_response.tracebacks:
+        print(tts_response.tracebacks)
     return
 
 
-class TTS_Engine:
+class TTSEngine:
     def __init__(self, configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg], speakers_cfg: Speakers_Cfg, speaker_name: str):
         self.configs = configs
         self.speakers_cfg = speakers_cfg
@@ -34,6 +40,7 @@ class TTS_Engine:
             "aux_ref_audio_paths": [],
         }
         self.tts = TTS(self.configs, self.speaker, self.prompt_cache)
+        self.warmup(speaker_name)
 
     @classmethod
     def get_instance(
@@ -164,8 +171,28 @@ class TTS_Engine:
         if spk_name in self.speakers_cfg.speakers_dict:
             del self.speakers_cfg.speakers_dict[spk_name]
 
-    def precall(self, **kwds) -> Union[TTSRequest, TTSResponse_Failed]:
-        print(kwds)
+    def warmup(self, speaker_name):
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as temp_file:
+            file_name = temp_file.name
+            with wave.open(temp_file, "w") as wav_file:
+                channels = 1
+                sample_width = 2
+                sample_rate = 44100
+                duration = 5
+                frequency = 440.0
+
+                t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+                sine_wave = np.sin(2 * np.pi * frequency * t)  # Sine Wave
+                int_wave = (sine_wave * 32767).astype(np.int16)
+
+                wav_file.setnchannels(channels)
+                wav_file.setsampwidth(sample_width)
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(int_wave.tobytes())
+            next(self.generate(text="犯大吴疆土者,盛必击而破之", text_lang="all_zh", ref_audio_path=file_name, speaker_name=speaker_name))
+        self.clear_prompt_cache()
+
+    def precall(self, **kwds) -> Union[TTSRequest, TTSResponseFailed]:
         try:
             speaker_name = kwds.pop("speaker_name", "")
             self.set_speaker(speaker_name, prompt=False)
@@ -243,11 +270,11 @@ class TTS_Engine:
             return TTS_Request
 
         except Exception as e:
-            return TTSResponse_Failed(exception=e, tracebacks=traceback.format_exc())
+            return TTSResponseFailed(exception=e, tracebacks=traceback.format_exc())
 
     def __call__(
         self,
-        exception_handler: Callable[[TTSResponse_Failed], Optional[Exception]] = default_exception_handler,
+        exception_handler: Callable[[TTSResponseFailed], Optional[Exception]] = default_exception_handler,
         **kwds,
     ):
         """
@@ -287,16 +314,16 @@ class TTS_Engine:
 
         precall_result = self.precall(**kwds)  # checking
         excptions = None
-        if isinstance(precall_result, TTSResponse_Failed):
+        if isinstance(precall_result, TTSResponseFailed):
             excptions = exception_handler(precall_result)
             if isinstance(excptions, Exception):
                 raise excptions
         elif isinstance(precall_result, TTSRequest):
             yield None
             for result in self.tts.run(precall_result):
-                if isinstance(result, (TTSResponse_Success, TTSResponse_Segment)):
+                if isinstance(result, (TTSResponseSuccess, TTSResponseSegment)):
                     yield result.audio
-                elif isinstance(result, TTSResponse_Failed):
+                elif isinstance(result, TTSResponseFailed):
                     excptions = exception_handler(result)
         if isinstance(excptions, Exception):
             raise excptions
@@ -304,12 +331,12 @@ class TTS_Engine:
 
     def generate(
         self,
-        exception_handler: Callable[[TTSResponse_Failed], Optional[Exception]] = default_exception_handler,
+        exception_handler: Callable[[TTSResponseFailed], Optional[Exception]] = default_exception_handler,
         **kwds,
     ):
         """
         Similar to __call__, but skips the first None.
         """
         audio_generator = self.__call__(exception_handler, **kwds)
-        next(audio_generator)
+        print(str(next(audio_generator)))
         return audio_generator

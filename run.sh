@@ -73,7 +73,7 @@ if $infer; then
   exit 0
 elif $api; then
   echo "Running API v2..."
-  python3 api_v2.py --api-config "$cfg_path" --speakers-config "$speaker_cfg_path"
+  python3 tools/api.py --api-config "$cfg_path" --speakers-config "$speaker_cfg_path"
   exit 0
 else
   echo "Running Web UI..."

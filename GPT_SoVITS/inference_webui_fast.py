@@ -112,7 +112,7 @@ if bert_path is not None:
     tts_config.bert_base_path = bert_path
 
 print(tts_config)
-tts_pipeline = TTS(tts_config)
+tts_engine = TTS(tts_config)
 gpt_path = tts_config.t2s_weights_path
 sovits_path = tts_config.vits_weights_path
 version = tts_config.version
@@ -162,7 +162,7 @@ def inference(
         "parallel_infer": parallel_infer,
         "repetition_penalty": repetition_penalty,
     }
-    for item in tts_pipeline.run(inputs):
+    for item in tts_engine.run(inputs):
         yield item, actual_seed
 
 
@@ -220,11 +220,11 @@ SoVITS_names, GPT_names = get_weights_names(GPT_weight_root, SoVITS_weight_root)
 
 
 def change_sovits_weights(sovits_path, prompt_language=None, text_language=None):
-    tts_pipeline.init_vits_weights(sovits_path)
+    tts_engine.init_vits_weights(sovits_path)
     tts_config.vits_weights_path = sovits_path
     tts_config.save_configs()
     global version, dict_language
-    dict_language = dict_language_v1 if tts_pipeline.configs.version == "v1" else dict_language_v2
+    dict_language = dict_language_v1 if tts_engine.configs.version == "v1" else dict_language_v2
     if prompt_language is not None and text_language is not None:
         if prompt_language in list(dict_language.keys()):
             prompt_text_update, prompt_language_update = {"__type__": "update"}, {"__type__": "update", "value": prompt_language}
@@ -247,7 +247,7 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
 
 
 def change_gpt_weights(gpt_path):
-    tts_pipeline.init_t2s_weights(gpt_path)
+    tts_engine.init_t2s_weights(gpt_path)
 
 
 with gr.Blocks(title="GPT-SoVITS WebUI") as app:
@@ -353,7 +353,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
             ],
             [output, seed],
         )
-        stop_infer.click(tts_pipeline.stop, [], [])
+        stop_infer.click(tts_engine.stop, [], [])
         SoVITS_dropdown.change(
             change_sovits_weights,
             [SoVITS_dropdown, prompt_language, text_language],

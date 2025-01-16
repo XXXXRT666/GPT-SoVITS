@@ -14,8 +14,8 @@ from numpy.typing import NDArray
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 from tqdm import tqdm
 
-from cfg import Inference_WebUI_Cfg, API_Batch_Cfg, Speaker
-from schema import TTSResponse, TTSResponse_Failed, TTSResponse_Segment, TTSResponse_Success
+from tools.cfg import Inference_WebUI_Cfg, API_Batch_Cfg, Speaker
+from tools.server.schema import TTSResponse, TTSResponseFailed, TTSResponseSegment, TTSResponseSuccess
 from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from GPT_SoVITS.feature_extractor.cnhubert import CNHubert
 from GPT_SoVITS.module.models import SynthesizerTrn
@@ -491,7 +491,7 @@ class TTS:
             if not return_fragment:
                 data = self.text_preprocessor.preprocess(text, text_lang, text_split_method, self.speaker.version)
                 if len(data) == 0:
-                    yield TTSResponse_Failed(exception=RuntimeError("Empty text"))
+                    yield TTSResponseFailed(exception=RuntimeError("Empty text"))
                     return
 
                 batch_index_list: list = None
@@ -632,34 +632,33 @@ class TTS:
                 t_45 += t5 - t4
                 if return_fragment:
                     print(f"{t2 - t1:.3f}\t{t4 - t3:.3f}\t{t5 - t4:.3f}")
-                    yield TTSResponse_Segment(
+                    yield TTSResponseSegment(
                         audio=self.audio_postprocess([batch_audio_fragment], self.hps.data.sampling_rate, None, False, fragment_interval)
                     )
                 else:
                     audio.append(batch_audio_fragment)
 
                 if self.stop_flag:
-                    yield TTSResponse_Failed(exception=RuntimeError("Stop flag triggered"))
+                    yield TTSResponseFailed(exception=RuntimeError("Stop flag triggered"))
                     return
 
             if not return_fragment:
                 print(f"{t2 - t1:.3f}\t{t_34:.3f}\t{t_45:.3f}")
                 if len(audio) == 0:
-                    yield TTSResponse_Failed(exception=RuntimeError("Empty Prediction"))
+                    yield TTSResponseFailed(exception=RuntimeError("Empty Prediction"))
                     return
-                yield TTSResponse_Success(
+                yield TTSResponseSuccess(
                     audio=self.audio_postprocess(audio, self.hps.data.sampling_rate, batch_index_list, split_bucket, fragment_interval)
                 )
 
         except Exception as e:
             print("TTS Failed")
-            yield TTSResponse_Failed(exception=e, tracebacks=traceback.format_exc())
+            yield TTSResponseFailed(exception=e, tracebacks=traceback.format_exc())
             # 重置模型, 否则会导致显存释放不完全。
             del self.t2s_model
             del self.vits_model
             self.t2s_model = None
             self.vits_model = None
-            gc.collect()
             self.init_t2s_weights(self.speaker.t2s_path)
             self.init_vits_weights(self.speaker.vits_path)
         finally:
@@ -667,7 +666,7 @@ class TTS:
 
     def empty_cache(self):
         try:
-            gc.collect()  # 触发gc的垃圾回收。避免内存一直增长。
+            gc.collect()
             if "cuda" in str(self.configs.device):
                 torch.cuda.empty_cache()
             elif str(self.configs.device) == "mps":

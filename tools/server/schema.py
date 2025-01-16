@@ -5,7 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
-from cfg import Speaker, Prompt
+from tools.cfg import Prompt
 
 
 @dataclass
@@ -32,25 +32,25 @@ class TTSRequest:
 
 
 @dataclass
-class TTSResponse_Success:
+class TTSResponseSuccess:
     audio: Tuple[int, NDArray[np.int16]]
 
 
 @dataclass
-class TTSResponse_Segment:
+class TTSResponseSegment:
     audio: Tuple[int, NDArray[np.int16]]
 
 
 @dataclass
-class TTSResponse_Failed:
+class TTSResponseFailed:
     exception: Exception = Exception()
     tracebacks: str = ""
 
 
-TTSResponse = Union[TTSResponse_Success, TTSResponse_Segment, TTSResponse_Failed]
+TTSResponse = Union[TTSResponseSuccess, TTSResponseSegment, TTSResponseFailed]
 
 
-class TTS_Request_API(BaseModel):
+class TTSRequestAPI(BaseModel):
     text: str = Field(examples=["I like playing Genshin Impact.", "犯大吴疆土者,盛必击而破之。"], description="Text to Synthesize")
     text_lang: str = Field(examples=["en", "all_zh"], description="The Language of the Text")
     speaker_name: str = Field(
@@ -88,13 +88,13 @@ class TTS_Request_API(BaseModel):
     batch_threshold: Optional[Annotated[float, Field(ge=0.01, le=1.0)]] = Field(default=0.75, examples=[0.75])
     split_bucket: bool = True
 
-    media_type: Optional[Literal["raw", "wav", "aac", "ogg"]] = Field(default=None, examples=["wav"], description="Media Format for Audio")
+    media_type: Optional[Literal["pcm", "wav", "aac", "ogg"]] = Field(default=None, examples=["wav"], description="Media Format for Audio")
     seed: Optional[Annotated[int, Field(ge=-1)]] = Field(-1, description="Random Seed")
 
 
 class SpeakerAPI(BaseModel):
-    speaker_name: Optional[str] = Field(None, description="Name of Speaker")
-    t2s_path: Optional[str] = Field(None, description="Path of the GPT Model")
-    vits_path: Optional[str] = Field(None, description="Path of the SoVITS Model")
+    speaker_name: str = Field(description="Name of Speaker")
+    t2s_path: str = Field(description="Path of the GPT Model, GPT V2 model if unset")
+    vits_path: str = Field(description="Path of the SoVITS Model, SoVITS V2 model if unset")
     version: Literal["v1", "v2"] = Field("v2", description="Version of the Model")
     prompt: Optional[Prompt] = Field(default=None, description="Prompt for the this Speaker, Optional")

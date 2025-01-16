@@ -87,7 +87,7 @@ class Inference_WebUI_Cfg(BaseModel):
     fragment_interval: Annotated[float, Field(ge=0.01)] = Field(default=0.3, exclude=True)  # Default 0.3
     parallel_inference: bool = Field(default=True, exclude=True)  # Default True
     reprtition_penalty: Annotated[float, Field(ge=0.9, le=2.0, strict=True)] = Field(default=1.35, exclude=True)  # Default 1.35
-    media_type: Literal["raw", "wav", "aac", "ogg"] = Field(default="wav", exclude=True)  # Default wav
+    media_type: Literal["pcm", "wav", "aac", "ogg"] = Field(default="wav", exclude=True)  # Default wav
 
     @model_validator(mode="after")
     @classmethod
@@ -135,7 +135,7 @@ class API_Cfg(BaseModel):
         else:
             raise ValueError(f"Invalid device: {device}")
         assert 0 < vals.port < 65536, ValueError("Invalid Port")
-        assert vals.media_type in ["raw", "wav", "aac", "ogg"], ValueError("Invalid mediatype")
+        assert vals.media_type in ["pcm", "wav", "aac", "ogg"], ValueError("Invalid mediatype")
         assert 1 <= vals.top_k <= 100, ValueError("Top_k should be between 1 and 100")
         assert 0.0 <= vals.top_p <= 1.0, ValueError("Top_p should be between 0.0 and 1.0")
         assert 0.0 <= vals.temperature <= 1.0, ValueError("Temperature should be between 0.0 and 1.0")
@@ -151,7 +151,7 @@ class API_Batch_Cfg(BaseModel):
     port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9880
     speaker_name: str = "API_Batch"
     streaming: bool = False
-    media_type: Literal["raw", "wav", "aac", "ogg"] = "wav"
+    media_type: Literal["pcm", "wav", "aac", "ogg"] = "wav"
     top_k: Annotated[int, Field(ge=1, le=100, strict=True)] = 5
     top_p: Annotated[float, Field(ge=0.01, le=1.0, strict=True)] = 1.0
     temperature: Annotated[float, Field(ge=0.01, le=1.0, strict=True)] = 1.0
