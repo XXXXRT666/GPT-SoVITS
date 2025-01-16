@@ -1,26 +1,21 @@
-import traceback
-from typing import Optional, Annotated, Literal, Any
-from contextlib import asynccontextmanager
-from functools import partial
+from typing import Annotated, Literal, Any, Union
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi import FastAPI, Query, Request, Depends
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse, PlainTextResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 
-from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
-from tools.server.schema import TTSRequestAPI, TTSResponseFailed, SpeakerAPI
+from tools.server.schema import TTSRequestAPI, SpeakerAPI
 from tools.cfg import Prompt
-from tools.server.api_utils import build_HTTPException
-from tools.server.service import tts_handle, handle_control
+from tools.server.service import tts_handle, handle_control, set_prompt, add_speaker, set_speaker, set_gpt_weights, set_sovits_weights
 
 SHARED_DOCS_TTS = "\
 # Text To Speech\n\
 ## If the speaker has a valid prompt in `Speakers.json`, skip Ref Audio Path. Without prompt text or language, inference runs without reference.\n\
 #### You can set prompt and speaker using other endpoints"
 
-SHARED_RESPONSE_DICT: dict[int, dict[str, Any]] = {
+SHARED_RESPONSE_DICT: dict[Union[int, str], dict[str, Any]] = {
     200: {
         "description": "Streaming audio content",
         "content": {
@@ -36,19 +31,8 @@ SHARED_RESPONSE_DICT: dict[int, dict[str, Any]] = {
     },
 }
 
-tts_engine: TTSEngine
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global tts_engine, tts_handle
-    tts_engine: TTSEngine = app.state.tts_engine
-    tts_handle = partial(tts_handle, tts_engine=tts_engine)
-    yield
-    print("Exited")
-
-
-APP = FastAPI(title="GPT-SoVITS API", description="GPT-SoVITS API For Batch Inference", lifespan=lifespan)
+APP = FastAPI(title="GPT-SoVITS API", description="GPT-SoVITS API For Batch Inference")
 
 
 @APP.exception_handler(RequestValidationError)
@@ -103,69 +87,45 @@ async def TTS_POST_Endpoint(result: Annotated[TTSRequestAPI, Depends(tts_handle)
 
 
 @APP.post("/set_prompt", tags=["Setting Prompt"], summary="Set_Prompt")
-async def Set_Prompt(prompt: Annotated[Prompt, Query()]):
-    try:
-        tts_engine.set_prompt(prompt)
-        tts_engine.speaker.prompt = prompt
-        tts_engine.speakers_cfg.save_as_json()
-    except Exception as e:
-        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
-    return JSONResponse(status_code=200, content={"message": "success"})
+async def Set_Prompt(result: Annotated[Prompt, Depends(set_prompt)]):
+    return result
 
 
 @APP.post("/add_speaker", tags=["Setting Speaker"], summary="Add_Speaker")
-async def Add_Speaker(speaker: Annotated[SpeakerAPI, Query()]):
-    try:
-        tts_engine.add_speaker(spk_name=speaker.speaker_name, spk=speaker.model_dump(mode="python", exclude_none=True))
-        tts_engine.speakers_cfg.save_as_json()
-    except Exception as e:
-        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
-    return JSONResponse(status_code=200, content={"message": "success"})
+async def Add_Speaker(result: Annotated[SpeakerAPI, Depends(add_speaker)]):
+    return result
 
 
 @APP.get("/set_speaker", tags=["Setting Speaker"], summary="Set_Speaker_GET")
-async def Set_Speaker_GET(speaker_name: str):
-    try:
-        tts_engine.set_speaker(speaker_name)
-    except Exception as e:
-        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
-    return JSONResponse(status_code=200, content={"message": "success"})
+async def Set_Speaker_GET(result: Annotated[str, Depends(set_speaker)]):
+    return result
 
 
 @APP.post("/set_speaker", tags=["Setting Speaker"], summary="Set_Speaker_POST")
-async def Set_Speaker_POST(speaker_name: str):
-    try:
-        tts_engine.set_speaker(speaker_name)
-    except Exception as e:
-        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
-    return JSONResponse(status_code=200, content={"message": "success"})
+async def Set_Speaker_POST(result: Annotated[str, Depends(set_speaker)]):
+    return result
 
 
 @APP.get("/set_gpt_weights", tags=["Setting Weights"], summary="Set_GPT_Weights_GET")
-async def Set_GPT_Weights_GET(weights_path: Optional[str] = None):
-    try:
-        if weights_path in ["", None]:
-            raise build_HTTPException(TTSResponseFailed(RuntimeError("gpt weight path is required")))
-        if isinstance(weights_path, str):
-            tts_engine.set_t2s(weights_path)
-    except Exception as e:
-        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
+async def Set_GPT_Weights_GET(result: Annotated[str, Depends(set_gpt_weights)]):
+    return result
 
-    return JSONResponse(status_code=200, content={"message": "success"})
+
+@APP.post("/set_gpt_weights", tags=["Setting Weights"], summary="Set_GPT_Weights_POST")
+async def Set_GPT_Weights_POST(result: Annotated[str, Depends(set_gpt_weights)]):
+    return result
 
 
 @APP.get("/set_sovits_weights", tags=["Setting Weights"], summary="Set_SoVITS_Weights_GET")
-async def Set_SoVITS_Weights_GET(weights_path: Optional[str] = None):
-    try:
-        if weights_path in ["", None]:
-            raise build_HTTPException(TTSResponseFailed(RuntimeError("sovits weight path is required")))
-        if isinstance(weights_path, str):
-            tts_engine.set_vits(weights_path)
-    except Exception as e:
-        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
-    return JSONResponse(status_code=200, content={"message": "success"})
+async def Set_SoVITS_Weights_GET(result: Annotated[str, Depends(set_sovits_weights)]):
+    return result
+
+
+@APP.get("/set_sovits_weights", tags=["Setting Weights"], summary="Set_SoVITS_Weights_POST")
+async def Set_SoVITS_Weights_POST(result: Annotated[str, Depends(set_sovits_weights)]):
+    return result
 
 
 @APP.get("/control", tags=["Control"])
 async def Control(command: Literal["reastart", "exit"]):
-    handle_control(command)
+    await handle_control(command)

@@ -1,17 +1,19 @@
 import sys
 import os
 import signal
+import traceback
 from typing import Annotated
 
 from fastapi import Query, Request
 from fastapi.responses import StreamingResponse
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
-from tools.server.schema import TTSRequestAPI, TTSResponseFailed
+from tools.server.schema import TTSRequestAPI, TTSResponseFailed, SpeakerAPI
 from tools.server.api_utils import build_HTTPException, streaming_generator, base_generator
+from tools.cfg import Prompt
 
 
-async def tts_handle(tts_req: Annotated[TTSRequestAPI, Query()], tts_engine: TTSEngine):
+async def tts_handle(tts_req: Annotated[TTSRequestAPI, Query()], request: Request):
     """
     Text to speech handler.
 
@@ -43,6 +45,7 @@ async def tts_handle(tts_req: Annotated[TTSRequestAPI, Query()], tts_engine: TTS
     returns:
         StreamingResponse: audio stream response.
     """
+    tts_engine: TTSEngine = request.app.state.TTSEngine
     req = tts_req.model_dump(mode="python", exclude_none=True)
     streaming_mode = req.pop("streaming_mode", tts_engine.configs.streaming)
     media_type = req.pop("media_type", tts_engine.configs.media_type)
@@ -76,7 +79,59 @@ async def tts_handle(tts_req: Annotated[TTSRequestAPI, Query()], tts_engine: TTS
         )
 
 
-def handle_control(command: str):
+async def set_prompt(prompt: Annotated[Prompt, Query()], request: Request):
+    try:
+        tts_engine: TTSEngine = request.app.state.TTSEngine
+        tts_engine.set_prompt(prompt)
+        tts_engine.speaker.prompt = prompt
+        tts_engine.speakers_cfg.save_as_json()
+    except Exception as e:
+        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
+    return {"message": "success"}
+
+
+async def add_speaker(speaker: Annotated[SpeakerAPI, Query()], request: Request):
+    try:
+        tts_engine: TTSEngine = request.app.state.TTSEngine
+        tts_engine.add_speaker(spk_name=speaker.speaker_name, spk=speaker.model_dump(mode="python", exclude_none=True))
+        tts_engine.speakers_cfg.save_as_json()
+    except Exception as e:
+        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
+    return {"message": "success"}
+
+
+async def set_speaker(speaker_name: str, request: Request):
+    try:
+        tts_engine: TTSEngine = request.app.state.TTSEngine
+        tts_engine.set_speaker(speaker_name)
+    except Exception as e:
+        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
+    return {"message": "success"}
+
+
+async def set_gpt_weights(weights_path: str, request: Request):
+    try:
+        if isinstance(weights_path, str):
+            tts_engine: TTSEngine = request.app.state.TTSEngine
+            tts_engine.set_t2s(weights_path)
+    except Exception as e:
+        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
+
+    return {"message": "success"}
+
+
+async def set_sovits_weights(weights_path: str, request: Request):
+    try:
+        if isinstance(weights_path, str):
+            tts_engine: TTSEngine = request.app.state.TTSEngine
+            tts_engine.set_vits(weights_path)
+    except Exception as e:
+        raise build_HTTPException(TTSResponseFailed(e, traceback.format_exc()))
+
+    return {"message": "success"}
+
+
+async def handle_control(command: str):
     if command == "restart":
         os.execl(sys.executable, sys.executable, *sys.argv)
     elif command == "exit":
