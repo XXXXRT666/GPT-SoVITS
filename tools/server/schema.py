@@ -54,7 +54,7 @@ class TTSRequestAPI(BaseModel):
     text: str = Field(examples=["I like playing Genshin Impact.", "犯大吴疆土者,盛必击而破之。"], description="Text to Synthesize")
     text_lang: str = Field(examples=["en", "all_zh"], description="The Language of the Text")
     speaker_name: str = Field(
-        default="API_Batch", description="The Speaker for Synthesizing, See cfg.py --> SpeakerCfg and Speakers.json for More Information"
+        default="API_Batch", description="The Speaker for Synthesizing, See cfg.py --> SpeakerCfg and speakers.json for More Information"
     )
 
     ref_audio_path: Optional[str] = Field(None, description="Reference Audio Path for TTS, Optional If Provided in Speaker Setting(Prompt)")

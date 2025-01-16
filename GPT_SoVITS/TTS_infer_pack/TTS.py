@@ -14,14 +14,14 @@ from numpy.typing import NDArray
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 from tqdm import tqdm
 
-from tools.cfg import Inference_WebUI_Cfg, API_Batch_Cfg, Speaker
-from tools.server.schema import TTSResponse, TTSResponseFailed, TTSResponseSegment, TTSResponseSuccess
 from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from GPT_SoVITS.feature_extractor.cnhubert import CNHubert
 from GPT_SoVITS.module.models import SynthesizerTrn
 from GPT_SoVITS.module.mel_processing import spectrogram_torch
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSRequest
 from GPT_SoVITS.TTS_infer_pack.TextPreprocessor import TextPreprocessor
+from tools.cfg import Inference_WebUI_Cfg, API_Batch_Cfg, Speaker
+from tools.server.schema import TTSResponse, TTSResponseFailed, TTSResponseSegment, TTSResponseSuccess
 from tools.i18n.i18n import I18nAuto, scan_language_list
 from tools.my_utils import load_audio, DictToAttrRecursive
 
@@ -515,8 +515,7 @@ class TTS:
 
                 def make_batch(batch_texts):
                     batch_data = []
-                    print(i18n("############ 提取文本Bert特征 ############"))
-                    for text in tqdm(batch_texts):
+                    for text in tqdm(batch_texts, leave=False):
                         phones, bert_features, norm_text = self.text_preprocessor.segment_and_extract_feature_for_text(
                             text, text_lang, self.speaker.version
                         )
@@ -543,7 +542,7 @@ class TTS:
 
             t2 = ttime()
 
-            print("############ 推理 ############")
+            print(i18n("############ 推理 ############"))
             ###### inference ######
             t_34 = 0.0
             t_45 = 0.0
@@ -652,7 +651,7 @@ class TTS:
                 )
 
         except Exception as e:
-            print("TTS Failed")
+            print("TTS Failed", file=sys.stderr)
             yield TTSResponseFailed(exception=e, tracebacks=traceback.format_exc())
             # 重置模型, 否则会导致显存释放不完全。
             del self.t2s_model

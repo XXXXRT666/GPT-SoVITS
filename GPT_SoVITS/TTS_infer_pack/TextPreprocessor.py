@@ -59,7 +59,7 @@ class TextPreprocessor:
         texts = self.pre_seg_text(text, lang, text_split_method)
         result = []
         print(i18n("############ 提取文本Bert特征 ############"))
-        for text in tqdm(texts):
+        for text in tqdm(texts, leave=False):
             phones, bert_features, norm_text = self.segment_and_extract_feature_for_text(text, lang, version)
             if phones is None or norm_text == "":
                 continue
@@ -126,6 +126,7 @@ class TextPreprocessor:
             while "  " in formattext:
                 formattext = formattext.replace("  ", " ")
             if language == "zh":
+                tqdm.write(i18n("############ 提取文本Bert特征 ############"))
                 if re.search(r"[A-Za-z]", formattext):
                     formattext = re.sub(r"[a-z]", lambda x: x.group(0).upper(), formattext)
                     formattext = chinese.mix_text_normalize(formattext)

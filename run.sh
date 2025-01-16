@@ -9,8 +9,8 @@ cd "$SCRIPT_DIR"
 export PYTHONPATH="$SCRIPT_DIR/GPT_SoVITS:$SCRIPT_DIR:$PYTHONPATH"
 export TOKENIZERS_PARALLELISM=false
 
-cfg_path="GPT_SoVITS/configs/Cfg.json"
-speaker_cfg_path="GPT_SoVITS/configs/Speakers.json"
+cfg_path="tools/cfgs/cfg.json"
+speaker_cfg_path="tools/cfgs/speakers.json"
 api=false
 infer=false
 

@@ -259,7 +259,7 @@ class Speakers_Cfg(BaseModel):
         "API": Speaker(),
         "API_Batch": Speaker(),
     }
-    file_path: str = Field(default="./GPT_SoVITS/configs/Speakers.json", exclude=True)
+    file_path: str = Field(default="./tools/cfgs/speakers.json", exclude=True)
 
     def get_speaker(self, speaker_name: str):
         return self.speakers_dict.get(speaker_name, Speaker())
@@ -307,7 +307,7 @@ class Cfg(BaseModel):
     inference_webui_cfg: Inference_WebUI_Cfg = Field(default_factory=Inference_WebUI_Cfg_p)
     api_cfg: API_Cfg = Field(default_factory=API_Cfg_p)
     api_batch_cfg: API_Batch_Cfg = Field(default_factory=API_Batch_Cfg_p)
-    file_path: str = Field(default="./GPT_SoVITS/configs/Cfg.json", exclude=True)
+    file_path: str = Field(default="tools/cfgs/cfg.json", exclude=True)
 
     @classmethod
     def from_json(cls, file_path: str) -> Self:
@@ -327,7 +327,4 @@ class Cfg(BaseModel):
 
 
 if __name__ == "__main__":
-    cfg = Cfg.from_json("./GPT_SoVITS/configs/Cfg.json")
-    speakers = Speakers_Cfg.from_json("./GPT_SoVITS/configs/Speakers.json")
-    # print(cfg)
-    # print(speakers)
+    pass

@@ -16,10 +16,10 @@ def main():
     speakers_cfg_path = args.speakers_config
 
     if cfg_path in [None, ""]:
-        cfg_path = "GPT_SoVITS/configs/Cfg.json"
+        cfg_path = "tools/cfgs/cfg.json"
 
     if speakers_cfg_path in [None, ""]:
-        speakers_cfg_path = "GPT_SoVITS/configs/Speakers.json"
+        speakers_cfg_path = "tools/cfgs/speakers.json"
 
     tts_engine = TTSEngine.get_instance(cfg_name="api_batch_cfg", cfg_path=cfg_path, speakers_cfg_path=speakers_cfg_path)
     print(tts_engine.configs)
@@ -30,7 +30,7 @@ def main():
     APP.state.tts_engine = tts_engine
 
     try:
-        uvicorn_config = uvicorn.Config(app=APP, host=host, port=port, log_level="error", access_log=False)
+        uvicorn_config = uvicorn.Config(app=APP, host=host, port=port, log_level="info", access_log=False)
         server = uvicorn.Server(uvicorn_config)
         server.run()
     except Exception as e:

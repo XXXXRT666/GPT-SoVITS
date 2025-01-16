@@ -17,8 +17,8 @@ from tools.server.schema import TTSResponseFailed
 
 def parse_args():
     parser = ArgumentParser(description="GPT-SoVITS API")
-    parser.add_argument("-c", "--api-config", type=str, default="GPT_SoVITS/configs/Cfg.json", help="API_Batch配置参数路径")
-    parser.add_argument("-s", "--speakers-config", type=str, default="GPT_SoVITS/configs/Speakers.json", help="说话人配置参数路径")
+    parser.add_argument("-c", "--api-config", type=str, default="tools/cfgs/cfg.json", help="API_Batch配置参数路径")
+    parser.add_argument("-s", "--speakers-config", type=str, default="tools/cfgs/speakers.json", help="说话人配置参数路径")
     return parser.parse_args()
 
 

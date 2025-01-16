@@ -1,9 +1,11 @@
-import platform, os, traceback
+import os
+import traceback
+import sys
 import ffmpeg
 import numpy as np
 import gradio as gr
 from tools.i18n.i18n import I18nAuto
-from typing import Optional, List
+from typing import List
 
 i18n = I18nAuto(language=os.environ.get("language", "Auto"))
 
@@ -180,3 +182,13 @@ class DictToAttrRecursive(dict):
             del self[item]
         except KeyError:
             raise AttributeError(f"Attribute {item} not found")
+
+
+class SilentPrint:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, "w")
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout

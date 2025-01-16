@@ -517,7 +517,7 @@ class Text2SemanticDecoder(nn.Module):
             samples = topk_sampling(logits, top_k=top_k, top_p=1.0, temperature=temperature)
 
             if early_stop_num != -1 and (y.shape[1] - prefix_len) > early_stop_num:
-                print("use early stop num:", early_stop_num)
+                tqdm.write("use early stop num:", early_stop_num)
                 stop = True
 
             if torch.argmax(logits, dim=-1)[0] == self.EOS or samples[0, 0] == self.EOS:
@@ -526,8 +526,8 @@ class Text2SemanticDecoder(nn.Module):
             if stop:
                 if prompts.shape[1] == y.shape[1]:
                     y = torch.concat([y, torch.zeros_like(samples)], dim=1)
-                    print("bad zero prediction")
-                print(f"T2S Decoding EOS [{prefix_len} -> {y.shape[1]}]")
+                    tqdm.write("bad zero prediction")
+                tqdm.write(f"T2S Decoding EOS [{prefix_len} -> {y.shape[1]}]")
                 break
             # 本次生成的 semantic_ids 和之前的 y 构成新的 y
             # print(samples.shape)#[1,1]#第一个1是bs
@@ -555,7 +555,7 @@ class Text2SemanticDecoder(nn.Module):
         **kwargs,
     ):
         if prompts is None:
-            print("Warning: Prompt free is not supported batch_infer! switch to naive_infer")
+            tqdm.write("Warning: Prompt free is not supported batch_infer! switch to naive_infer")
             return self.infer_panel_naive_batched(
                 x, x_lens, prompts, bert_feature, top_k=top_k, top_p=top_p, early_stop_num=early_stop_num, temperature=temperature, **kwargs
             )
@@ -680,7 +680,7 @@ class Text2SemanticDecoder(nn.Module):
                         v_cache[i] = torch.index_select(v_cache[i], dim=0, index=reserved_idx_of_batch_for_y)
 
             if (early_stop_num != -1 and (y.shape[1] - prefix_len) > early_stop_num) or idx == 1499:
-                print("use early stop num:", early_stop_num)
+                tqdm.write("use early stop num:", early_stop_num)
                 stop = True
                 for i, batch_index in enumerate(batch_idx_map):
                     batch_index = batch_idx_map[i]
@@ -693,8 +693,8 @@ class Text2SemanticDecoder(nn.Module):
             if stop:
                 if y.shape[1] == 0:
                     y = torch.concat([y, torch.zeros_like(samples)], dim=1)
-                    print("bad zero prediction")
-                print(f"T2S Decoding EOS [{prefix_len} -> {y.shape[1]}]")
+                    tqdm.write("bad zero prediction")
+                tqdm.write(f"T2S Decoding EOS [{prefix_len} -> {y.shape[1]}]")
                 break
 
             ####################### update next step ###################################
@@ -828,7 +828,7 @@ class Text2SemanticDecoder(nn.Module):
             y = torch.concat([y, samples], dim=1)
 
             if early_stop_num != -1 and (y.shape[1] - prefix_len) > early_stop_num:
-                print("use early stop num:", early_stop_num)
+                tqdm.write("use early stop num:", early_stop_num)
                 stop = True
 
             if torch.argmax(logits, dim=-1)[0] == self.EOS or samples[0, 0] == self.EOS:
@@ -836,8 +836,8 @@ class Text2SemanticDecoder(nn.Module):
             if stop:
                 if y.shape[1] == 0:
                     y = torch.concat([y, torch.zeros_like(samples)], dim=1)
-                    print("bad zero prediction")
-                print(f"T2S Decoding EOS [{prefix_len} -> {y.shape[1]}]")
+                    tqdm.write("bad zero prediction")
+                tqdm.write(f"T2S Decoding EOS [{prefix_len} -> {y.shape[1]}]")
                 break
 
             ####################### update next step ###################################

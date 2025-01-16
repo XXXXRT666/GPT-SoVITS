@@ -3,10 +3,12 @@ import os
 import traceback
 import tempfile
 import wave
+import sys
 from functools import partial
 from typing import Union, Callable, Optional
 
 import numpy as np
+from tools.my_utils import SilentPrint
 from tools.cfg import Speakers_Cfg, Inference_WebUI_Cfg, API_Batch_Cfg, Speaker, Prompt, Cfg
 from tools.i18n.i18n import I18nAuto
 from tools.server.schema import TTSRequest, TTSResponseFailed, TTSResponseSuccess, TTSResponseSegment
@@ -17,9 +19,9 @@ i18n = I18nAuto()
 
 
 def default_exception_handler(tts_response: TTSResponseFailed):
-    print(tts_response.exception)
+    print(tts_response.exception, file=sys.stderr)
     if tts_response.tracebacks:
-        print(tts_response.tracebacks)
+        print(tts_response.tracebacks, file=sys.stderr)
     return
 
 
@@ -46,8 +48,8 @@ class TTSEngine:
     def get_instance(
         cls,
         cfg_name: str,
-        cfg_path: str = "GPT_SoVITS/configs/Cfg.json",
-        speakers_cfg_path: str = "GPT_SoVITS/configs/Speakers.json",
+        cfg_path: str = "tools/cfgs/cfg.json",
+        speakers_cfg_path: str = "tools/cfgs/speakers.json",
         compiled=False,  # Not Supported yet
     ):
         configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg] = getattr(Cfg.from_json(cfg_path), cfg_name)
@@ -189,7 +191,10 @@ class TTSEngine:
                 wav_file.setsampwidth(sample_width)
                 wav_file.setframerate(sample_rate)
                 wav_file.writeframes(int_wave.tobytes())
-            next(self.generate(text="犯大吴疆土者,盛必击而破之", text_lang="all_zh", ref_audio_path=file_name, speaker_name=speaker_name))
+                print("Warm UP")
+                print('If "compile" is selected, it may take some time to warm up.')
+                with SilentPrint():
+                    next(self.generate(text="犯大吴疆土者,盛必击而破之", text_lang="all_zh", ref_audio_path=file_name, speaker_name=speaker_name))
         self.clear_prompt_cache()
 
     def precall(self, **kwds) -> Union[TTSRequest, TTSResponseFailed]:
@@ -338,5 +343,5 @@ class TTSEngine:
         Similar to __call__, but skips the first None.
         """
         audio_generator = self.__call__(exception_handler, **kwds)
-        print(str(next(audio_generator)))
+        next(audio_generator)
         return audio_generator

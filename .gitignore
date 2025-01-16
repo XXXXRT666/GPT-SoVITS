@@ -15,8 +15,8 @@ SoVITS_weights_v2
 TEMP
 ffmpeg*
 ffprobe*
-Cfg.json
-Speakers.json
+cfg.json
+speakers.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
