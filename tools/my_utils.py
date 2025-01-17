@@ -183,6 +183,29 @@ class DictToAttrRecursive(dict):
         except KeyError:
             raise AttributeError(f"Attribute {item} not found")
 
+    def update(self, other_dict=None, **kwargs):
+        if other_dict:
+            if isinstance(other_dict, DictToAttrRecursive):
+                other_dict = dict(other_dict)
+            for key, value in other_dict.items():
+                if isinstance(value, dict):
+                    if key in self and isinstance(self[key], DictToAttrRecursive):
+                        self[key].update(value)
+                    else:
+                        self[key] = DictToAttrRecursive(value)
+                else:
+                    self[key] = value
+                setattr(self, key, self[key])
+        for key, value in kwargs.items():
+            if isinstance(value, dict):
+                if key in self and isinstance(self[key], DictToAttrRecursive):
+                    self[key].update(value)
+                else:
+                    self[key] = DictToAttrRecursive(value)
+            else:
+                self[key] = value
+            setattr(self, key, self[key])
+
 
 class SilentPrint:
     def __enter__(self):

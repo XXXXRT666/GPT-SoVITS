@@ -17,8 +17,9 @@ from tools.server.schema import TTSResponseFailed
 
 def parse_args():
     parser = ArgumentParser(description="GPT-SoVITS API")
-    parser.add_argument("-c", "--api-config", type=str, default="tools/cfgs/cfg.json", help="API_Batch配置参数路径")
-    parser.add_argument("-s", "--speakers-config", type=str, default="tools/cfgs/speakers.json", help="说话人配置参数路径")
+    parser.add_argument("-c", "--api-config", type=str, default="tools/cfgs/cfg.json", help="API_Batch Cfg Path")
+    parser.add_argument("-s", "--speakers-config", type=str, default="tools/cfgs/speakers.json", help="Speakers Cfg Path")
+    parser.add_argument("--compile", action="store_true", help="Compiled the model to accelerate")
     return parser.parse_args()
 
 
@@ -119,5 +120,6 @@ async def streaming_generator(tts_generator: Generator[Tuple[int, NDArray[int16]
         yield pack_audio(BytesIO(), chunk, sr, media_type).getvalue()
 
 
-async def base_generator(audio):
-    yield audio
+async def base_generator(tts_generator: Generator[Tuple[int, NDArray[int16]], None, None], media_type: str):
+    sr, chunk = next(tts_generator)
+    yield pack_audio(BytesIO(), chunk, sr, media_type).getvalue()

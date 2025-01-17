@@ -6,7 +6,7 @@ import signal
 import uvicorn
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
-from tools.server.routes import APP
+from tools.server.routes import build_APP
 from tools.server.api_utils import parse_args
 
 
@@ -14,6 +14,7 @@ def main():
     args = parse_args()
     cfg_path = args.api_config
     speakers_cfg_path = args.speakers_config
+    compile = args.compile
 
     if cfg_path in [None, ""]:
         cfg_path = "tools/cfgs/cfg.json"
@@ -21,12 +22,13 @@ def main():
     if speakers_cfg_path in [None, ""]:
         speakers_cfg_path = "tools/cfgs/speakers.json"
 
-    tts_engine = TTSEngine.get_instance(cfg_name="api_batch_cfg", cfg_path=cfg_path, speakers_cfg_path=speakers_cfg_path)
+    tts_engine = TTSEngine.get_instance(cfg_name="api_batch_cfg", cfg_path=cfg_path, speakers_cfg_path=speakers_cfg_path, compile=compile)
     print(tts_engine.configs)
 
     host = tts_engine.configs.host
     port = tts_engine.configs.port
 
+    APP = build_APP(compile=compile)
     APP.state.TTSEngine = tts_engine
 
     try:

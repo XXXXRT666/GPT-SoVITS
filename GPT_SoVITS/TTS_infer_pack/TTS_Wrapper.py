@@ -50,15 +50,13 @@ class TTSEngine:
         cfg_name: str,
         cfg_path: str = "tools/cfgs/cfg.json",
         speakers_cfg_path: str = "tools/cfgs/speakers.json",
-        compiled=False,  # Not Supported yet
+        compile=False,  # Not Supported yet
     ):
         configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg] = getattr(Cfg.from_json(cfg_path), cfg_name)
         speakers_cfg = Speakers_Cfg.from_json(speakers_cfg_path)
         instance = cls(configs=configs, speakers_cfg=speakers_cfg, speaker_name=configs.speaker_name)
-        if compiled:
-            instance.__call__ = partial(
-                instance.__call__, batchsize=configs.batch_size, speed_factor=configs.speed_factor
-            )  # must have fixed batch size for kv cache
+        if compile:
+            ...
             # To be continued
         return instance
 
@@ -163,18 +161,20 @@ class TTSEngine:
             aux_ref_audio_paths: Union[list[str], None] = None
         }
         """
-        if "prompt" in spk.keys():
-            if not spk["prompt"]:
-                del spk["prompt"]
         new_spk = Speaker(**spk)
         self.speakers_cfg.speakers_dict.update({spk_name: new_spk})
         self.speakers_cfg.save_as_json()
 
-    def del_speaker(self, spk_name):
-        if spk_name in self.speakers_cfg.speakers_dict:
-            del self.speakers_cfg.speakers_dict[spk_name]
+    def del_speaker(self, spk_name: str):
+        self.speakers_cfg.speakers_dict.pop(spk_name, None)
 
-    def warmup(self, speaker_name):
+    def get_speaker(self, spk_name: str):
+        return self.speakers_cfg.get_speaker(spk_name)
+
+    def list_speaker(self):
+        return self.speakers_cfg.list_speaker()
+
+    def warmup(self, speaker_name: str):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as temp_file:
             file_name = temp_file.name
             with wave.open(temp_file, "w") as wav_file:

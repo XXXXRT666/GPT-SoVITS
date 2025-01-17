@@ -195,6 +195,7 @@ class Prompt(BaseModel):
             vals.ref_audio_path = None
             vals.prompt_text = None
             vals.prompt_lang = None
+            vals.aux_ref_audio_paths = []
             warnings.warn("Ref audio not found", UserWarning)
         if vals.ref_audio_path:
             if vals.prompt_text and vals.prompt_lang:

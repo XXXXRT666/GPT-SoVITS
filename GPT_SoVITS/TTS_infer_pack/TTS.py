@@ -66,7 +66,7 @@ class TTS:
         self.bert_tokenizer: AutoTokenizer = None
         self.bert_model: AutoModelForMaskedLM = None
         self.cnhuhbert_model: CNHubert = None
-        self.hps: DictToAttrRecursive = None
+        self.hps: DictToAttrRecursive = DictToAttrRecursive({})
 
         self._init_models()
 
@@ -110,7 +110,7 @@ class TTS:
         else:
             self.speaker.version = "v2"
         hps.model.version = self.speaker.version
-        self.hps = hps
+        self.hps.update(hps)
         kwargs = hps["model"]
         vits_model = SynthesizerTrn(
             self.hps.data.filter_length // 2 + 1,

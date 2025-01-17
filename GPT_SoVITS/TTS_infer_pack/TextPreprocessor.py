@@ -126,7 +126,6 @@ class TextPreprocessor:
             while "  " in formattext:
                 formattext = formattext.replace("  ", " ")
             if language == "zh":
-                tqdm.write(i18n("############ 提取文本Bert特征 ############"))
                 if re.search(r"[A-Za-z]", formattext):
                     formattext = re.sub(r"[a-z]", lambda x: x.group(0).upper(), formattext)
                     formattext = chinese.mix_text_normalize(formattext)
@@ -182,7 +181,7 @@ class TextPreprocessor:
             phones = sum(phones_list, [])
             norm_text = "".join(norm_text_list)
         else:
-            raise ValueError(f"{language} " + i18n("Not Supported!"))
+            raise ValueError(i18n("{} Not Supported!").format(language))
 
         if not final and len(phones) < 6:
             return self.get_phones_and_bert("." + text, language, version, final=True)
