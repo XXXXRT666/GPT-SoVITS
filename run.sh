@@ -69,7 +69,7 @@ fi
 
 if $infer; then
   echo "Running Inference Web UI..."
-  python3 inference_webui.py --cfg-path "$cfg_path" --speaker-cfg-path "$speaker_cfg_path"
+  python3 tools/inference_webui.py --webui-config "$cfg_path" --speakers-config "$speaker_cfg_path"
   exit 0
 elif $api; then
   echo "Running API v2..."
@@ -77,6 +77,6 @@ elif $api; then
   exit 0
 else
   echo "Running Web UI..."
-  python3 webui.py --cfg-path "$cfg_path" --speaker-cfg-path "$speaker_cfg_path"
+  python3 webui.py --webui-config "$cfg_path" --speakers-config "$speaker_cfg_path"
   exit 0
 fi

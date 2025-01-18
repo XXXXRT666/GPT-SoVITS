@@ -6,7 +6,7 @@ numba==0.56.4
 pytorch-lightning
 matplotlib >=3.7
 torchmetrics <= 1.5.0
-gradio=4.41.0
+gradio==5.12
 ffmpeg-python
 onnxruntime; sys_platform == 'darwin'
 onnxruntime-gpu; sys_platform != 'darwin'

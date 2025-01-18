@@ -1,8 +1,5 @@
-import os
-import sys
 import subprocess
 import wave
-import signal
 from argparse import ArgumentParser
 from io import BytesIO
 from typing import Generator, Tuple

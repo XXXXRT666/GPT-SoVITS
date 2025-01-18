@@ -4,7 +4,7 @@ import sys
 import gc
 import random
 import traceback
-from typing import Union, Generator
+from typing import Union, Generator, Callable
 from time import time as ttime
 
 import numpy as np
@@ -22,15 +22,7 @@ from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSRequest
 from GPT_SoVITS.TTS_infer_pack.TextPreprocessor import TextPreprocessor
 from tools.cfg import Inference_WebUI_Cfg, API_Batch_Cfg, Speaker
 from tools.server.schema import TTSResponse, TTSResponseFailed, TTSResponseSegment, TTSResponseSuccess
-from tools.i18n.i18n import I18nAuto, scan_language_list
 from tools.my_utils import load_audio, DictToAttrRecursive
-
-now_dir = os.getcwd()
-sys.path.append(now_dir)
-
-language = os.environ.get("language", "Auto")
-language = sys.argv[-1] if sys.argv[-1] in scan_language_list() else language
-i18n = I18nAuto(language=language)
 
 
 def set_seed(seed: int):
@@ -57,7 +49,7 @@ def set_seed(seed: int):
 
 
 class TTS:
-    def __init__(self, configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg], speaker: Speaker, cache: dict):
+    def __init__(self, configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg], speaker: Speaker, cache: dict, i18n: Callable[[str], str]):
 
         self.configs = configs
         self.speaker: Speaker = speaker
@@ -67,10 +59,11 @@ class TTS:
         self.bert_model: AutoModelForMaskedLM = None
         self.cnhuhbert_model: CNHubert = None
         self.hps: DictToAttrRecursive = DictToAttrRecursive({})
+        self.i18n = i18n
 
         self._init_models()
 
-        self.text_preprocessor: TextPreprocessor = TextPreprocessor(self.bert_model, self.bert_tokenizer, self.configs.device)
+        self.text_preprocessor: TextPreprocessor = TextPreprocessor(self.bert_model, self.bert_tokenizer, self.configs.device, i18n=self.i18n)
         self.prompt_cache = cache
         self.stop_flag: bool = False
         self.precision: torch.dtype = torch.float16 if self.configs.fp16 else torch.float32
@@ -251,7 +244,7 @@ class TTS:
         with torch.no_grad():
             wav16k, _ = librosa.load(ref_wav_path, sr=16000)
             if wav16k.shape[0] > 160000 or wav16k.shape[0] < 48000:
-                raise ValueError(i18n("参考音频在3~10秒范围外，请更换！"))
+                raise ValueError(self.i18n("参考音频在3~10秒范围外，请更换！"))
             wav16k = torch.from_numpy(wav16k)
             zero_wav_torch = torch.from_numpy(zero_wav)
             wav16k = wav16k.to(self.configs.device)
@@ -429,7 +422,7 @@ class TTS:
         self.stop_flag = True
 
     @torch.no_grad()
-    def run(self, tts_request: TTSRequest) -> Generator[TTSResponse, None, None]:
+    def run(self, tts_request: TTSRequest, progress_tracker) -> Generator[TTSResponse, None, None]:
         """
         Text to speech inference.
 
@@ -505,7 +498,7 @@ class TTS:
                     precision=self.precision,
                 )
             else:
-                print(i18n("############ 切分文本 ############"))
+                print(self.i18n("############ 切分文本 ############"))
                 texts = self.text_preprocessor.pre_seg_text(text, text_lang, text_split_method)
                 data = []
                 for idx, text in enumerate(texts):
@@ -542,12 +535,12 @@ class TTS:
 
             t2 = ttime()
 
-            print(i18n("############ 推理 ############"))
+            print(self.i18n("############ 推理 ############"))
             ###### inference ######
             t_34 = 0.0
             t_45 = 0.0
             audio = []
-            for item in data:
+            for item in progress_tracker(data):
                 t3 = ttime()
                 if return_fragment:
                     item = make_batch(item)
@@ -563,7 +556,7 @@ class TTS:
                 norm_text: str = item["norm_text"]
                 max_len = item["max_len"]
 
-                print(i18n("前端处理后的文本(每句):"), norm_text)
+                print(self.i18n("前端处理后的文本(每句):"), norm_text)
                 if no_prompt_text:
                     prompt = None
                 else:

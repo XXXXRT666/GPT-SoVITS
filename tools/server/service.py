@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.server.schema import TTSRequestAPI, TTSResponseFailed, SpeakerAPI, TTSRequestAPI_Compiled
-from tools.server.api_utils import build_HTTPException, streaming_generator, base_generator
+from tools.server.utils import build_HTTPException, streaming_generator, base_generator
 from tools.cfg import Prompt
 
 
@@ -56,7 +56,7 @@ async def tts_handle_query(tts_req: Annotated[TTSRequestAPI, Query()], request: 
     if media_type == "ogg" and not streaming_mode:
         raise build_HTTPException(TTSResponseFailed(RuntimeError("ogg format is not supported in non-streaming mode")))
 
-    tts_generator = tts_engine(exception_handler=build_HTTPException, **req)
+    tts_generator = tts_engine(**req)
     next(tts_generator)  # Surface Exceptions Early.
     cur_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if streaming_mode:

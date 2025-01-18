@@ -7,7 +7,7 @@ import uvicorn
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.server.routes import build_APP
-from tools.server.api_utils import parse_args
+from tools.server.utils import parse_args, build_HTTPException
 
 
 def main():
@@ -22,7 +22,9 @@ def main():
     if speakers_cfg_path in [None, ""]:
         speakers_cfg_path = "tools/cfgs/speakers.json"
 
-    tts_engine = TTSEngine.get_instance(cfg_name="api_batch_cfg", cfg_path=cfg_path, speakers_cfg_path=speakers_cfg_path, compile=compile)
+    tts_engine = TTSEngine.get_instance(
+        cfg_name="api_batch_cfg", cfg_path=cfg_path, speakers_cfg_path=speakers_cfg_path, compile=compile, exception_handler=build_HTTPException
+    )
     print(tts_engine.configs)
 
     host = tts_engine.configs.host

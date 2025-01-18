@@ -1,25 +1,15 @@
-import os, sys
-
-from tqdm import tqdm
-
-now_dir = os.getcwd()
-sys.path.append(now_dir)
-
 import re
+from typing import Callable, Dict, List, Tuple
+
 import torch
 import LangSegment
-from GPT_SoVITS.text import chinese
-from typing import Dict, List, Tuple
-from GPT_SoVITS.text.cleaner import clean_text
-from GPT_SoVITS.text import cleaned_text_to_sequence
 from transformers import AutoModelForMaskedLM, AutoTokenizer
+from tqdm import tqdm
+
+from GPT_SoVITS.text import cleaned_text_to_sequence, chinese
+from GPT_SoVITS.text.cleaner import clean_text
 from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import split_big_text, splits, get_method as get_seg_method
 
-from tools.i18n.i18n import I18nAuto, scan_language_list
-
-language = os.environ.get("language", "Auto")
-language = sys.argv[-1] if sys.argv[-1] in scan_language_list() else language
-i18n = I18nAuto(language=language)
 punctuation = set(["!", "?", "…", ",", ".", "-", " "])
 
 
@@ -29,7 +19,7 @@ def get_first(text: str) -> str:
     return text
 
 
-def merge_short_text_in_array(texts: str, threshold: int) -> list:
+def merge_short_text_in_array(texts: List[str], threshold: int) -> list:
     if (len(texts)) < 2:
         return texts
     result = []
@@ -48,17 +38,18 @@ def merge_short_text_in_array(texts: str, threshold: int) -> list:
 
 
 class TextPreprocessor:
-    def __init__(self, bert_model: AutoModelForMaskedLM, tokenizer: AutoTokenizer, device: torch.device):
+    def __init__(self, bert_model: AutoModelForMaskedLM, tokenizer: AutoTokenizer, device: torch.device, i18n: Callable[[str], str]):
         self.bert_model = bert_model
         self.tokenizer = tokenizer
         self.device = device
+        self.i18n = i18n
 
     def preprocess(self, text: str, lang: str, text_split_method: str, version: str = "v2") -> List[Dict]:
-        print(i18n("############ 切分文本 ############"))
+        print(self.i18n("############ 切分文本 ############"))
         text = self.replace_consecutive_punctuation(text)
         texts = self.pre_seg_text(text, lang, text_split_method)
         result = []
-        print(i18n("############ 提取文本Bert特征 ############"))
+        print(self.i18n("############ 提取文本Bert特征 ############"))
         for text in tqdm(texts, leave=False):
             phones, bert_features, norm_text = self.segment_and_extract_feature_for_text(text, lang, version)
             if phones is None or norm_text == "":
@@ -77,7 +68,7 @@ class TextPreprocessor:
             return []
         if text[0] not in splits and len(get_first(text)) < 4:
             text = "。" + text if lang != "en" else "." + text
-        print(i18n("实际输入的目标文本:"))
+        print(self.i18n("实际输入的目标文本:"))
         print(text)
 
         seg_method = get_seg_method(text_split_method)
@@ -107,7 +98,7 @@ class TextPreprocessor:
             else:
                 texts.append(text)
 
-        print(i18n("实际输入的目标文本(切句后):"))
+        print(self.i18n("实际输入的目标文本(切句后):"))
         print(texts)
         return texts
 
@@ -170,9 +161,8 @@ class TextPreprocessor:
             phones_list = []
             bert_list = []
             norm_text_list = []
-            for i in range(len(textlist)):
-                lang = langlist[i]
-                phones, word2ph, norm_text = self.clean_text_inf(textlist[i], lang, version)
+            for text, lang in zip(textlist, langlist):
+                phones, word2ph, norm_text = self.clean_text_inf(text, lang, version)
                 bert = self.get_bert_inf(phones, word2ph, norm_text, lang)
                 phones_list.append(phones)
                 norm_text_list.append(norm_text)
@@ -181,7 +171,7 @@ class TextPreprocessor:
             phones = sum(phones_list, [])
             norm_text = "".join(norm_text_list)
         else:
-            raise ValueError(i18n("{} Not Supported!").format(language))
+            raise ValueError(self.i18n("{} Not Supported!").format(language))
 
         if not final and len(phones) < 6:
             return self.get_phones_and_bert("." + text, language, version, final=True)
@@ -197,8 +187,8 @@ class TextPreprocessor:
             res = torch.cat(res["hidden_states"][-3:-2], -1)[0].cpu()[1:-1]
         assert len(word2ph) == len(text)
         phone_level_feature = []
-        for i in range(len(word2ph)):
-            repeat_feature = res[i].repeat(word2ph[i], 1)
+        for idx, phoneme_counts in enumerate(word2ph):
+            repeat_feature = res[idx].repeat(phoneme_counts, 1)
             phone_level_feature.append(repeat_feature)
         phone_level_feature = torch.cat(phone_level_feature, dim=0)
         return phone_level_feature.T
@@ -223,7 +213,7 @@ class TextPreprocessor:
     def filter_text(self, texts):
         _text = []
         if all(text in [None, " ", "\n", ""] for text in texts):
-            raise ValueError(i18n("请输入有效文本"))
+            raise ValueError(self.i18n("请输入有效文本"))
         for text in texts:
             if text in [None, " ", ""]:
                 pass

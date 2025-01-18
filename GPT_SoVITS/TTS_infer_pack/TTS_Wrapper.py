@@ -4,8 +4,7 @@ import traceback
 import tempfile
 import wave
 import sys
-from functools import partial
-from typing import Union, Callable, Optional
+from typing import Union, Callable, Optional, Iterable
 
 import numpy as np
 from tools.my_utils import SilentPrint
@@ -15,8 +14,6 @@ from tools.server.schema import TTSRequest, TTSResponseFailed, TTSResponseSucces
 from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import splits
 from GPT_SoVITS.TTS_infer_pack.TTS import TTS
 
-i18n = I18nAuto()
-
 
 def default_exception_handler(tts_response: TTSResponseFailed):
     print(tts_response.exception, file=sys.stderr)
@@ -25,8 +22,19 @@ def default_exception_handler(tts_response: TTSResponseFailed):
     return
 
 
+def default_progress_tracker(items: Iterable):
+    return items
+
+
 class TTSEngine:
-    def __init__(self, configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg], speakers_cfg: Speakers_Cfg, speaker_name: str):
+    def __init__(
+        self,
+        configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg],
+        speakers_cfg: Speakers_Cfg,
+        speaker_name: str,
+        compile=False,
+        exception_handler=default_exception_handler,
+    ):
         self.configs = configs
         self.speakers_cfg = speakers_cfg
         self.speaker = self.speakers_cfg.get_speaker(speaker_name)
@@ -41,8 +49,10 @@ class TTSEngine:
             "norm_text": None,
             "aux_ref_audio_paths": [],
         }
-        self.tts = TTS(self.configs, self.speaker, self.prompt_cache)
-        self.warmup(speaker_name)
+        self.i18n = I18nAuto(self.configs.i18n_language)
+        self.tts = TTS(self.configs, self.speaker, self.prompt_cache, self.i18n)
+        self.compile = compile
+        self.exception_handler = exception_handler
 
     @classmethod
     def get_instance(
@@ -51,13 +61,17 @@ class TTSEngine:
         cfg_path: str = "tools/cfgs/cfg.json",
         speakers_cfg_path: str = "tools/cfgs/speakers.json",
         compile=False,  # Not Supported yet
+        exception_handler: Callable[[TTSResponseFailed], Optional[Exception]] = default_exception_handler,
     ):
         configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg] = getattr(Cfg.from_json(cfg_path), cfg_name)
         speakers_cfg = Speakers_Cfg.from_json(speakers_cfg_path)
-        instance = cls(configs=configs, speakers_cfg=speakers_cfg, speaker_name=configs.speaker_name)
+        instance = cls(
+            configs=configs, speakers_cfg=speakers_cfg, speaker_name=configs.speaker_name, compile=compile, exception_handler=exception_handler
+        )
         if compile:
-            ...
+            instance.compile_func(batch_size=configs.batch_size)
             # To be continued
+        instance.warmup(configs.speaker_name)
         return instance
 
     def clear_prompt_cache(self):
@@ -88,7 +102,7 @@ class TTSEngine:
     def set_prompt(self, prompt: Prompt):
         if prompt.is_empty():
             self.clear_prompt_cache()
-            raise ValueError(i18n("Ref audio path can not be empty"))
+            raise ValueError(self.i18n("Ref audio path can not be empty"))
         self.tts.set_ref_audio(prompt.ref_audio_path)
         self.prompt_cache["prompt_text"] = prompt.prompt_text
         self.prompt_cache["prompt_lang"] = prompt.prompt_lang
@@ -113,7 +127,7 @@ class TTSEngine:
                 if path in [None, ""]:
                     continue
                 if not os.path.exists(path):
-                    print(i18n("音频文件不存在，跳过：{}").format(path))
+                    print(self.i18n("音频文件不存在，跳过：{}").format(path))
                     continue
                 self.prompt_cache["refer_spec"].append(self.tts.get_ref_spec(path))
 
@@ -174,7 +188,7 @@ class TTSEngine:
     def list_speaker(self):
         return self.speakers_cfg.list_speaker()
 
-    def warmup(self, speaker_name: str):
+    def warmup(self, speaker_name: str, progress_tracker=default_progress_tracker):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as temp_file:
             file_name = temp_file.name
             with wave.open(temp_file, "w") as wav_file:
@@ -194,8 +208,18 @@ class TTSEngine:
                 wav_file.writeframes(int_wave.tobytes())
                 print("Warm UP")
                 print('If "compile" is selected, it may take some time to warm up.')
+
                 with SilentPrint():
-                    next(self.generate(text="犯大吴疆土者,盛必击而破之", text_lang="all_zh", ref_audio_path=file_name, speaker_name=speaker_name))
+                    next(
+                        self.generate(
+                            progress_tracker,
+                            text="犯大吴疆土者,盛必击而破之,犯大吴疆土者,盛必击而破之,犯大吴疆土者,盛必击而破之,犯大吴疆土者,盛必击而破之",
+                            text_lang="all_zh",
+                            ref_audio_path=file_name,
+                            speaker_name=speaker_name,
+                            text_split_method="cut5",
+                        )
+                    )
         self.clear_prompt_cache()
 
     def precall(self, **kwds) -> Union[TTSRequest, TTSResponseFailed]:
@@ -213,6 +237,8 @@ class TTSEngine:
                 ref_audio_path = self.speaker.prompt.ref_audio_path
                 prompt_text = self.speaker.prompt.prompt_text
                 prompt_lang = self.speaker.prompt.prompt_lang
+                kwds.pop("prompt_text", None)
+                kwds.pop("prompt_lang", None)
             if aux_ref_audio_paths:
                 pass
             else:
@@ -245,27 +271,27 @@ class TTSEngine:
             TTS_Request = TTSRequest(**kwds)
 
             if TTS_Request.parallel_infer:
-                print(i18n("并行推理模式已开启"))
+                print(self.i18n("并行推理模式已开启"))
             else:
-                print(i18n("并行推理模式已关闭"))
+                print(self.i18n("并行推理模式已关闭"))
 
             if TTS_Request.return_fragment:
-                print(i18n("分段返回模式已开启"))
+                print(self.i18n("分段返回模式已开启"))
                 if TTS_Request.split_bucket:
                     TTS_Request.split_bucket = False
-                    print(i18n("分段返回模式不支持分桶处理，已自动关闭分桶处理"))
+                    print(self.i18n("分段返回模式不支持分桶处理，已自动关闭分桶处理"))
 
             if TTS_Request.split_bucket and TTS_Request.speed_factor == 1.0:
-                print(i18n("分桶处理模式已开启"))
+                print(self.i18n("分桶处理模式已开启"))
             elif TTS_Request.speed_factor != 1.0:
-                print(i18n("语速调节不支持分桶处理，已自动关闭分桶处理"))
+                print(self.i18n("语速调节不支持分桶处理，已自动关闭分桶处理"))
                 TTS_Request.split_bucket = False
             else:
-                print(i18n("分桶处理模式已关闭"))
+                print(self.i18n("分桶处理模式已关闭"))
 
             if TTS_Request.fragment_interval < 0.01:
                 TTS_Request.fragment_interval = 0.01
-                print(i18n("分段间隔过小，已自动设置为0.01"))
+                print(self.i18n("分段间隔过小，已自动设置为0.01"))
 
             TTS_Request.no_prompt_text = not bool(prompt_text)
 
@@ -280,7 +306,7 @@ class TTSEngine:
 
     def __call__(
         self,
-        exception_handler: Callable[[TTSResponseFailed], Optional[Exception]] = default_exception_handler,
+        progress_tracker: Callable[[Iterable], Iterable] = default_progress_tracker,
         **kwds,
     ):
         """
@@ -321,28 +347,66 @@ class TTSEngine:
         precall_result = self.precall(**kwds)  # checking
         excptions = None
         if isinstance(precall_result, TTSResponseFailed):
-            excptions = exception_handler(precall_result)
+            excptions = self.exception_handler(precall_result)
             if isinstance(excptions, Exception):
                 raise excptions
         elif isinstance(precall_result, TTSRequest):
             yield None
-            for result in self.tts.run(precall_result):
+            for result in self.tts.run(precall_result, progress_tracker=progress_tracker):
                 if isinstance(result, (TTSResponseSuccess, TTSResponseSegment)):
                     yield result.audio
                 elif isinstance(result, TTSResponseFailed):
-                    excptions = exception_handler(result)
+                    excptions = self.exception_handler(result)
         if isinstance(excptions, Exception):
             raise excptions
         return
 
     def generate(
         self,
-        exception_handler: Callable[[TTSResponseFailed], Optional[Exception]] = default_exception_handler,
+        progress_tracker: Callable[[Iterable], Iterable] = default_progress_tracker,
         **kwds,
     ):
         """
         Similar to __call__, but skips the first None.
+
+        Text to speech inference.
+
+        Some parameters can be set in the config file. If they are not passed in during the call, the values from the config file will be used.
+
+        Args:
+            kwds (dict):
+                {
+                    "text":                     # str.(required) text to be synthesized
+                    "text_lang:                 # str.(required) language of the text to be synthesized
+                    "speaker_name":             # str.(required) speaker name in the speakers_cfg
+
+                    "ref_audio_path":           # str.(required if not set in speakers_cfg) reference audio path
+                    "prompt_text":              # str.(required if not set in speakers_cfg) prompt text for the reference audio
+                    "prompt_lang":              # str.(required if not set in speakers_cfg) language of the prompt text for the reference audio
+
+                    The following are optional parameters:
+
+                    "aux_ref_audio_paths"       # list. auxiliary reference audio paths for multi-speaker tone fusion
+                    "top_k":                    # int. top-k sampling
+                    "top_p":                    # float. top-p sampling
+                    "temperature":              # float. temperature for sampling
+                    "text_split_method":        # str. text split method, see text_segmentation_method.py for details.
+                    "batch_size":               # int. batch size for inference
+                    "batch_threshold": 0.75     # float. threshold for batch splitting.
+                    "split_bucket: True,        # bool. whether to split the batch into multiple buckets.
+                    "return_fragment":          # bool. step by step return the audio fragment.
+                    "speed_factor":             # float. control the speed of the synthesized audio.
+                    "fragment_interval":        # float. to control the interval of the audio fragment.
+                    "seed": -1,                 # int. random seed for reproducibility.
+                    "parallel_infer":           # bool. whether to use parallel inference.
+                    "repetition_penalty":       # float. repetition penalty for T2S model.
+                }
         """
-        audio_generator = self.__call__(exception_handler, **kwds)
+
+        audio_generator = self.__call__(progress_tracker, **kwds)
         next(audio_generator)
         return audio_generator
+
+    def compile_func(self, speaker_name: str, batch_size: int, progress_tracker: Callable[[Iterable], Iterable] = default_progress_tracker):
+        ...
+        self.warmup(speaker_name, progress_tracker)

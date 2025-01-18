@@ -18,8 +18,27 @@ PRETRAINED_T2S_V2 = "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert2
 PRETRAINED_VITS_V1 = "GPT_SoVITS/pretrained_models/s2G488k.pth"
 PRETRAINED_VITS_V2 = "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth"
 
-V1_LANGUAGES = ["auto", "en", "zh", "ja", "all_zh", "all_ja"]
-V2_LANGUAGES = ["auto", "auto_yue", "en", "zh", "ja", "yue", "ko", "all_zh", "all_ja", "all_yue", "all_ko"]
+V1_LANGUAGES = [
+    "all_zh",  # All Chinese
+    "en",  # All English
+    "all_ja"  # All Japanese
+    "zh",  # Mixed Chinese & English
+    "ja",  # Mixed Japanese & English
+    "auto",  # Auto Detect Language
+]
+V2_LANGUAGES = [
+    "all_zh",  # All Chinese
+    "en",  # All English
+    "all_ja",  # All Japanese
+    "all_yue",  # All Cantonese
+    "all_ko",  # All Korean
+    "zh",  # Mixed Chinese & English
+    "ja",  # Mixed Japanese & English
+    "yue",  # Mixed Cantonese & English
+    "ko",  # Mixed Korean & English
+    "auto",  # Auto Detect Language (Without Cantonese)
+    "auto_yue",  # Auto Detect Language (with Cantonese)
+]
 
 T = TypeVar("T", bound=Hashable)
 
@@ -40,7 +59,7 @@ class Main_WebUI_Cfg(BaseModel):
     fp16: bool = False
     logging_dir: str = "logs"
     python_exec: str = "python3"
-    server_name: str = "::"
+    server_name: str = "0.0.0.0"
     webui_port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9874
     uvr5_webui_port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9873
     subfux_webui_port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9871
@@ -71,23 +90,23 @@ class Inference_WebUI_Cfg(BaseModel):
     init: bool = Field(default=False, exclude=True)
     device: str = "cpu"
     fp16: bool = False
-    host: str = "::"
+    host: str = "0.0.0.0"
     port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9872
     i18n_language: str = "en_US"
     gradio_share: bool = False
     speaker_name: str = "WebUI"
 
-    streaming: bool = Field(default=False, exclude=True)  # Default False
-    top_k: Annotated[int, Field(ge=1, le=100, strict=True)] = Field(default=5, exclude=True)  # Default 5
-    top_p: Annotated[float, Field(ge=0.01, le=1.0, strict=True)] = Field(default=1.0, exclude=True)  # Default 1.0
-    temperature: Annotated[float, Field(ge=0.01, le=1.0, strict=True)] = Field(default=1.0, exclude=True)  # Default 1.0
-    text_splitting_method: Annotated[str, Field(pattern=r"^cut[0-5]$")] = Field(default="cut1", exclude=True)  # Default cut1
-    batch_size: int = Field(default=5, exclude=True)  # Default 5
-    speed_factor: Annotated[float, Field(ge=0.6, le=1.4, strict=True)] = Field(default=1.0, exclude=True)  # Default 1.0
-    fragment_interval: Annotated[float, Field(ge=0.01)] = Field(default=0.3, exclude=True)  # Default 0.3
-    parallel_inference: bool = Field(default=True, exclude=True)  # Default True
-    reprtition_penalty: Annotated[float, Field(ge=0.9, le=2.0, strict=True)] = Field(default=1.35, exclude=True)  # Default 1.35
-    media_type: Literal["pcm", "wav", "aac", "ogg"] = Field(default="wav", exclude=True)  # Default wav
+    streaming: bool = Field(default=False, exclude=True)
+    top_k: Annotated[int, Field(ge=1, le=100, strict=True)] = Field(default=5, exclude=True)
+    top_p: Annotated[float, Field(ge=0.01, le=1.0, strict=True)] = Field(default=1.0, exclude=True)
+    temperature: Annotated[float, Field(ge=0.01, le=1.0, strict=True)] = Field(default=1.0, exclude=True)
+    text_splitting_method: Annotated[str, Field(pattern=r"^cut[0-5]$")] = Field(default="cut1", exclude=True)
+    batch_size: int = Field(default=4, exclude=True)
+    speed_factor: Annotated[float, Field(ge=0.6, le=1.4, strict=True)] = Field(default=1.0, exclude=True)
+    fragment_interval: Annotated[float, Field(ge=0.01)] = Field(default=0.3, exclude=True)
+    parallel_inference: bool = Field(default=True, exclude=True)
+    reprtition_penalty: Annotated[float, Field(ge=0.9, le=2.0, strict=True)] = Field(default=1.35, exclude=True)
+    media_type: Literal["pcm", "wav", "aac", "ogg"] = Field(default="pcm", exclude=True)
 
     @model_validator(mode="after")
     @classmethod
@@ -114,6 +133,7 @@ class API_Cfg(BaseModel):
     fp16: bool = False
     host: str = "::"
     port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9880
+    i18n_language: str = "en_US"
     streaming: bool = False
     media_type: str = "wav"
     cut_punc: str = ""
@@ -139,6 +159,7 @@ class API_Cfg(BaseModel):
         assert 1 <= vals.top_k <= 100, ValueError("Top_k should be between 1 and 100")
         assert 0.0 <= vals.top_p <= 1.0, ValueError("Top_p should be between 0.0 and 1.0")
         assert 0.0 <= vals.temperature <= 1.0, ValueError("Temperature should be between 0.0 and 1.0")
+        assert vals.i18n_language in scan_language_list(), ValueError("I18n language not supported")
 
         return vals
 
@@ -147,8 +168,9 @@ class API_Batch_Cfg(BaseModel):
     init: bool = Field(default=False, exclude=True)
     device: str = "cpu"
     fp16: bool = False
-    host: str = "::"
+    host: str = "[::]"
     port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9880
+    i18n_language: str = "en_US"
     speaker_name: str = "API_Batch"
     streaming: bool = False
     media_type: Literal["pcm", "wav", "aac", "ogg"] = "wav"
@@ -175,7 +197,7 @@ class API_Batch_Cfg(BaseModel):
             pass
         else:
             raise ValueError(f"Invalid device: {device}")
-
+        assert vals.i18n_language in scan_language_list(), ValueError("I18n language not supported")
         return vals
 
 

@@ -1,12 +1,12 @@
 from typing import Annotated, Literal, Any, Union
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi import FastAPI, Request, Depends, Query, Body
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse, PlainTextResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 
-from tools.server.schema import TTSRequestAPI, SpeakerAPI
+from tools.server.schema import SpeakerAPI
 from tools.cfg import Prompt
 from tools.server.service import (
     tts_handle_query,
