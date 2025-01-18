@@ -85,9 +85,9 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
             with gr.Column():
                 with gr.Row(equal_height=True):
                     with gr.Row(equal_height=True):
-                        parallel_infer = gr.Checkbox(value=False, label=i18n("并行推理"), interactive=True)
+                        parallel_infer = gr.Checkbox(value=True, label=i18n("并行推理"), interactive=True)
                     with gr.Row(equal_height=True):
-                        split_bucket = gr.Checkbox(value=False, label=i18n("分桶处理"), interactive=True)
+                        split_bucket = gr.Checkbox(value=True, label=i18n("分桶处理"), interactive=True)
                 with gr.Row(equal_height=True):
                     with gr.Row(equal_height=True):
                         keep_random = gr.Checkbox(value=True, label=i18n("保持随机"), interactive=True)
@@ -109,9 +109,27 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
                     with gr.Row(equal_height=True):
                         stop_button = gr.Button(value=i18n("中止合成"), variant="stop", interactive=False)
 
-        GPT_dropdown.change(set_gpt_partial, [GPT_dropdown], [])
-        SoVITS_dropdown.change(set_sovits_partial, [SoVITS_dropdown], [prompt_text, prompt_lang, text, text_lang])
-        compile_checkbox.change(compile_func_partial, [speakers_dropdown, batch_size], [batch_size, compile_checkbox])
+        GPT_dropdown.change(
+            set_gpt_partial,
+            [GPT_dropdown],
+            [],
+            api_name=False,
+            show_api=False,
+        )
+        SoVITS_dropdown.change(
+            set_sovits_partial,
+            [SoVITS_dropdown],
+            [prompt_text, prompt_lang, text, text_lang],
+            api_name=False,
+            show_api=False,
+        )
+        compile_checkbox.change(
+            compile_func_partial,
+            [speakers_dropdown, batch_size],
+            [batch_size, compile_checkbox],
+            api_name=False,
+            show_api=False,
+        )
         start_button.click(
             inference_partial,
             [
@@ -141,5 +159,12 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
             scroll_to_output=True,
             show_api=False,
         )
-        stop_button.click(tts_engine.tts.stop, [], [])
+        stop_button.click(
+            tts_engine.tts.stop,
+            [],
+            [],
+            api_name=False,
+            show_api=False,
+        )
+
     return app
