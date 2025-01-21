@@ -14,7 +14,7 @@ def main():
     args = parse_args()
     cfg_path = args.api_config
     speakers_cfg_path = args.speakers_config
-    compile = args.compile
+    compile = args.compile  # pylint: disable=redefined-builtin
 
     if cfg_path in [None, ""]:
         cfg_path = "tools/cfgs/cfg.json"
@@ -37,7 +37,7 @@ def main():
         uvicorn_config = uvicorn.Config(app=APP, host=host, port=port, log_level="info", access_log=False)
         server = uvicorn.Server(uvicorn_config)
         server.run()
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         print(e)
         traceback.print_exc()
         os.kill(os.getpid(), signal.SIGTERM)

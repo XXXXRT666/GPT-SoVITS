@@ -9,7 +9,7 @@ from tools.webui.inference.utils import get_gpt_paths, get_sovits_paths, get_lan
 from tools.webui.assets import js, css, seafoam
 
 
-def build_app(tts_engine: TTSEngine, compile: bool = False):
+def build_app(tts_engine: TTSEngine, compile: bool = False):  # pylint: disable=redefined-builtin
     i18n = tts_engine.i18n
     configs = tts_engine.configs
 
@@ -112,37 +112,49 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
                     with gr.Row(equal_height=True):
                         stop_button = gr.Button(value=i18n("中止合成"), variant="stop", interactive=False)
 
-        GPT_dropdown.change(
+        GPT_dropdown.change(  # pylint: disable=no-member
             set_gpt_partial,
             [GPT_dropdown],
             [],
             api_name=False,
             show_api=False,
         )
-        SoVITS_dropdown.change(
+        SoVITS_dropdown.change(  # pylint: disable=no-member
             set_sovits_partial,
             [SoVITS_dropdown],
             [prompt_text, prompt_lang, text, text_lang],
             api_name=False,
             show_api=False,
         )
-        refresh_button.click(refresh_partial, [], [GPT_dropdown, SoVITS_dropdown, speakers_dropdown])
-        speakers_dropdown.change(
-            set_speaker_partial, [speakers_dropdown], [GPT_dropdown, SoVITS_dropdown, ref_audio, aux_ref_audio, prompt_text, prompt_lang]
+        refresh_button.click(  # pylint: disable=no-member
+            refresh_partial,
+            [],
+            [GPT_dropdown, SoVITS_dropdown, speakers_dropdown],
+            api_name=False,
+            show_api=False,
         )
-        add_new_speaker.click(
+        speakers_dropdown.change(  # pylint: disable=no-member
+            set_speaker_partial,
+            [speakers_dropdown],
+            [GPT_dropdown, SoVITS_dropdown, ref_audio, aux_ref_audio, prompt_text, prompt_lang],
+            api_name=False,
+            show_api=False,
+        )
+        add_new_speaker.click(  # pylint: disable=no-member
             add_speaker_partial,
             [new_speaker_name, GPT_dropdown, SoVITS_dropdown, ref_audio, aux_ref_audio, prompt_text, prompt_lang],
             [speakers_dropdown, new_speaker_name],
+            api_name=False,
+            show_api=False,
         )
-        compile_checkbox.change(
+        compile_checkbox.change(  # pylint: disable=no-member
             compile_func_partial,
             [speakers_dropdown, batch_size],
             [batch_size, compile_checkbox],
             api_name=False,
             show_api=False,
         )
-        start_button.click(
+        start_button.click(  # pylint: disable=no-member
             inference_partial,
             [
                 text,
@@ -171,7 +183,7 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
             scroll_to_output=True,
             show_api=False,
         )
-        stop_button.click(
+        stop_button.click(  # pylint: disable=no-member
             tts_engine.tts.stop,
             [],
             [],

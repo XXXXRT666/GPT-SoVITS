@@ -1,3 +1,5 @@
+# pylint: disable=raise-missing-from
+
 import sys
 import os
 import signal

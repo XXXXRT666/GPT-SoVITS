@@ -98,11 +98,11 @@ def wave_header_chunk(channels=1, sample_width=2, sample_rate=32000, frame_input
     # Other frames better should not have it (else you will hear some artifacts each chunk start)
     wav_buf = BytesIO()
     with wave.open(wav_buf, "wb") as vfout:
-        vfout.setnchannels(channels)
-        vfout.setsampwidth(sample_width)
-        vfout.setframerate(sample_rate)
+        vfout.setnchannels(channels)  # pylint: disable=no-member
+        vfout.setsampwidth(sample_width)  # pylint: disable=no-member
+        vfout.setframerate(sample_rate)  # pylint: disable=no-member
         if frame_input:
-            vfout.writeframes(frame_input)
+            vfout.writeframes(frame_input)  # pylint: disable=no-member
     wav = wav_buf.getvalue()
     wav_buf.close()
     return wav

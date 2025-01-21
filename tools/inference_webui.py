@@ -19,7 +19,7 @@ def main():
     args = parse_args()
     cfg_path = args.webui_config
     speakers_cfg_path = args.speakers_config
-    compile = args.compile
+    compile = args.compile  # pylint: disable=redefined-builtin
 
     if cfg_path in [None, ""]:
         cfg_path = "tools/cfgs/cfg.json"

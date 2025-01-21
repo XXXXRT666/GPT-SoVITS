@@ -32,7 +32,7 @@ class TTSEngine:
         configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg],
         speakers_cfg: Speakers_Cfg,
         speaker_name: str,
-        compile=False,
+        compile=False,  # pylint: disable=redefined-builtin
         exception_handler=default_exception_handler,
     ):
         self.configs = configs
@@ -60,7 +60,7 @@ class TTSEngine:
         cfg_name: str,
         cfg_path: str = "tools/cfgs/cfg.json",
         speakers_cfg_path: str = "tools/cfgs/speakers.json",
-        compile=False,  # Not Supported yet
+        compile=False,  # pylint: disable=redefined-builtin
         exception_handler: Callable[[TTSResponseFailed], Optional[Exception]] = default_exception_handler,
     ):
         configs: Union[Inference_WebUI_Cfg, API_Batch_Cfg] = getattr(Cfg.from_json(cfg_path), cfg_name)
@@ -68,7 +68,7 @@ class TTSEngine:
         instance = cls(
             configs=configs, speakers_cfg=speakers_cfg, speaker_name=configs.speaker_name, compile=compile, exception_handler=exception_handler
         )
-        if compile:
+        if compile:  # Not Supported yet
             instance.compile_func(speaker_name=configs.speaker_name, batch_size=configs.batch_size)
             # To be continued
         instance.warmup(configs.speaker_name)
@@ -202,10 +202,10 @@ class TTSEngine:
                 sine_wave = np.sin(2 * np.pi * frequency * t)  # Sine Wave
                 int_wave = (sine_wave * 32767).astype(np.int16)
 
-                wav_file.setnchannels(channels)
-                wav_file.setsampwidth(sample_width)
-                wav_file.setframerate(sample_rate)
-                wav_file.writeframes(int_wave.tobytes())
+                wav_file.setnchannels(channels)  # pylint: disable=no-member
+                wav_file.setsampwidth(sample_width)  # pylint: disable=no-member
+                wav_file.setframerate(sample_rate)  # pylint: disable=no-member
+                wav_file.writeframes(int_wave.tobytes())  # pylint: disable=no-member
                 print("Warm UP")
                 print('If "compile" is selected, it may take some time to warm up.')
 
@@ -301,7 +301,7 @@ class TTSEngine:
 
             return TTS_Request
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return TTSResponseFailed(exception=e, tracebacks=traceback.format_exc())
 
     def __call__(
@@ -403,7 +403,7 @@ class TTSEngine:
                 }
         """
 
-        audio_generator = self.__call__(progress_tracker, **kwds)
+        audio_generator = self.__call__(progress_tracker, **kwds)  # pylint: disable=unnecessary-dunder-call
         next(audio_generator)
         return audio_generator
 

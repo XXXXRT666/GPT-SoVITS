@@ -43,7 +43,7 @@ def set_seed(seed: int):
             # 开启后会影响精度
             torch.backends.cuda.matmul.allow_tf32 = False
             torch.backends.cudnn.allow_tf32 = False
-    except Exception as _:
+    except Exception as _:  # pylint: disable=broad-exception-caught
         pass
     return seed
 
@@ -643,7 +643,7 @@ class TTS:
                     audio=self.audio_postprocess(audio, self.hps.data.sampling_rate, batch_index_list, split_bucket, fragment_interval)
                 )
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print("TTS Failed", file=sys.stderr)
             yield TTSResponseFailed(exception=e, tracebacks=traceback.format_exc())
             # 重置模型, 否则会导致显存释放不完全。
@@ -663,7 +663,7 @@ class TTS:
                 torch.cuda.empty_cache()
             elif str(self.configs.device) == "mps":
                 torch.mps.empty_cache()
-        except Exception as _:
+        except Exception as _:  # pylint: disable=broad-exception-caught
             pass
 
     def audio_postprocess(

@@ -152,7 +152,7 @@ SHARED_GET_RESPONSE_DICT: dict[Union[int, str], dict[str, Any]] = {
 }
 
 
-def build_APP(compile: bool = False):
+def build_APP(compile: bool = False):  # pylint: disable=redefined-builtin
     APP = FastAPI(
         title="GPT-SoVITS API",
         description=SHARED_DOCS_API,
@@ -171,12 +171,12 @@ def build_APP(compile: bool = False):
         return await request_validation_exception_handler(request, exc)
 
     @APP.exception_handler(StarletteHTTPException)
-    async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):  # pylint: disable=unused-argument
         print(f"HTTP Error: {str(exc)}")
         return PlainTextResponse(exc.detail, media_type="text/plain; charset=utf-8")
 
     @APP.exception_handler(404)
-    async def Redirect_404(*args, **kwds):
+    async def Redirect_404(*args, **kwds):  # pylint: disable=unused-argument
         return RedirectResponse(url="/docs")
 
     @APP.middleware("http")
