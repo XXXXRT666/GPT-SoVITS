@@ -2,7 +2,7 @@ import logging
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.webui.inference.layout import build_app
-from tools.webui.inference.utils import parse_args, build_gradio_exception
+from tools.webui.inference.utils import parse_args, build_gradio_exception, list_root_directories
 
 logging.getLogger("markdown_it").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
@@ -11,6 +11,8 @@ logging.getLogger("httpx").setLevel(logging.ERROR)
 logging.getLogger("asyncio").setLevel(logging.ERROR)
 logging.getLogger("charset_normalizer").setLevel(logging.ERROR)
 logging.getLogger("torchaudio._extension").setLevel(logging.ERROR)
+
+ROOT_DIR = list_root_directories()
 
 
 def main():
@@ -37,7 +39,9 @@ def main():
 
     app = build_app(tts_engine=tts_engine, compile=compile)
 
-    app.queue().launch(server_name=configs.host, inbrowser=True, share=configs.gradio_share, server_port=configs.port, quiet=True)
+    app.queue().launch(
+        server_name=configs.host, inbrowser=True, share=configs.gradio_share, server_port=configs.port, quiet=True, allowed_paths=ROOT_DIR
+    )
 
 
 if __name__ == "__main__":

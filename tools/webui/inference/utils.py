@@ -1,5 +1,7 @@
 import re
 import os
+import platform
+import shutil
 from typing import List, Optional
 from argparse import ArgumentParser
 
@@ -39,7 +41,7 @@ def custom_sort_key(s):
     return parts
 
 
-def get_sovits_path(SoVITS_weight_root: Optional[List[str]] = None):
+def get_sovits_paths(SoVITS_weight_root: Optional[List[str]] = None):
     if SoVITS_weight_root is None:
         SoVITS_weight_root = SOVITS_ROOT
     SoVITS_Paths = PRETRAINED_SOVITS
@@ -62,7 +64,7 @@ def get_gpt_paths(GPT_weight_root: Optional[List[str]] = None):
 
 
 def get_both_paths():
-    return get_gpt_paths(GPT_ROOT), get_sovits_path(SOVITS_ROOT)
+    return get_gpt_paths(), get_sovits_paths()
 
 
 def build_gradio_exception(tts_response: TTSResponseFailed):
@@ -76,3 +78,38 @@ def build_gradio_exception(tts_response: TTSResponseFailed):
 
 def get_languages_list(tts_engine: TTSEngine):
     return [tts_engine.i18n(language) for language in tts_engine.speaker.languages]
+
+
+def truncate_path(path):
+    match = re.search(r"(GPT_SoVITS|GPT_weights|GPT_weights_v2|SoVITS_weights|SoVITS_weights_v2)(?:/|\\).*", path)
+    if match:
+        return match.group(0)
+    else:
+        return None
+
+
+def list_root_directories():
+    if platform.system() == "Windows":
+        # 在 Windows 上获取所有盘符
+        drives = [f"{chr(letter)}:\\" for letter in range(65, 91) if os.path.exists(f"{chr(letter)}:\\")]
+        return drives
+    else:
+        # Linux/macOS
+        return ["/"]
+
+
+def copy_file(src_path: str, target_folder: str, spk: str):
+
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+
+    ref_audio_dir = os.path.join(base_dir, "ref_audio", spk, target_folder)
+
+    os.makedirs(ref_audio_dir, exist_ok=True)
+
+    file_name = os.path.basename(src_path)
+
+    dest_path = os.path.join(ref_audio_dir, file_name)
+
+    shutil.copy2(src_path, dest_path)
+
+    return dest_path

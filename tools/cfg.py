@@ -21,7 +21,7 @@ PRETRAINED_VITS_V2 = "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G233
 V1_LANGUAGES = [
     "all_zh",  # All Chinese
     "en",  # All English
-    "all_ja"  # All Japanese
+    "all_ja",  # All Japanese
     "zh",  # Mixed Chinese & English
     "ja",  # Mixed Japanese & English
     "auto",  # Auto Detect Language

@@ -1,10 +1,11 @@
 import random
+import os
 from functools import partial
 from typing import List, Optional, Dict
 
 import gradio as gr
 
-from tools.webui.inference.utils import get_languages_list
+from tools.webui.inference.utils import get_languages_list, get_gpt_paths, truncate_path, get_sovits_paths, copy_file
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 
 
@@ -99,3 +100,61 @@ def compile_func(speaker_name: str, batch_size: int, tts_engine: TTSEngine, prog
     progress_tracker(0, desc="Starting")
     tts_engine.compile_func(speaker_name, batch_size=batch_size, progress_tracker=partial(progress_tracker.tqdm, desc="Compiling"))
     return gr.Slider(interactive=False), gr.Checkbox(interactive=False)
+
+
+def refresh(tts_engine: TTSEngine):
+    return gr.Dropdown(choices=get_gpt_paths()), gr.Dropdown(choices=get_sovits_paths()), gr.Dropdown(choices=list(tts_engine.list_speaker()))
+
+
+def set_speaker(speaker_name, tts_engine: TTSEngine):
+    speaker = tts_engine.get_speaker(spk_name=speaker_name)
+    tts_engine.set_speaker(speaker_name, prompt=False)
+    if (not speaker.prompt.is_empty()) and os.path.exists(speaker.prompt.ref_audio_path):
+        ref_audio_update = gr.Audio(value=speaker.prompt.ref_audio_path)
+        aux_ref_update = gr.File(value=[i for i in speaker.prompt.aux_ref_audio_paths if os.path.exists(i)])
+        if speaker.prompt.prompt_text and speaker.prompt.prompt_lang:
+            prompt_text_update = gr.Textbox(value=speaker.prompt.prompt_text)
+            prompt_lang_update = gr.Dropdown(value=tts_engine.i18n(speaker.prompt.prompt_lang))
+        else:
+            prompt_text_update = gr.skip()
+            prompt_lang_update = gr.skip()
+    else:
+        ref_audio_update = gr.skip()
+        aux_ref_update = gr.skip()
+        prompt_text_update = gr.skip()
+        prompt_lang_update = gr.skip()
+    GPT_update = gr.Dropdown(value=truncate_path(speaker.t2s_path))
+    SoVITS_update = gr.Dropdown(value=truncate_path(speaker.vits_path))
+    return (
+        GPT_update,
+        SoVITS_update,
+        ref_audio_update,
+        aux_ref_update,
+        prompt_text_update,
+        prompt_lang_update,
+    )
+
+
+def add_speaker(
+    speaker_name: str,
+    GPT_weights: str,
+    SoVITS_weights: str,
+    ref_audio_path: str,
+    aux_ref_audio: List[str],
+    prompt_text: str,
+    prompt_lang: str,
+    tts_engine: TTSEngine,
+):
+    spk_dict = {
+        "t2s_path": GPT_weights,
+        "vits_path": SoVITS_weights,
+        "version": tts_engine.speaker.version,
+        "prompt": {
+            "ref_audio_path": copy_file(ref_audio_path, "ref", speaker_name),
+            "prompt_text": prompt_text,
+            "prompt_lang": prompt_lang,
+            "aux_ref_audio_paths": [copy_file(i, "aux", speaker_name) for i in aux_ref_audio],
+        },
+    }
+    tts_engine.add_speaker(spk_name=speaker_name, spk=spk_dict)
+    return gr.Dropdown(choices=list(tts_engine.list_speaker()), value=speaker_name), gr.Textbox(value=None)

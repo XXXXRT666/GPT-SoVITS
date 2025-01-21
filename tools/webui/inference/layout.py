@@ -4,8 +4,8 @@ import gradio as gr
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.cfg import V2_LANGUAGES
-from tools.webui.inference.handlers import inference, set_gpt, set_sovits, compile_func
-from tools.webui.inference.utils import get_gpt_paths, get_sovits_path, get_languages_list
+from tools.webui.inference.handlers import inference, set_gpt, set_sovits, compile_func, refresh, set_speaker, add_speaker
+from tools.webui.inference.utils import get_gpt_paths, get_sovits_paths, get_languages_list
 from tools.webui.assets import js, css, seafoam
 
 
@@ -19,6 +19,9 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
     inference_partial = partial(inference, tts_engine=tts_engine, cut_methods_mapping=CUT_METHODS_MAPPING, language_mapping=LANGUAGE_MAPPING)
     set_gpt_partial = partial(set_gpt, tts_engine=tts_engine)
     set_sovits_partial = partial(set_sovits, tts_engine=tts_engine)
+    refresh_partial = partial(refresh, tts_engine=tts_engine)
+    set_speaker_partial = partial(set_speaker, tts_engine=tts_engine)
+    add_speaker_partial = partial(add_speaker, tts_engine=tts_engine)
     compile_func_partial = partial(compile_func, tts_engine=tts_engine)
 
     with gr.Blocks(title="GPT-SoVITS Inference WebUI", analytics_enabled=False, fill_width=False, js=js, css=css, theme=seafoam) as app:
@@ -36,7 +39,7 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
                 )
             with gr.Column():
                 SoVITS_dropdown = gr.Dropdown(
-                    choices=get_sovits_path(), value=tts_engine.speaker.vits_path, label=i18n("SoVITS 模型列表"), interactive=True, scale=1
+                    choices=get_sovits_paths(), value=tts_engine.speaker.vits_path, label=i18n("SoVITS 模型列表"), interactive=True, scale=1
                 )
             with gr.Column():
                 refresh_button = gr.Button(value=i18n("刷新模型和说话人列表"), variant="secondary", scale=1)
@@ -122,6 +125,15 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
             [prompt_text, prompt_lang, text, text_lang],
             api_name=False,
             show_api=False,
+        )
+        refresh_button.click(refresh_partial, [], [GPT_dropdown, SoVITS_dropdown, speakers_dropdown])
+        speakers_dropdown.change(
+            set_speaker_partial, [speakers_dropdown], [GPT_dropdown, SoVITS_dropdown, ref_audio, aux_ref_audio, prompt_text, prompt_lang]
+        )
+        add_new_speaker.click(
+            add_speaker_partial,
+            [new_speaker_name, GPT_dropdown, SoVITS_dropdown, ref_audio, aux_ref_audio, prompt_text, prompt_lang],
+            [speakers_dropdown, new_speaker_name],
         )
         compile_checkbox.change(
             compile_func_partial,

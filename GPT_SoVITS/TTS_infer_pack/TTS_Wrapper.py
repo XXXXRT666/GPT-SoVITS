@@ -71,7 +71,7 @@ class TTSEngine:
         if compile:
             instance.compile_func(speaker_name=configs.speaker_name, batch_size=configs.batch_size)
             # To be continued
-        # instance.warmup(configs.speaker_name)
+        instance.warmup(configs.speaker_name)
         return instance
 
     def clear_prompt_cache(self):
@@ -94,9 +94,9 @@ class TTSEngine:
         self.speaker.update_language()
         self.speakers_cfg.save_as_json()
 
-    def set_t2s(self, vits_path: str):
-        self.tts.init_t2s_weights(vits_path)
-        self.speaker.t2s_path = vits_path
+    def set_t2s(self, t2s_path: str):
+        self.tts.init_t2s_weights(t2s_path)
+        self.speaker.t2s_path = t2s_path
         self.speakers_cfg.save_as_json()
 
     def set_prompt(self, prompt: Prompt):
@@ -168,7 +168,7 @@ class TTSEngine:
             prompt: Optional[Prompt]
         }
 
-        Prompt: {
+        prompt: {
             ref_audio_path: Optional[str] = None
             prompt_text: Optional[str] = None
             prompt_lang: Optional[str] = None # prompt_text and prompt_lang must be set at the same time
