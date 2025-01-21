@@ -102,7 +102,7 @@ def copy_file(src_path: str, target_folder: str, spk: str):
 
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
 
-    ref_audio_dir = os.path.join(base_dir, "ref_audio", spk, target_folder)
+    ref_audio_dir = os.path.join(base_dir, "ref_audios", spk, target_folder)
 
     os.makedirs(ref_audio_dir, exist_ok=True)
 
