@@ -69,9 +69,9 @@ class TTSEngine:
             configs=configs, speakers_cfg=speakers_cfg, speaker_name=configs.speaker_name, compile=compile, exception_handler=exception_handler
         )
         if compile:
-            instance.compile_func(batch_size=configs.batch_size)
+            instance.compile_func(speaker_name=configs.speaker_name, batch_size=configs.batch_size)
             # To be continued
-        instance.warmup(configs.speaker_name)
+        # instance.warmup(configs.speaker_name)
         return instance
 
     def clear_prompt_cache(self):

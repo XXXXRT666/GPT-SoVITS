@@ -3,6 +3,45 @@ from typing import Iterable
 import gradio.themes.base as ThemeBase
 from gradio.themes.utils import colors, fonts, sizes
 
+neutral_50_dark = "#fafafa"
+neutral_100_dark = "#f5f5f5"
+neutral_200_dark = "#e5e5e5"
+neutral_300_dark = "#d4d4d4"
+neutral_400_dark = "#a3a3a3"
+neutral_500_dark = "#737373"
+neutral_600_dark = "#525252"
+neutral_700_dark = "#404040"
+neutral_800_dark = "#262626"
+neutral_900_dark = "#171717"
+neutral_950_dark = "#0f0f0f"
+
+primary_50_dark = "#eff6ff"
+primary_100_dark = "#dbeafe"
+primary_200_dark = "#bfdbfe"
+primary_300_dark = "#93c5fd"
+primary_400_dark = "#60a5fa"
+primary_500_dark = "#3b82f6"
+primary_600_dark = "#621dd8"
+primary_700_dark = "#1d4ed8"
+primary_800_dark = "#1e40af"
+primary_900_dark = "#1e3a8a"
+primary_950_dark = "#1d3660"
+
+secondary_50_dark = "#ecfdf5"
+secondary_100_dark = "#d1fae5"
+secondary_200_dark = "#a7f3d0"
+secondary_300_dark = "#6ee7b7"
+secondary_400_dark = "#34d399"
+secondary_500_dark = "#10b981"
+secondary_600_dark = "#059669"
+secondary_700_dark = "#047857"
+secondary_800_dark = "#065f46"
+secondary_900_dark = "#064e3b"
+secondary_950_dark = "#054436"
+
+
+border_color_primary_ = neutral_700_dark
+
 
 class Seafoam(ThemeBase.Base):
     def __init__(
@@ -36,21 +75,14 @@ class Seafoam(ThemeBase.Base):
             font_mono=font_mono,
         )
         super().set(
+            # Light
             body_background_fill="linear-gradient(45deg, #80eeee, #ecfdf5)",  # 浅色模式背景渐变
-            body_background_fill_dark="linear-gradient(45deg, #1c4d4d, #142d2d)",  # 深色模式背景渐变
-            # body_background_fill="linear-gradient(45deg, *primary_200, *primary_50)",
-            # body_background_fill_dark="linear-gradient(45deg, *primary_800, *primary_900)",
             button_primary_background_fill="linear-gradient(90deg, *primary_300, *secondary_400)",
             button_primary_background_fill_hover="linear-gradient(90deg, *primary_400, *secondary_500)",
-            button_primary_text_color="white",
-            button_primary_background_fill_dark="linear-gradient(90deg, *primary_600, *secondary_800)",
-            # button_secondary_text_color="white",
+            button_primary_text_color="black",
             button_cancel_background_fill="#ffa6a6",
             button_cancel_background_fill_hover="#ff8686",
-            # button_cancel_text_color="white",  # 按钮文字颜色
-            # button_cancel_background_fill_dark="linear-gradient(90deg, #b22222, #8b0000)",  # 深色模式按钮渐变
             slider_color="*secondary_300",
-            slider_color_dark="*secondary_600",
             block_title_text_weight="600",
             block_border_width="3px",
             block_shadow="*shadow_drop_lg",
@@ -63,7 +95,7 @@ js = """
 function createGradioAnimation() {
     const params = new URLSearchParams(window.location.search);
     if (!params.has('__theme')) {
-        params.set('__theme', 'light');
+        params.set('__theme', 'dark');
         window.location.search = params.toString();
     }
     
@@ -102,9 +134,14 @@ function createGradioAnimation() {
 
 css = """
 /* CSSStyleRule */
-.markdown {
-    background-color: lightblue;
-    padding: 20px;
+
+body .markdown {
+    background-color: lightblue; /* 适用于 light 主题的颜色 */
+    padding: 30px;
+}
+
+body.dark .markdown {
+    background-color: darkblue; /* 适用于 dark 主题的颜色 */
 }
 
 /* CSSFontFaceRule */
@@ -137,3 +174,7 @@ footer * {
 }
 
 """
+
+if __name__ == "__main__":
+    theme = Seafoam()
+    theme.dump("Seafoam.json")

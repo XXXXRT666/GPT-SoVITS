@@ -6,7 +6,7 @@ from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.cfg import V2_LANGUAGES
 from tools.webui.inference.handlers import inference, set_gpt, set_sovits, compile_func
 from tools.webui.inference.utils import get_gpt_paths, get_sovits_path, get_languages_list
-from tools.webui.inference.assets import js, css, Seafoam
+from tools.webui.assets1 import js, css, seafoam
 
 
 def build_app(tts_engine: TTSEngine, compile: bool = False):
@@ -21,7 +21,7 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
     set_sovits_partial = partial(set_sovits, tts_engine=tts_engine)
     compile_func_partial = partial(compile_func, tts_engine=tts_engine)
 
-    with gr.Blocks(title=i18n("GPT-SoVITS Inference WebUI"), analytics_enabled=False, fill_width=False, js=js, css=css, theme=Seafoam()) as app:
+    with gr.Blocks(title="GPT-SoVITS Inference WebUI", analytics_enabled=False, fill_width=False, js=js, css=css, theme=seafoam) as app:
         gr.Markdown(
             value=i18n(
                 "本软件以 MIT 协议开源，作者不对软件具备任何控制力，使用软件者、传播软件导出的声音者自负全责<br>如不认可该条款，则不能使用或引用软件包内任何代码和文件。详见根目录<b> LICENSE</b>."
@@ -46,7 +46,7 @@ def build_app(tts_engine: TTSEngine, compile: bool = False):
                     choices=list(tts_engine.list_speaker()), value=configs.speaker_name, label=i18n("说话人列表"), interactive=True
                 )
             with gr.Column():
-                new_speaker_name = gr.Textbox(value="WebUI", label=i18n("新说话人名称"))
+                new_speaker_name = gr.Textbox(value="WebUI", label=i18n("新说话人名称"), interactive=True)
             with gr.Column():
                 add_new_speaker = gr.Button(value=i18n("添加新说话人"), variant="secondary")
         with gr.Row(equal_height=True):
