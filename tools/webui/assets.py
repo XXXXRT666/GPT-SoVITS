@@ -3,45 +3,6 @@ from typing import Iterable
 import gradio.themes.base as ThemeBase
 from gradio.themes.utils import colors, fonts, sizes
 
-neutral_50_dark = "#fafafa"
-neutral_100_dark = "#f5f5f5"
-neutral_200_dark = "#e5e5e5"
-neutral_300_dark = "#d4d4d4"
-neutral_400_dark = "#a3a3a3"
-neutral_500_dark = "#737373"
-neutral_600_dark = "#525252"
-neutral_700_dark = "#404040"
-neutral_800_dark = "#262626"
-neutral_900_dark = "#171717"
-neutral_950_dark = "#0f0f0f"
-
-primary_50_dark = "#eff6ff"
-primary_100_dark = "#dbeafe"
-primary_200_dark = "#bfdbfe"
-primary_300_dark = "#93c5fd"
-primary_400_dark = "#60a5fa"
-primary_500_dark = "#3b82f6"
-primary_600_dark = "#621dd8"
-primary_700_dark = "#1d4ed8"
-primary_800_dark = "#1e40af"
-primary_900_dark = "#1e3a8a"
-primary_950_dark = "#1d3660"
-
-secondary_50_dark = "#ecfdf5"
-secondary_100_dark = "#d1fae5"
-secondary_200_dark = "#a7f3d0"
-secondary_300_dark = "#6ee7b7"
-secondary_400_dark = "#34d399"
-secondary_500_dark = "#10b981"
-secondary_600_dark = "#059669"
-secondary_700_dark = "#047857"
-secondary_800_dark = "#065f46"
-secondary_900_dark = "#064e3b"
-secondary_950_dark = "#054436"
-
-
-border_color_primary_ = neutral_700_dark
-
 
 class Seafoam(ThemeBase.Base):
     def __init__(
@@ -93,10 +54,11 @@ class Seafoam(ThemeBase.Base):
 
 js = """
 function createGradioAnimation() {
+    
     const params = new URLSearchParams(window.location.search);
-    if (!params.has('__theme')) {
-        params.set('__theme', 'dark');
-        window.location.search = params.toString();
+    if (params.get('__theme') !== 'light') { 
+        params.set('__theme', 'light'); // 仅当 __theme 不是 'light' 时设置为 'light'
+        window.location.search = params.toString(); // 更新 URL，触发页面刷新
     }
     
     var container = document.createElement('div');
@@ -135,13 +97,9 @@ function createGradioAnimation() {
 css = """
 /* CSSStyleRule */
 
-body .markdown {
+.markdown {
     background-color: lightblue; /* 适用于 light 主题的颜色 */
     padding: 30px;
-}
-
-body.dark .markdown {
-    background-color: darkblue; /* 适用于 dark 主题的颜色 */
 }
 
 /* CSSFontFaceRule */
@@ -175,6 +133,4 @@ footer * {
 
 """
 
-if __name__ == "__main__":
-    theme = Seafoam()
-    theme.dump("Seafoam.json")
+seafoam = Seafoam()
