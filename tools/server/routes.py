@@ -108,7 +108,9 @@ SHARED_TTS_RESPONSE_DICT: dict[Union[int, str], dict[str, Any]] = {
     },
     400: {
         "description": "Plain text error response",
-        "content": {"text/plain": {"example": "Error message or tracebacks"}},
+        "content": {
+            "text/plain": {"example": "Error message or tracebacks"},
+        },
     },
 }
 
@@ -186,11 +188,17 @@ def build_APP(compile: bool = False):  # pylint: disable=redefined-builtin
             response.headers["Content-Type"] = "application/json; charset=utf-8"
         return response
 
-    @APP.get("/", include_in_schema=False)
+    @APP.get(
+        "/",
+        include_in_schema=False,
+    )
     async def redirect_root_to_docs_get():
         return RedirectResponse(url="/docs")
 
-    @APP.post("/", include_in_schema=False)
+    @APP.post(
+        "/",
+        include_in_schema=False,
+    )
     async def redirect_root_to_doc_post():
         return RedirectResponse(url="/docs")
 
@@ -243,19 +251,31 @@ def build_APP(compile: bool = False):  # pylint: disable=redefined-builtin
         return result
 
     @APP.get(
-        "/set_prompt", tags=["Setting Prompt"], summary="Set_Prompt_GET", description=SHARED_DOCS_SET_PROMPT, responses=SHARED_OTHER_RESPONSE_DICT
+        "/set_prompt",
+        tags=["Setting Prompt"],
+        summary="Set_Prompt_GET",
+        description=SHARED_DOCS_SET_PROMPT,
+        responses=SHARED_OTHER_RESPONSE_DICT,
     )
     async def Set_Prompt_GET(result: Annotated[Prompt, Depends(set_prompt_query)]):
         return result
 
     @APP.post(
-        "/set_prompt", tags=["Setting Prompt"], summary="Set_Prompt_POST", description=SHARED_DOCS_SET_PROMPT, responses=SHARED_OTHER_RESPONSE_DICT
+        "/set_prompt",
+        tags=["Setting Prompt"],
+        summary="Set_Prompt_POST",
+        description=SHARED_DOCS_SET_PROMPT,
+        responses=SHARED_OTHER_RESPONSE_DICT,
     )
     async def Set_Prompt_POST(result: Annotated[Prompt, Depends(set_prompt_body)]):
         return result
 
     @APP.get(
-        "/add_speaker", tags=["Setting Speaker"], summary="Add_Speaker_GET", description=SHARED_DOCS_ADD_SPEAKER, responses=SHARED_OTHER_RESPONSE_DICT
+        "/add_speaker",
+        tags=["Setting Speaker"],
+        summary="Add_Speaker_GET",
+        description=SHARED_DOCS_ADD_SPEAKER,
+        responses=SHARED_OTHER_RESPONSE_DICT,
     )
     async def Add_Speaker_GET(result: Annotated[SpeakerAPI, Depends(add_speaker_query)]):
         return result
@@ -270,11 +290,21 @@ def build_APP(compile: bool = False):  # pylint: disable=redefined-builtin
     async def Add_Speaker_POST(result: Annotated[SpeakerAPI, Depends(add_speaker_body)]):
         return result
 
-    @APP.get("/del_speaker", tags=["Setting Speaker"], summary="Del_Speaker_GET", responses=SHARED_OTHER_RESPONSE_DICT)
+    @APP.get(
+        "/del_speaker",
+        tags=["Setting Speaker"],
+        summary="Del_Speaker_GET",
+        responses=SHARED_OTHER_RESPONSE_DICT,
+    )
     async def Del_Speaker_GET(result: Annotated[SpeakerAPI, Depends(del_speaker_query)]):
         return result
 
-    @APP.post("/del_speaker", tags=["Setting Speaker"], summary="Del_Speaker_POST", responses=SHARED_OTHER_RESPONSE_DICT)
+    @APP.post(
+        "/del_speaker",
+        tags=["Setting Speaker"],
+        summary="Del_Speaker_POST",
+        responses=SHARED_OTHER_RESPONSE_DICT,
+    )
     async def Del_Speaker_POST(result: Annotated[SpeakerAPI, Depends(del_speaker_body)]):
         return result
 
@@ -299,22 +329,40 @@ def build_APP(compile: bool = False):  # pylint: disable=redefined-builtin
         return result
 
     @APP.get(
-        "/get_speaker", tags=["Setting Speaker"], summary="Get_Speaker_GET", description=SHARED_DOCS_GET_SPEAKER, responses=SHARED_GET_RESPONSE_DICT
+        "/get_speaker",
+        tags=["Setting Speaker"],
+        summary="Get_Speaker_GET",
+        description=SHARED_DOCS_GET_SPEAKER,
+        responses=SHARED_GET_RESPONSE_DICT,
     )
     async def Get_Speaker_GET(result: Annotated[str, Depends(get_speaker_query)]):
         return result
 
     @APP.post(
-        "/get_speaker", tags=["Setting Speaker"], summary="Get_Speaker_POST", description=SHARED_DOCS_GET_SPEAKER, responses=SHARED_GET_RESPONSE_DICT
+        "/get_speaker",
+        tags=["Setting Speaker"],
+        summary="Get_Speaker_POST",
+        description=SHARED_DOCS_GET_SPEAKER,
+        responses=SHARED_GET_RESPONSE_DICT,
     )
     async def Get_Speaker_POST(result: Annotated[str, Depends(get_speaker_body)]):
         return result
 
-    @APP.get("/set_speaker", tags=["Setting Speaker"], summary="Set_Speaker_POST", responses=SHARED_OTHER_RESPONSE_DICT)
+    @APP.get(
+        "/set_speaker",
+        tags=["Setting Speaker"],
+        summary="Set_Speaker_POST",
+        responses=SHARED_OTHER_RESPONSE_DICT,
+    )
     async def Set_Speaker_GET(result: Annotated[str, Depends(set_speaker_query)]):
         return result
 
-    @APP.post("/set_speaker", tags=["Setting Speaker"], summary="Set_Speaker_POST", responses=SHARED_OTHER_RESPONSE_DICT)
+    @APP.post(
+        "/set_speaker",
+        tags=["Setting Speaker"],
+        summary="Set_Speaker_POST",
+        responses=SHARED_OTHER_RESPONSE_DICT,
+    )
     async def Set_Speaker_POST(result: Annotated[str, Depends(set_speaker_body)]):
         return result
 
@@ -358,11 +406,19 @@ def build_APP(compile: bool = False):  # pylint: disable=redefined-builtin
     async def Set_SoVITS_Weights_POST(result: Annotated[str, Depends(set_sovits_weights_body)]):
         return result
 
-    @APP.get("/control", tags=["Control"], summary="Control_GET")
+    @APP.get(
+        "/control",
+        tags=["Control"],
+        summary="Control_GET",
+    )
     async def Control_GET(command: Literal["restart", "exit"]):
         await handle_control_query(command)
 
-    @APP.post("/control", tags=["Control"], summary="Control_POST")
+    @APP.post(
+        "/control",
+        tags=["Control"],
+        summary="Control_POST",
+    )
     async def Control_POST(command: Literal["restart", "exit"]):
         await handle_control_body(command)
 

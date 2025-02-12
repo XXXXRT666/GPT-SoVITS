@@ -89,7 +89,12 @@ def set_sovits(sovits_path: str, prompt_language: str, text_language: str, tts_e
         text_update, text_language_update = gr.skip(), gr.Dropdown(choices=language_list)
     else:
         text_update, text_language_update = gr.Textbox(value=""), gr.Dropdown(choices=language_list, value=i18n("all_zh"))
-    return prompt_text_update, prompt_language_update, text_update, text_language_update
+    return (
+        prompt_text_update,
+        prompt_language_update,
+        text_update,
+        text_language_update,
+    )
 
 
 def set_gpt(gpt_path: str, tts_engine: TTSEngine):
@@ -103,7 +108,11 @@ def compile_func(speaker_name: str, batch_size: int, tts_engine: TTSEngine, prog
 
 
 def refresh(tts_engine: TTSEngine):
-    return gr.Dropdown(choices=get_gpt_paths()), gr.Dropdown(choices=get_sovits_paths()), gr.Dropdown(choices=list(tts_engine.list_speaker()))
+    return (
+        gr.Dropdown(choices=get_gpt_paths()),
+        gr.Dropdown(choices=get_sovits_paths()),
+        gr.Dropdown(choices=list(tts_engine.list_speaker())),
+    )
 
 
 def set_speaker(speaker_name, tts_engine: TTSEngine):
@@ -157,4 +166,7 @@ def add_speaker(
         },
     }
     tts_engine.add_speaker(spk_name=speaker_name, spk=spk_dict)
-    return gr.Dropdown(choices=list(tts_engine.list_speaker()), value=speaker_name), gr.Textbox(value=None)
+    return (
+        gr.Dropdown(choices=list(tts_engine.list_speaker()), value=speaker_name),
+        gr.Textbox(value=None),
+    )

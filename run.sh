@@ -77,6 +77,6 @@ elif $api; then
   exit 0
 else
   echo "Running Web UI..."
-  python3 webui.py --webui-config "$cfg_path" --speakers-config "$speaker_cfg_path"
+  python3 tools/train_webui.py --webui-config "$cfg_path"
   exit 0
 fi

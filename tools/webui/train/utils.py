@@ -9,11 +9,16 @@ import gradio as gr
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.server.schema import TTSResponseFailed
 
-GPT_ROOT = [i for i in ("GPT_weights_v2", "GPT_weights_v1", "GPT_weights") if os.path.exists(i)]
-SOVITS_ROOT = [i for i in ("SoVITS_weights_v2", "SoVITS_weights_v1", "SoVITS_weights") if os.path.exists(i)]
+GPT_ROOT = ["GPT_weights_v2", "GPT_weights"]
+SOVITS_ROOT = ["SoVITS_weights_v2", "SoVITS_weights"]
 
 PRETRAINED_SOVITS = [
-    i for i in ["GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth", "GPT_SoVITS/pretrained_models/s2G488k.pth"] if os.path.exists(i)
+    i
+    for i in [
+        "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth",
+        "GPT_SoVITS/pretrained_models/s2G488k.pth",
+    ]
+    if os.path.exists(i)
 ]
 PRETRAINED_GPT = [
     i
@@ -28,8 +33,6 @@ PRETRAINED_GPT = [
 def parse_args():
     parser = ArgumentParser(description="GPT-SoVITS WebUI")
     parser.add_argument("-c", "--webui-config", type=str, default="tools/cfgs/cfg.json", help="API_Batch Cfg Path")
-    parser.add_argument("-s", "--speakers-config", type=str, default="tools/cfgs/speakers.json", help="Speakers Cfg Path")
-    parser.add_argument("--compile", action="store_true", help="Compiled the model to accelerate")
     return parser.parse_args()
 
 

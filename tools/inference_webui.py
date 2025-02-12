@@ -40,7 +40,13 @@ def main():
     app = build_app(tts_engine=tts_engine, compile=compile)
 
     app.queue().launch(
-        server_name=configs.host, inbrowser=True, share=configs.gradio_share, server_port=configs.port, quiet=True, allowed_paths=ROOT_DIR
+        server_name=configs.host,
+        inbrowser=True,
+        share=configs.gradio_share,
+        server_port=configs.port,
+        quiet=True,
+        allowed_paths=ROOT_DIR,
+        # ssr_mode=True,
     )
 
 

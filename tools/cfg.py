@@ -59,7 +59,7 @@ class Main_WebUI_Cfg(BaseModel):
     fp16: bool = False
     logging_dir: str = "logs"
     python_exec: str = "python3"
-    server_name: str = "0.0.0.0"
+    host: str = "0.0.0.0"
     webui_port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9874
     uvr5_webui_port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9873
     subfux_webui_port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9871
@@ -127,48 +127,11 @@ class Inference_WebUI_Cfg(BaseModel):
         return vals
 
 
-class API_Cfg(BaseModel):
-    init: bool = Field(default=False, exclude=True)
-    device: str = "cpu"
-    fp16: bool = False
-    host: str = "::"
-    port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9880
-    i18n_language: str = "en_US"
-    streaming: bool = False
-    media_type: str = "wav"
-    cut_punc: str = ""
-    top_k: Annotated[int, Field(ge=1, le=100, strict=True)] = 5
-    top_p: Annotated[float, Field(ge=0.01, le=1.0, strict=True)] = 1.0
-    temperature: Annotated[float, Field(ge=0.01, le=1.0, strict=True)] = 1.0
-
-    @model_validator(mode="after")
-    @classmethod
-    def check_all(cls, vals):
-        if vals.init:
-            vals.device, vals.fp16 = check_infer_device()
-        vals.init = False
-        device = vals.device
-        if device == "cpu":
-            pass
-        elif device[:-1] == "cuda":
-            pass
-        else:
-            raise ValueError(f"Invalid device: {device}")
-        assert 0 < vals.port < 65536, ValueError("Invalid Port")
-        assert vals.media_type in ["pcm", "wav", "aac", "ogg"], ValueError("Invalid mediatype")
-        assert 1 <= vals.top_k <= 100, ValueError("Top_k should be between 1 and 100")
-        assert 0.0 <= vals.top_p <= 1.0, ValueError("Top_p should be between 0.0 and 1.0")
-        assert 0.0 <= vals.temperature <= 1.0, ValueError("Temperature should be between 0.0 and 1.0")
-        assert vals.i18n_language in scan_language_list(), ValueError("I18n language not supported")
-
-        return vals
-
-
 class API_Batch_Cfg(BaseModel):
     init: bool = Field(default=False, exclude=True)
     device: str = "cpu"
     fp16: bool = False
-    host: str = "[::]"
+    host: str = "::"
     port: Annotated[int, Field(ge=0, le=65536, strict=True)] = 9880
     i18n_language: str = "en_US"
     speaker_name: str = "API_Batch"
@@ -321,14 +284,12 @@ class Speakers_Cfg(BaseModel):
 
 Main_WebUI_Cfg_p = partial(Main_WebUI_Cfg, init=True)
 Inference_WebUI_Cfg_p = partial(Inference_WebUI_Cfg, init=True)
-API_Cfg_p = partial(API_Cfg, init=True)
 API_Batch_Cfg_p = partial(API_Batch_Cfg, init=True)
 
 
 class Cfg(BaseModel):
-    webui_cfg: Main_WebUI_Cfg = Field(default_factory=Main_WebUI_Cfg_p)
+    train_webui_cfg: Main_WebUI_Cfg = Field(default_factory=Main_WebUI_Cfg_p)
     inference_webui_cfg: Inference_WebUI_Cfg = Field(default_factory=Inference_WebUI_Cfg_p)
-    api_cfg: API_Cfg = Field(default_factory=API_Cfg_p)
     api_batch_cfg: API_Batch_Cfg = Field(default_factory=API_Batch_Cfg_p)
     file_path: str = Field(default="tools/cfgs/cfg.json", exclude=True)
 
