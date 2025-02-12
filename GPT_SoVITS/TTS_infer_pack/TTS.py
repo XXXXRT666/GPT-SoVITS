@@ -476,7 +476,6 @@ class TTS:
         seed = -1 if seed in ["", None] else seed
         set_seed(seed)
 
-        ###### setting reference audio and prompt text preprocessing ########
         ###### text preprocessing ########
         try:
             t1 = ttime()
@@ -625,7 +624,13 @@ class TTS:
                 if return_fragment:
                     print(f"{t2 - t1:.3f}\t{t4 - t3:.3f}\t{t5 - t4:.3f}")
                     yield TTSResponseSegment(
-                        audio=self.audio_postprocess([batch_audio_fragment], self.hps.data.sampling_rate, None, False, fragment_interval)
+                        audio=self.audio_postprocess(
+                            [batch_audio_fragment],
+                            self.hps.data.sampling_rate,
+                            None,
+                            False,
+                            fragment_interval,
+                        )
                     )
                 else:
                     audio.append(batch_audio_fragment)
@@ -640,7 +645,13 @@ class TTS:
                     yield TTSResponseFailed(exception=RuntimeError("Empty Prediction"))
                     return
                 yield TTSResponseSuccess(
-                    audio=self.audio_postprocess(audio, self.hps.data.sampling_rate, batch_index_list, split_bucket, fragment_interval)
+                    audio=self.audio_postprocess(
+                        audio,
+                        self.hps.data.sampling_rate,
+                        batch_index_list,
+                        split_bucket,
+                        fragment_interval,
+                    )
                 )
 
         except Exception as e:  # pylint: disable=broad-exception-caught

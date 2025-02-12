@@ -45,7 +45,7 @@ class TextPreprocessor:
         self.i18n = i18n
 
     def preprocess(self, text: str, lang: str, text_split_method: str, version: str = "v2") -> List[Dict]:
-        print(self.i18n("############ 切分文本 ############"))
+        print(f"############ {self.i18n('切分文本')} ############")
         text = self.replace_consecutive_punctuation(text)
         texts = self.pre_seg_text(text, lang, text_split_method)
         result = []
