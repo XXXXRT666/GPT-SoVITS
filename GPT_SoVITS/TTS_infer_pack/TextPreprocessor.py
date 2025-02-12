@@ -49,7 +49,7 @@ class TextPreprocessor:
         text = self.replace_consecutive_punctuation(text)
         texts = self.pre_seg_text(text, lang, text_split_method)
         result = []
-        print(self.i18n("############ 提取文本Bert特征 ############"))
+        print(self.i18n(f"############ {self.i18n('提取文本Bert特征')} ############"))
         for text in tqdm(texts, leave=False):
             phones, bert_features, norm_text = self.segment_and_extract_feature_for_text(text, lang, version)
             if phones is None or norm_text == "":

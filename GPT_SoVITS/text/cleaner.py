@@ -40,7 +40,7 @@ def clean_text(text, language, version=None):
         norm_text = language_module.text_normalize(text)
     else:
         norm_text = text
-    if language == "zh" or language == "yue":  ##########
+    if language == "zh" or language == "yue":
         phones, word2ph = language_module.g2p(norm_text)
         assert len(phones) == sum(word2ph)
         assert len(norm_text) == len(word2ph)

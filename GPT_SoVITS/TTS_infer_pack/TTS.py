@@ -497,7 +497,7 @@ class TTS:
                     precision=self.precision,
                 )
             else:
-                print(self.i18n("############ 切分文本 ############"))
+                print(self.i18n(f"############ {self.i18n('切分文本')} ############"))
                 texts = self.text_preprocessor.pre_seg_text(text, text_lang, text_split_method)
                 data = []
                 for idx, text in enumerate(texts):
@@ -534,7 +534,7 @@ class TTS:
 
             t2 = ttime()
 
-            print(self.i18n("############ 推理 ############"))
+            print(f"############ {self.i18n('推理')} ############")
             ###### inference ######
             t_34 = 0.0
             t_45 = 0.0
