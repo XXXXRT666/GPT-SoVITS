@@ -3,18 +3,39 @@ import sys
 import traceback
 import signal
 
+import click
 import uvicorn
 
-from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
-from tools.server.routes import build_APP
-from tools.server.utils import parse_args, build_HTTPException
 
+@click.command(name="API", help="GPT-SoVITS API")
+@click.option(
+    "-c",
+    "--api-config",
+    default="tools/cfgs/cfg.json",
+    type=str,
+    help="Path of api config file",
+    show_default=True,
+)
+@click.option(
+    "-s",
+    "--speakers-config",
+    default="tools/cfgs/speakers.json",
+    type=str,
+    help="Path of speakers config file",
+    show_default=True,
+)
+@click.option("--compile", is_flag=True, help="Compiled the model to accelerate")
+def main(
+    api_config: str = "tools/cfgs/cfg.json",
+    speakers_config: str = "tools/cfgs/speakers.json",
+    compile=False,
+):  # pylint: disable=redefined-builtin
+    from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
+    from tools.server.routes import build_APP
+    from tools.server.utils import build_HTTPException
 
-def main():
-    args = parse_args()
-    cfg_path = args.api_config
-    speakers_cfg_path = args.speakers_config
-    compile = args.compile  # pylint: disable=redefined-builtin
+    cfg_path = api_config
+    speakers_cfg_path = speakers_config
 
     if cfg_path in [None, ""]:
         cfg_path = "tools/cfgs/cfg.json"

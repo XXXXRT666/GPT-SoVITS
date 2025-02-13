@@ -4,16 +4,18 @@ import os
 from typing import List
 from dataclasses import dataclass
 import threading
-import sys
 
 import gradio as gr
 import numpy as np
 import librosa
 import soundfile
+import click
+
 
 from tools.i18n.i18n import I18nAuto
 from tools.webui.assets import seafoam
 from tools.webui.train.utils import list_root_directories
+
 
 LANGUAGE_MAP: dict = {
     "ZH": "ZH",
@@ -449,11 +451,29 @@ class Subfix:
         self.load_list(list_path=list_path)
 
 
-def main():
+@click.command(name="subfix")
+@click.argument(
+    "list-path",
+    metavar="<Path>",
+    type=click.Path(exists=True, dir_okay=False, readable=True, writable=True),
+    required=True,
+)
+@click.option(
+    "--i18n-lang",
+    type=str,
+    default="Auto",
+    help="Languages for internationalisation",
+    show_default=True,
+)
+def main(list_path: str = "", i18n_lang="Auto"):
+    """Web-Based audio subtitle editing and multilingual annotation Tool"""
+
     with gr.Blocks(theme=seafoam) as app:
-        subfix = Subfix(I18nAuto())
-        subfix.render(list_path=sys.argv[1])
+        btn_close = gr.Button(visible=False, elem_id="btn_close")
+        subfix = Subfix(I18nAuto(i18n_lang))
+        subfix.render(list_path=list_path)
         timer = gr.Timer(0.1)
+
         timer.tick(
             fn=lambda x: (
                 gr.Slider(maximum=subfix.max_index),
@@ -467,6 +487,15 @@ def main():
                 timer,
             ],
         )
+        btn_close.click(
+            fn=subfix.submit,
+            inputs=[
+                *subfix.textboxes,
+                *subfix.languages,
+            ],
+            outputs=[],
+        ).success(app.close, [], [])
+
     app.queue().launch(
         server_name="0.0.0.0",
         inbrowser=True,
@@ -475,7 +504,3 @@ def main():
         quiet=False,
         allowed_paths=list_root_directories(),
     )
-
-
-if __name__ == "__main__":
-    main()

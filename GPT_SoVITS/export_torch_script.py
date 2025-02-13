@@ -2,7 +2,7 @@
 # reference: https://github.com/lifeiteng/vall-e
 import argparse
 from typing import Optional
-from my_utils import load_audio
+from tools.utils.my_utils import load_audio
 from GPT_SoVITS.text import cleaned_text_to_sequence
 import torch
 import torchaudio

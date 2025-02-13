@@ -7,7 +7,7 @@ import sys
 from typing import Union, Callable, Optional, Iterable
 
 import numpy as np
-from tools.my_utils import SilentPrint
+from tools.utils.my_utils import SilentPrint
 from tools.cfg import Speakers_Cfg, Inference_WebUI_Cfg, API_Batch_Cfg, Speaker, Prompt, Cfg
 from tools.i18n.i18n import I18nAuto
 from tools.server.schema import TTSRequest, TTSResponseFailed, TTSResponseSuccess, TTSResponseSegment

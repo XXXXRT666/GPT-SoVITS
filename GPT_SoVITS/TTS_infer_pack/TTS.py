@@ -22,7 +22,7 @@ from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSRequest
 from GPT_SoVITS.TTS_infer_pack.TextPreprocessor import TextPreprocessor
 from tools.cfg import Inference_WebUI_Cfg, API_Batch_Cfg, Speaker
 from tools.server.schema import TTSResponse, TTSResponseFailed, TTSResponseSegment, TTSResponseSuccess
-from tools.my_utils import load_audio, DictToAttrRecursive
+from tools.utils.my_utils import load_audio, DictToAttrRecursive
 
 
 def set_seed(seed: int):

@@ -147,7 +147,7 @@ def build_app(configs: Main_WebUI_Cfg):
                                     max_silence_kept = gr.Slider(
                                         minimum=100,
                                         maximum=1000,
-                                        value=500,
+                                        value=300,
                                         step=100,
                                         label=i18n("最大保留精音时长"),
                                         interactive=True,

@@ -25,7 +25,7 @@ from glob import glob
 from tqdm import tqdm
 import logging, librosa, utils
 from GPT_SoVITS.module.models import SynthesizerTrn
-from tools.my_utils import clean_path
+from tools.utils.my_utils import clean_path
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 # from config import pretrained_s2G

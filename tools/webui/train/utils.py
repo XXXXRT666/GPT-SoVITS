@@ -6,7 +6,6 @@ from typing import List, Optional
 from argparse import ArgumentParser
 
 import gradio as gr
-from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.server.schema import TTSResponseFailed
 
 GPT_ROOT = ["GPT_weights_v2", "GPT_weights"]
@@ -79,7 +78,7 @@ def build_gradio_exception(tts_response: TTSResponseFailed):
         print(tracebacks)
 
 
-def get_languages_list(tts_engine: TTSEngine):
+def get_languages_list(tts_engine):
     return [tts_engine.i18n(language) for language in tts_engine.speaker.languages]
 
 

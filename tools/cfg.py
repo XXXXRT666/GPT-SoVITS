@@ -8,7 +8,7 @@ from pydantic_core import PydanticCustomError
 from pydantic import BaseModel, Field, model_validator, AfterValidator
 
 from tools.i18n.i18n import scan_language_list
-from tools.my_utils import check_infer_device
+from tools.utils.my_utils import check_infer_device
 
 CNHUBERT_DEFAULT = "GPT_SoVITS/pretrained_models/chinese-hubert-base"
 BERT_DEFAULT = "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large"

@@ -213,7 +213,6 @@ async def set_sovits_weights_body(weights_path: Annotated[str, Body()], request:
 
 async def handle_control_query(command: Annotated[str, Query()]):
     if command == "restart":
-        print(11111)
         print(sys.executable, *sys.argv)
         os.execl(sys.executable, sys.executable, *sys.argv)
     elif command == "exit":

@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from functools import lru_cache
 from scipy.io import wavfile
 from io import BytesIO
-from tools.my_utils import load_audio
+from tools.utils.my_utils import load_audio
 
 version = os.environ.get("version", None)
 
