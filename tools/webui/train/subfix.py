@@ -1,9 +1,10 @@
 import traceback
 import datetime
 import os
+import threading
+from functools import partial
 from typing import List
 from dataclasses import dataclass
-import threading
 
 import gradio as gr
 import numpy as np
@@ -16,6 +17,7 @@ from tools.i18n.i18n import I18nAuto
 from tools.webui.assets import seafoam
 from tools.webui.train.utils import list_root_directories
 
+PARTIAL_EXIT = partial(os._exit, 0)
 
 LANGUAGE_MAP: dict = {
     "ZH": "ZH",
@@ -33,6 +35,8 @@ LANGUAGE_MAP: dict = {
 }
 
 LOCK = threading.Lock()
+
+IS_CLI = True
 
 
 @dataclass
@@ -220,7 +224,7 @@ class Subfix:
                             show_label=False,
                             show_download_button=False,
                             editable=False,
-                            waveform_options={"show_recording_waveform": False},
+                            waveform_options={"show_recording_waveform": False, "show_controls": False},
                         )
                     with gr.Column(scale=1, min_width=160):
                         with gr.Group():
@@ -250,7 +254,7 @@ class Subfix:
                             show_label=False,
                             show_download_button=False,
                             interactive=False,
-                            waveform_options={"show_recording_waveform": False, "show_controls": True},
+                            waveform_options={"show_recording_waveform": False, "show_controls": False},
                         )
                     with gr.Column(scale=1, min_width=160):
                         with gr.Group():
@@ -328,7 +332,7 @@ class Subfix:
         )
 
         self.next_index_button2.click(  # Next Page Button on the Bottom, Binding to Next Page Button on the Top
-            lambda x: None,
+            lambda: None,
             [],
             [],
             js="""
@@ -362,7 +366,7 @@ class Subfix:
         )
 
         self.previous_index_button2.click(  # Previous Page Button on the Bottom, Binding to Previous Page Button on the Top
-            lambda x: None,
+            lambda: None,
             [],
             [],
             js="""
@@ -433,17 +437,31 @@ class Subfix:
             outputs=[],
             show_progress="hidden",
         )
-
-        self.close_button.click(  # Close the Subfix Tab, Binding to Close Button on Audio Processing Tab
-            lambda x: None,
-            [],
-            [],
-            js="""
-            () => {
-            document.getElementById("btn_close").click();
-            }""",
-            trigger_mode="once",
-        )
+        if not IS_CLI:
+            self.close_button.click(  # Close the Subfix Tab, Binding to Close Button on Audio Processing Tab
+                fn=lambda: None,
+                inputs=[],
+                outputs=[],
+                js="""
+                () => {
+                document.getElementById("btn_close").click();
+                }""",
+                trigger_mode="once",
+            )
+        else:
+            self.close_button.click(  # Close the Subfix Tab, Binding to Close Button on Audio Processing Tab
+                fn=self.submit,
+                inputs=[
+                    *self.textboxes,
+                    *self.languages,
+                ],
+                outputs=[],
+                trigger_mode="once",
+            ).then(
+                fn=PARTIAL_EXIT,
+                inputs=[],
+                outputs=[],
+            )
 
     def render(self, list_path: str, batch_size: int = 10):
         self.batch_size = batch_size
@@ -469,13 +487,12 @@ def main(list_path: str = "", i18n_lang="Auto"):
     """Web-Based audio subtitle editing and multilingual annotation Tool"""
 
     with gr.Blocks(theme=seafoam) as app:
-        btn_close = gr.Button(visible=False, elem_id="btn_close")
         subfix = Subfix(I18nAuto(i18n_lang))
         subfix.render(list_path=list_path)
         timer = gr.Timer(0.1)
 
         timer.tick(
-            fn=lambda x: (
+            fn=lambda: (
                 gr.Slider(maximum=subfix.max_index),
                 gr.Slider(value=10),
                 gr.Timer(active=False),
@@ -487,15 +504,6 @@ def main(list_path: str = "", i18n_lang="Auto"):
                 timer,
             ],
         )
-        btn_close.click(
-            fn=subfix.submit,
-            inputs=[
-                *subfix.textboxes,
-                *subfix.languages,
-            ],
-            outputs=[],
-        ).success(app.close, [], [])
-
     app.queue().launch(
         server_name="0.0.0.0",
         inbrowser=True,

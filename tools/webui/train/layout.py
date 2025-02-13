@@ -4,10 +4,10 @@ from functools import partial
 import psutil
 import gradio as gr
 
+import tools.webui.train.subfix
 from tools.cfg import Main_WebUI_Cfg
 from tools.i18n.i18n import I18nAuto
 from tools.webui.assets import seafoam, js, css, top_html, info_html, uvr5_html, subfix_html
-from tools.webui.train.subfix import Subfix
 from tools.webui.train.handler import open_subfix, close_subfix
 
 
@@ -312,7 +312,8 @@ def build_app(configs: Main_WebUI_Cfg):
                             )
                 with gr.Tab(label=i18n("文本标注校对工具"), id=2, visible=False) as Tab_0_2:
                     gr.HTML(value=subfix_html.format(*map(i18n, ["语音文本标注校对", "1,2,3"])))
-                    subfix = Subfix(i18n)
+                    tools.webui.train.subfix.IS_CLI = False
+                    subfix = tools.webui.train.subfix.Subfix(i18n)
         with gr.Tab(label=i18n("1-GPT-SoVITS模型训练")):
             with gr.Row(equal_height=True):
                 with gr.Column(min_width=160):
