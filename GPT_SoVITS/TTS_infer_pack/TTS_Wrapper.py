@@ -7,6 +7,7 @@ import sys
 from typing import Union, Callable, Optional, Iterable
 
 import numpy as np
+
 from tools.utils.my_utils import SilentPrint
 from tools.cfg import Speakers_Cfg, Inference_WebUI_Cfg, API_Batch_Cfg, Speaker, Prompt, Cfg
 from tools.i18n.i18n import I18nAuto
@@ -208,18 +209,17 @@ class TTSEngine:
                 wav_file.writeframes(int_wave.tobytes())  # pylint: disable=no-member
                 print("Warm UP")
                 print('If "compile" is selected, it may take some time to warm up.')
-
+                gen = self(
+                    progress_tracker,
+                    text="犯大吴疆土者,盛必击而破之,犯大吴疆土者,盛必击而破之,犯大吴疆土者,盛必击而破之,犯大吴疆土者,盛必击而破之",
+                    text_lang="all_zh",
+                    ref_audio_path=file_name,
+                    speaker_name=speaker_name,
+                    text_split_method="cut5",
+                )
+                next(gen)
                 with SilentPrint():
-                    next(
-                        self.generate(
-                            progress_tracker,
-                            text="犯大吴疆土者,盛必击而破之,犯大吴疆土者,盛必击而破之,犯大吴疆土者,盛必击而破之,犯大吴疆土者,盛必击而破之",
-                            text_lang="all_zh",
-                            ref_audio_path=file_name,
-                            speaker_name=speaker_name,
-                            text_split_method="cut5",
-                        )
-                    )
+                    next(gen)
         self.clear_prompt_cache()
 
     def precall(self, **kwds) -> Union[TTSRequest, TTSResponseFailed]:

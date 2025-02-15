@@ -1,5 +1,7 @@
 import logging
 
+import click
+
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.webui.inference.layout import build_app
 from tools.webui.inference.utils import parse_args, build_gradio_exception, list_root_directories
@@ -15,11 +17,34 @@ logging.getLogger("torchaudio._extension").setLevel(logging.ERROR)
 ROOT_DIR = list_root_directories()
 
 
-def main():
-    args = parse_args()
-    cfg_path = args.webui_config
-    speakers_cfg_path = args.speakers_config
-    compile = args.compile  # pylint: disable=redefined-builtin
+@click.command(
+    name="Infer-WebUI",
+)
+@click.option(
+    "-c",
+    "--infer-config",
+    default="tools/cfgs/cfg.json",
+    metavar="<Path>",
+    type=click.Path(exists=True, dir_okay=False, readable=True, writable=True),
+    help="Path of Infer-WebUI config file",
+    show_default=True,
+)
+@click.option(
+    "-s",
+    "--speakers-config",
+    default="tools/cfgs/speakers.json",
+    metavar="<Path>",
+    type=click.Path(exists=True, dir_okay=False, readable=True, writable=True),
+    help="Path of speakers config file",
+    show_default=True,
+)
+def main(
+    infer_config="tools/cfgs/cfg.json",
+    speakers_config="tools/cfgs/speakers.json",
+    compile=False,
+):  # pylint: disable=redefined-builtin
+    cfg_path = infer_config
+    speakers_cfg_path = speakers_config
 
     if cfg_path in [None, ""]:
         cfg_path = "tools/cfgs/cfg.json"

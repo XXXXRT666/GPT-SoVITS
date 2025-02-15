@@ -6,6 +6,10 @@ import signal
 import click
 import uvicorn
 
+from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
+from tools.server.routes import build_APP
+from tools.server.utils import build_HTTPException
+
 
 @click.command(name="API", help="GPT-SoVITS API")
 @click.option(
@@ -30,9 +34,18 @@ def main(
     speakers_config: str = "tools/cfgs/speakers.json",
     compile=False,
 ):  # pylint: disable=redefined-builtin
-    from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
-    from tools.server.routes import build_APP
-    from tools.server.utils import build_HTTPException
+    """Batched Inference API for GPT-SoVITS
+
+    The command-line arguments accept two OPTIONAL configuration file paths
+
+    The api-config configures some FastAPI parameters and the default settings for inference, while speakers-config configures speaker information.
+
+    If the default config path doesn't exist, create a new config file
+
+    Compile will accelerate the inference with fixed batch size, but it takes a moment to initialized
+
+    Go to https//127.0.0.1:{api_port} for more information after starting the FastAPI application.
+    """
 
     cfg_path = api_config
     speakers_cfg_path = speakers_config

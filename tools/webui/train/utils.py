@@ -29,12 +29,6 @@ PRETRAINED_GPT = [
 ]
 
 
-def parse_args():
-    parser = ArgumentParser(description="GPT-SoVITS WebUI")
-    parser.add_argument("-c", "--webui-config", type=str, default="tools/cfgs/cfg.json", help="API_Batch Cfg Path")
-    return parser.parse_args()
-
-
 def custom_sort_key(s):
     # 使用正则表达式提取字符串中的数字部分和非数字部分
     parts = re.split(r"(\d+)", s)

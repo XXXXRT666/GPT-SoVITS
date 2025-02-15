@@ -14,7 +14,12 @@ CONTEXT_SETTINGS = dict(
 )
 def cli():
     """GPT-SoVITS Command Line Tools"""
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "../",
+        )
+    )
 
 
 # Subfix WebUI
@@ -59,7 +64,7 @@ def subfix(*args, **kwds):
     "--api-config",
     default="tools/cfgs/cfg.json",
     metavar="<Path>",
-    type=click.Path(exists=True, dir_okay=False, readable=True, writable=True),
+    type=click.Path(exists=False, dir_okay=False, readable=True, writable=True),
     help="Path of api config file",
     show_default=True,
 )
@@ -68,13 +73,13 @@ def subfix(*args, **kwds):
     "--speakers-config",
     default="tools/cfgs/speakers.json",
     metavar="<Path>",
-    type=click.Path(exists=True, dir_okay=False, readable=True, writable=True),
+    type=click.Path(exists=False, dir_okay=False, readable=True, writable=True),
     help="Path of speakers config file",
     show_default=True,
 )
 @click.option("--compile", is_flag=True, help="Compiled the model to accelerate")
 def api(*args, **kwds):
-    """The Batched Inference API of GPT-SoVITS
+    """Batched Inference API for GPT-SoVITS
 
     The command-line arguments accept two OPTIONAL configuration file paths
 
@@ -197,9 +202,84 @@ def slice_audio(*args, **kwds):
     audio_slicer.callback(*args, **kwds)
 
 
+# Train WebUI
+@click.command(
+    name="Train-WebUI",
+    context_settings=CONTEXT_SETTINGS,
+)
+@click.option(
+    "-c",
+    "webui-cfg",
+    default="tools/cfgs/cfg.json",
+    type=click.Path(exists=False, dir_okay=False, readable=True, writable=True),
+    help="Train WebUI Cfg Path",
+    show_default=True,
+)
+def open_train_webui(*args, **kwds):
+    """Train WebUI for GPT-SoVITS
+
+    The command-line arguments accept one OPTIONAL configuration file paths
+
+    The webui-config configures some Gradio parameters and the default settings for training
+
+    If the default config path doesn't exist, create a new config file
+
+    \b
+    Examples:
+      GPT-SoVITS Train-WebUI -c tools/cfgs/cfg.json
+    """
+    from tools.train_webui import main as train_webui_main
+
+    train_webui_main.callback(*args, **kwds)
+
+
+# Infer WebUI
+@click.command(
+    name="Infer-WebUI",
+    context_settings=CONTEXT_SETTINGS,
+)
+@click.option(
+    "-c",
+    "--infer-config",
+    default="tools/cfgs/cfg.json",
+    metavar="<Path>",
+    type=click.Path(exists=False, dir_okay=False, readable=True, writable=True),
+    help="Path of Infer-WebUI config file",
+    show_default=True,
+)
+@click.option(
+    "-s",
+    "--speakers-config",
+    default="tools/cfgs/speakers.json",
+    metavar="<Path>",
+    type=click.Path(exists=False, dir_okay=False, readable=True, writable=True),
+    help="Path of speakers config file",
+    show_default=True,
+)
+@click.option("--compile", is_flag=True, help="Compiled the model to accelerate")
+def open_infer_webui(*args, **kwds):
+    """Train WebUI for GPT-SoVITS
+
+    The command-line arguments accept one OPTIONAL configuration file paths
+
+    The webui-config configures some Gradio parameters and the default settings for training
+
+    If the default config path doesn't exist, create a new config file
+
+    \b
+    Examples:
+      GPT-SoVITS Train-WebUI -c tools/cfgs/cfg.json
+    """
+    from tools.inference_webui import main as infer_webui_main
+
+    infer_webui_main.callback(*args, **kwds)
+
+
 cli.add_command(api)
-cli.add_command(subfix)
 cli.add_command(slice_audio)
+cli.add_command(subfix)
+cli.add_command(open_train_webui)
+cli.add_command(open_infer_webui)
 
 if __name__ == "__main__":
     cli()

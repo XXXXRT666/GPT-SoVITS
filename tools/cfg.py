@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import os
 import warnings
 from functools import partial
-from typing import Dict, Optional, Annotated, Literal, TypeVar, Hashable, Self
+from typing import Dict, Optional, Annotated, Literal, TypeVar, Hashable
 
 import torch
 from pydantic_core import PydanticCustomError
@@ -266,7 +268,7 @@ class Speakers_Cfg(BaseModel):
         return vals
 
     @classmethod
-    def from_json(cls, file_path: str) -> Self:
+    def from_json(cls, file_path: str) -> "Speakers_Cfg":
         if not os.path.exists(file_path):
             cls().save_as_json(file_path=file_path)
         with open(file_path, "r", encoding="utf-8") as f:
@@ -294,7 +296,7 @@ class Cfg(BaseModel):
     file_path: str = Field(default="tools/cfgs/cfg.json", exclude=True)
 
     @classmethod
-    def from_json(cls, file_path: str) -> Self:
+    def from_json(cls, file_path: str) -> "Cfg":
         if not os.path.exists(file_path):
             cls().save_as_json(file_path=file_path)
         with open(file_path, "r", encoding="utf-8") as f:

@@ -27,9 +27,7 @@ def inference(X_spec, device, model, aggressiveness, data):
     data : dic configs
     """
 
-    def _execute(
-        X_mag_pad, roi_size, n_window, device, model, aggressiveness, is_half=True
-    ):
+    def _execute(X_mag_pad, roi_size, n_window, device, model, aggressiveness, is_half=True):
         model.eval()
         with torch.no_grad():
             preds = []
@@ -39,9 +37,7 @@ def inference(X_spec, device, model, aggressiveness, data):
             total_iterations = sum(iterations)
             for i in tqdm(range(n_window)):
                 start = i * roi_size
-                X_mag_window = X_mag_pad[
-                    None, :, :, start : start + data["window_size"]
-                ]
+                X_mag_window = X_mag_pad[None, :, :, start : start + data["window_size"]]
                 X_mag_window = torch.from_numpy(X_mag_window)
                 if is_half:
                     X_mag_window = X_mag_window.half()
@@ -76,9 +72,7 @@ def inference(X_spec, device, model, aggressiveness, data):
         is_half = True
     else:
         is_half = False
-    pred = _execute(
-        X_mag_pad, roi_size, n_window, device, model, aggressiveness, is_half
-    )
+    pred = _execute(X_mag_pad, roi_size, n_window, device, model, aggressiveness, is_half)
     pred = pred[:, :, :n_frame]
 
     if data["tta"]:
@@ -88,9 +82,7 @@ def inference(X_spec, device, model, aggressiveness, data):
 
         X_mag_pad = np.pad(X_mag_pre, ((0, 0), (0, 0), (pad_l, pad_r)), mode="constant")
 
-        pred_tta = _execute(
-            X_mag_pad, roi_size, n_window, device, model, aggressiveness, is_half
-        )
+        pred_tta = _execute(X_mag_pad, roi_size, n_window, device, model, aggressiveness, is_half)
         pred_tta = pred_tta[:, :, roi_size // 2 :]
         pred_tta = pred_tta[:, :, :n_frame]
 
@@ -103,18 +95,18 @@ def _get_name_params(model_path, model_hash):
     data = load_data()
     flag = False
     ModelName = model_path
-    for type in list(data):
-        for model in list(data[type][0]):
-            for i in range(len(data[type][0][model])):
-                if str(data[type][0][model][i]["hash_name"]) == model_hash:
+    for data_type in list(data):
+        for model in list(data[data_type][0]):
+            for i in range(len(data[data_type][0][model])):
+                if str(data[data_type][0][model][i]["hash_name"]) == model_hash:
                     flag = True
-                elif str(data[type][0][model][i]["hash_name"]) in ModelName:
+                elif str(data[data_type][0][model][i]["hash_name"]) in ModelName:
                     flag = True
 
                 if flag:
-                    model_params_auto = data[type][0][model][i]["model_params"]
-                    param_name_auto = data[type][0][model][i]["param_name"]
-                    if type == "equivalent":
+                    model_params_auto = data[data_type][0][model][i]["model_params"]
+                    param_name_auto = data[data_type][0][model][i]["param_name"]
+                    if data_type == "equivalent":
                         return param_name_auto, model_params_auto
                     else:
                         flag = False

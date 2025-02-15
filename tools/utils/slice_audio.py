@@ -179,6 +179,12 @@ def main(
     recursive: bool = False,
     clear_opt: bool = False,
 ):
+    """A command-line tool for slicing audio files based on silence detection.
+
+    This tool processes an input audio file and slices it into smaller segments based on silence thresholds, allowing for more manageable audio chunks.
+
+    It supports multiprocessing to improve processing speed and provides options to customize silence detection and slicing behavior.
+    """
     if clear_opt:
         if os.path.exists(output_path):
             shutil.rmtree(output_path)

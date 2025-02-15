@@ -484,7 +484,10 @@ class Subfix:
     show_default=True,
 )
 def main(list_path: str = "", i18n_lang="Auto"):
-    """Web-Based audio subtitle editing and multilingual annotation Tool"""
+    """Web-Based audio subtitle editing and multilingual annotation Tool
+
+    Accept a transcription list path to launch a Gradio WebUI for text editing
+    """
 
     with gr.Blocks(theme=seafoam) as app:
         subfix = Subfix(I18nAuto(i18n_lang))
