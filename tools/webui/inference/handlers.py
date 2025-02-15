@@ -1,12 +1,12 @@
-import random
 import os
+import random
 from functools import partial
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
 
 import gradio as gr
 
-from tools.webui.inference.utils import get_languages_list, get_gpt_paths, truncate_path, get_sovits_paths, copy_file
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
+from tools.webui.inference.utils import copy_file, get_gpt_paths, get_languages_list, get_sovits_paths, truncate_path
 
 
 def inference(

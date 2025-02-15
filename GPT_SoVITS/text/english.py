@@ -1,17 +1,16 @@
-import pickle
 import os
+import pickle
 import re
-import wordsegment
-from g2p_en import G2p
-
-from GPT_SoVITS.text.symbols import punctuation
-
-from GPT_SoVITS.text.symbols2 import symbols
-
 import unicodedata
 from builtins import str as unicode
+
+import wordsegment
+from g2p_en import G2p
 from g2p_en.expand import normalize_numbers
 from nltk.tokenize import TweetTokenizer
+
+from GPT_SoVITS.text.symbols import punctuation
+from GPT_SoVITS.text.symbols2 import symbols
 
 word_tokenize = TweetTokenizer().tokenize
 from nltk import pos_tag

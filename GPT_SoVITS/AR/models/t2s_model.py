@@ -9,20 +9,16 @@ from torch.nn import functional as F
 from torchmetrics.classification import MulticlassAccuracy
 from tqdm import tqdm
 
-from GPT_SoVITS.AR.models.utils import make_pad_mask
 from GPT_SoVITS.AR.models.utils import (
-    topk_sampling,
-    sample,
     dpo_loss,
-    make_reject_y,
     get_batch_logps,
+    make_pad_mask,
+    make_reject_y,
+    sample,
+    topk_sampling,
 )
-from GPT_SoVITS.AR.modules.embedding import SinePositionalEmbedding
-from GPT_SoVITS.AR.modules.embedding import TokenEmbedding
-from GPT_SoVITS.AR.modules.transformer import LayerNorm
-from GPT_SoVITS.AR.modules.transformer import TransformerEncoder
-from GPT_SoVITS.AR.modules.transformer import TransformerEncoderLayer
-
+from GPT_SoVITS.AR.modules.embedding import SinePositionalEmbedding, TokenEmbedding
+from GPT_SoVITS.AR.modules.transformer import LayerNorm, TransformerEncoder, TransformerEncoderLayer
 
 default_config = {
     "embedding_dim": 512,

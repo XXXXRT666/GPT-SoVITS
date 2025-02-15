@@ -1,38 +1,36 @@
-from typing import Annotated, Literal, Any, Union
+from typing import Annotated, Any, Literal, Union
 
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi import FastAPI, Request, Depends
-from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse, PlainTextResponse
+from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from tools.server.schema import SpeakerAPI
 from tools.cfg import Prompt
+from tools.server.schema import SpeakerAPI
 from tools.server.service import (
-    tts_handle_query,
-    tts_handle_compiled_query,
-    handle_control_query,
-    set_prompt_query,
+    add_speaker_body,
     add_speaker_query,
+    del_speaker_body,
     del_speaker_query,
-    list_speaker_query,
+    get_speaker_body,
     get_speaker_query,
-    set_speaker_query,
+    handle_control_body,
+    handle_control_query,
+    list_speaker_body,
+    list_speaker_query,
+    set_gpt_weights_body,
     set_gpt_weights_query,
+    set_prompt_body,
+    set_prompt_query,
+    set_sovits_weights_body,
     set_sovits_weights_query,
-)
-from tools.server.service import (
+    set_speaker_body,
+    set_speaker_query,
     tts_handle_body,
     tts_handle_compiled_body,
-    handle_control_body,
-    set_prompt_body,
-    add_speaker_body,
-    del_speaker_body,
-    list_speaker_body,
-    get_speaker_body,
-    set_speaker_body,
-    set_gpt_weights_body,
-    set_sovits_weights_body,
+    tts_handle_compiled_query,
+    tts_handle_query,
 )
 
 SHARED_DOCS_API = """

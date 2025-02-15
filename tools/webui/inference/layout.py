@@ -4,9 +4,9 @@ import gradio as gr
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.cfg import V2_LANGUAGES
-from tools.webui.inference.handlers import inference, set_gpt, set_sovits, compile_func, refresh, set_speaker, add_speaker
-from tools.webui.inference.utils import get_gpt_paths, get_sovits_paths, get_languages_list
-from tools.webui.assets import js, css, seafoam, top_html, info_html
+from tools.webui.assets import css, info_html, js, seafoam, top_html
+from tools.webui.inference.handlers import add_speaker, compile_func, inference, refresh, set_gpt, set_sovits, set_speaker
+from tools.webui.inference.utils import get_gpt_paths, get_languages_list, get_sovits_paths
 
 
 def build_app(tts_engine: TTSEngine, compile: bool = False):  # pylint: disable=redefined-builtin

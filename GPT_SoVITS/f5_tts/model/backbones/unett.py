@@ -8,26 +8,24 @@ d - dimension
 """
 
 from __future__ import annotations
+
 from typing import Literal
 
 import torch
-from torch import nn
 import torch.nn.functional as F
-
-from x_transformers import RMSNorm
-from x_transformers.x_transformers import RotaryEmbedding
-
 from f5_tts.model.modules import (
-    TimestepEmbedding,
-    ConvNeXtV2Block,
-    ConvPositionEmbedding,
     Attention,
     AttnProcessor,
+    ConvNeXtV2Block,
+    ConvPositionEmbedding,
     FeedForward,
-    precompute_freqs_cis,
+    TimestepEmbedding,
     get_pos_embed_indices,
+    precompute_freqs_cis,
 )
-
+from torch import nn
+from x_transformers import RMSNorm
+from x_transformers.x_transformers import RotaryEmbedding
 
 # Text embedding
 
@@ -41,9 +39,7 @@ class TextEmbedding(nn.Module):
             self.extra_modeling = True
             self.precompute_max_pos = 4096  # ~44s of 24khz audio
             self.register_buffer("freqs_cis", precompute_freqs_cis(text_dim, self.precompute_max_pos), persistent=False)
-            self.text_blocks = nn.Sequential(
-                *[ConvNeXtV2Block(text_dim, text_dim * conv_mult) for _ in range(conv_layers)]
-            )
+            self.text_blocks = nn.Sequential(*[ConvNeXtV2Block(text_dim, text_dim * conv_mult) for _ in range(conv_layers)])
         else:
             self.extra_modeling = False
 

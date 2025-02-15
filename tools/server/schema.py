@@ -1,5 +1,5 @@
-from typing import Optional, Literal, Tuple, Annotated, Union, List
 from dataclasses import dataclass
+from typing import Annotated, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 from numpy.typing import NDArray

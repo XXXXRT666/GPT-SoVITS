@@ -1,14 +1,14 @@
-import os
-import sys
-import shutil
-import traceback
 import multiprocessing
+import os
+import shutil
+import sys
+import traceback
 from pathlib import Path
 
-from tqdm import tqdm
-from scipy.io import wavfile
-import numpy as np
 import click
+import numpy as np
+from scipy.io import wavfile
+from tqdm import tqdm
 
 from tools.utils.my_utils import load_audio
 from tools.utils.slicer import Slicer

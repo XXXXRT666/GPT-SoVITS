@@ -6,16 +6,17 @@
 
 import math
 import os
+import pathlib
 import random
+from typing import List, Optional, Tuple
+
+import librosa
+import numpy as np
 import torch
 import torch.utils.data
-import numpy as np
-import librosa
-from librosa.filters import mel as librosa_mel_fn
-import pathlib
-from tqdm import tqdm
-from typing import List, Tuple, Optional
 from env import AttrDict
+from librosa.filters import mel as librosa_mel_fn
+from tqdm import tqdm
 
 MAX_WAV_VALUE = 32767.0  # NOTE: 32768.0 -1 to prevent int16 overflow (results in popping sound in corner cases)
 
@@ -86,9 +87,7 @@ def mel_spectrogram(
     key = f"{n_fft}_{num_mels}_{sampling_rate}_{hop_size}_{win_size}_{fmin}_{fmax}_{device}"
 
     if key not in mel_basis_cache:
-        mel = librosa_mel_fn(
-            sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax
-        )
+        mel = librosa_mel_fn(sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax)
         mel_basis_cache[key] = torch.from_numpy(mel).float().to(device)
         hann_window_cache[key] = torch.hann_window(win_size).to(device)
 
@@ -96,9 +95,7 @@ def mel_spectrogram(
     hann_window = hann_window_cache[key]
 
     padding = (n_fft - hop_size) // 2
-    y = torch.nn.functional.pad(
-        y.unsqueeze(1), (padding, padding), mode="reflect"
-    ).squeeze(1)
+    y = torch.nn.functional.pad(y.unsqueeze(1), (padding, padding), mode="reflect").squeeze(1)
 
     spec = torch.stft(
         y,
@@ -149,31 +146,19 @@ def get_dataset_filelist(a):
     list_unseen_validation_files = []
 
     with open(a.input_training_file, "r", encoding="utf-8") as fi:
-        training_files = [
-            os.path.join(a.input_wavs_dir, x.split("|")[0] + ".wav")
-            for x in fi.read().split("\n")
-            if len(x) > 0
-        ]
+        training_files = [os.path.join(a.input_wavs_dir, x.split("|")[0] + ".wav") for x in fi.read().split("\n") if len(x) > 0]
         print(f"first training file: {training_files[0]}")
 
     with open(a.input_validation_file, "r", encoding="utf-8") as fi:
-        validation_files = [
-            os.path.join(a.input_wavs_dir, x.split("|")[0] + ".wav")
-            for x in fi.read().split("\n")
-            if len(x) > 0
-        ]
+        validation_files = [os.path.join(a.input_wavs_dir, x.split("|")[0] + ".wav") for x in fi.read().split("\n") if len(x) > 0]
         print(f"first validation file: {validation_files[0]}")
 
     for i in range(len(a.list_input_unseen_validation_file)):
         with open(a.list_input_unseen_validation_file[i], "r", encoding="utf-8") as fi:
             unseen_validation_files = [
-                os.path.join(a.list_input_unseen_wavs_dir[i], x.split("|")[0] + ".wav")
-                for x in fi.read().split("\n")
-                if len(x) > 0
+                os.path.join(a.list_input_unseen_wavs_dir[i], x.split("|")[0] + ".wav") for x in fi.read().split("\n") if len(x) > 0
             ]
-            print(
-                f"first unseen {i}th validation fileset: {unseen_validation_files[0]}"
-            )
+            print(f"first unseen {i}th validation fileset: {unseen_validation_files[0]}")
             list_unseen_validation_files.append(unseen_validation_files)
 
     return training_files, validation_files, list_unseen_validation_files
@@ -227,13 +212,9 @@ class MelDataset(torch.utils.data.Dataset):
 
         print("[INFO] checking dataset integrity...")
         for i in tqdm(range(len(self.audio_files))):
-            assert os.path.exists(
-                self.audio_files[i]
-            ), f"{self.audio_files[i]} not found"
+            assert os.path.exists(self.audio_files[i]), f"{self.audio_files[i]} not found"
 
-    def __getitem__(
-        self, index: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, str, torch.Tensor]:
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor, str, torch.Tensor]:
         try:
             filename = self.audio_files[index]
 
@@ -248,17 +229,12 @@ class MelDataset(torch.utils.data.Dataset):
                     # Obtain randomized audio chunk
                     if source_sampling_rate != self.sampling_rate:
                         # Adjust segment size to crop if the source sr is different
-                        target_segment_size = math.ceil(
-                            self.segment_size
-                            * (source_sampling_rate / self.sampling_rate)
-                        )
+                        target_segment_size = math.ceil(self.segment_size * (source_sampling_rate / self.sampling_rate))
                     else:
                         target_segment_size = self.segment_size
 
                     # Compute upper bound index for the random chunk
-                    random_chunk_upper_bound = max(
-                        0, audio.shape[0] - target_segment_size
-                    )
+                    random_chunk_upper_bound = max(0, audio.shape[0] - target_segment_size)
 
                     # Crop or pad audio to obtain random chunk with target_segment_size
                     if audio.shape[0] >= target_segment_size:
@@ -346,20 +322,14 @@ class MelDataset(torch.utils.data.Dataset):
                         mel = mel[:, :, mel_start : mel_start + frames_per_seg]
                         audio = audio[
                             :,
-                            mel_start
-                            * self.hop_size : (mel_start + frames_per_seg)
-                            * self.hop_size,
+                            mel_start * self.hop_size : (mel_start + frames_per_seg) * self.hop_size,
                         ]
 
                     # Pad pre-computed mel and audio to match length to ensuring fine-tuning without error.
                     # NOTE: this may introduce a single-frame misalignment of the <pre-computed mel, audio>
                     # To remove possible misalignment, it is recommended to prepare the <pre-computed mel, audio> pair where the audio length is the integer multiple of self.hop_size
-                    mel = torch.nn.functional.pad(
-                        mel, (0, frames_per_seg - mel.size(2)), "constant"
-                    )
-                    audio = torch.nn.functional.pad(
-                        audio, (0, self.segment_size - audio.size(1)), "constant"
-                    )
+                    mel = torch.nn.functional.pad(mel, (0, frames_per_seg - mel.size(2)), "constant")
+                    audio = torch.nn.functional.pad(audio, (0, self.segment_size - audio.size(1)), "constant")
 
             # Compute mel_loss used by spectral regression objective. Uses self.fmax_loss instead (usually None)
             mel_loss = mel_spectrogram(
@@ -376,8 +346,7 @@ class MelDataset(torch.utils.data.Dataset):
 
             # Shape sanity checks
             assert (
-                audio.shape[1] == mel.shape[2] * self.hop_size
-                and audio.shape[1] == mel_loss.shape[2] * self.hop_size
+                audio.shape[1] == mel.shape[2] * self.hop_size and audio.shape[1] == mel_loss.shape[2] * self.hop_size
             ), f"Audio length must be mel frame length * hop_size. Got audio shape {audio.shape} mel shape {mel.shape} mel_loss shape {mel_loss.shape}"
 
             return (mel.squeeze(), audio.squeeze(0), filename, mel_loss.squeeze())
@@ -387,9 +356,7 @@ class MelDataset(torch.utils.data.Dataset):
             if self.fine_tuning:
                 raise e  # Terminate training if it is fine-tuning. The dataset should have been prepared properly.
             else:
-                print(
-                    f"[WARNING] Failed to load waveform, skipping! filename: {filename} Error: {e}"
-                )
+                print(f"[WARNING] Failed to load waveform, skipping! filename: {filename} Error: {e}")
                 return self[random.randrange(len(self))]
 
     def __len__(self):

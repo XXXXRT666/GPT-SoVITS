@@ -1,24 +1,23 @@
-import warnings
-import contextlib, random
+import contextlib
 import copy
 import math
 import os
 import pdb
+import random
+import warnings
 
 import torch
 from torch import nn
-from torch.nn import functional as F
-from torch.nn import Conv1d, ConvTranspose1d, AvgPool1d, Conv2d
-from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 from torch.cuda.amp import autocast
+from torch.nn import AvgPool1d, Conv1d, Conv2d, ConvTranspose1d
+from torch.nn import functional as F
+from torch.nn.utils import remove_weight_norm, spectral_norm, weight_norm
 
-from GPT_SoVITS.module.commons import init_weights, get_padding
+from GPT_SoVITS.f5_tts.model import DiT
+from GPT_SoVITS.module import attentions, commons, modules
+from GPT_SoVITS.module.commons import get_padding, init_weights
 from GPT_SoVITS.module.mrte_model import MRTE
 from GPT_SoVITS.module.quantize import ResidualVectorQuantizer
-from GPT_SoVITS.module import commons
-from GPT_SoVITS.module import modules
-from GPT_SoVITS.module import attentions
-from GPT_SoVITS.f5_tts.model import DiT
 from GPT_SoVITS.text import symbols as symbols_v1
 from GPT_SoVITS.text import symbols2 as symbols_v2
 
@@ -806,7 +805,7 @@ class SynthesizerTrn(nn.Module):
         semantic_frame_rate=None,
         freeze_quantizer=None,
         version="v2",
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.spec_channels = spec_channels
@@ -1076,7 +1075,7 @@ class SynthesizerTrnV3(nn.Module):
         use_sdp=True,
         semantic_frame_rate=None,
         freeze_quantizer=None,
-        **kwargs
+        **kwargs,
     ):
 
         super().__init__()

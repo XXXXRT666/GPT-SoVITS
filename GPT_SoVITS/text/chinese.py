@@ -3,7 +3,7 @@ import pdb
 import re
 
 import cn2an
-from pypinyin import lazy_pinyin, Style
+from pypinyin import Style, lazy_pinyin
 
 from GPT_SoVITS.text.symbols import punctuation
 from GPT_SoVITS.text.tone_sandhi import ToneSandhi
@@ -17,7 +17,6 @@ pinyin_to_symbol_map = {
 }
 
 import jieba_fast.posseg as psg
-
 
 rep_map = {
     "：": ",",

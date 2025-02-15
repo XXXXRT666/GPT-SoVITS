@@ -1,39 +1,44 @@
 import warnings
 
 warnings.filterwarnings("ignore")
-import utils, os
+import os
+
+import utils
 
 hps = utils.get_hparams(stage=2)
 os.environ["CUDA_VISIBLE_DEVICES"] = hps.train.gpu_numbers.replace("-", ",")
+import logging
+import traceback
+
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.cuda.amp import GradScaler, autocast
 from torch.nn import functional as F
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-import torch.multiprocessing as mp
-import torch.distributed as dist, traceback
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
-import logging, traceback
 
 logging.getLogger("matplotlib").setLevel(logging.INFO)
 logging.getLogger("h5py").setLevel(logging.INFO)
 logging.getLogger("numba").setLevel(logging.INFO)
 from random import randint
-from GPT_SoVITS.module import commons
 
+from process_ckpt import savee
+
+from GPT_SoVITS.module import commons
 from GPT_SoVITS.module.data_utils import (
-    TextAudioSpeakerLoaderV3 as TextAudioSpeakerLoader,
-    TextAudioSpeakerCollateV3 as TextAudioSpeakerCollate,
     DistributedBucketSampler,
 )
+from GPT_SoVITS.module.data_utils import TextAudioSpeakerCollateV3 as TextAudioSpeakerCollate
+from GPT_SoVITS.module.data_utils import TextAudioSpeakerLoaderV3 as TextAudioSpeakerLoader
+from GPT_SoVITS.module.losses import discriminator_loss, feature_loss, generator_loss, kl_loss
+from GPT_SoVITS.module.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
 from GPT_SoVITS.module.models import (
-    SynthesizerTrnV3 as SynthesizerTrn,
     MultiPeriodDiscriminator,
 )
-from GPT_SoVITS.module.losses import generator_loss, discriminator_loss, feature_loss, kl_loss
-from GPT_SoVITS.module.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
-from process_ckpt import savee
+from GPT_SoVITS.module.models import SynthesizerTrnV3 as SynthesizerTrn
 
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = False

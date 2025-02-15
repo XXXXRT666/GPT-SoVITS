@@ -6,14 +6,15 @@ if "_CUDA_VISIBLE_DEVICES" in os.environ:
     os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["_CUDA_VISIBLE_DEVICES"]
 import argparse
 import logging
+import platform
 from pathlib import Path
 
-import torch, platform
-from pytorch_lightning import seed_everything
-from pytorch_lightning import Trainer
+import torch
+from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger  # WandbLogger
 from pytorch_lightning.strategies import DDPStrategy
+
 from GPT_SoVITS.AR.data.data_module import Text2SemanticDataModule
 from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from GPT_SoVITS.AR.utils.io import load_yaml_config
@@ -21,11 +22,11 @@ from GPT_SoVITS.AR.utils.io import load_yaml_config
 logging.getLogger("numba").setLevel(logging.WARNING)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 torch.set_float32_matmul_precision("high")
-from GPT_SoVITS.AR.utils import get_newest_ckpt
-
+import shutil
 from collections import OrderedDict
 from time import time as ttime
-import shutil
+
+from GPT_SoVITS.AR.utils import get_newest_ckpt
 
 
 def my_save(fea, path):  #####fix issue: torch.save doesn't support chinese path

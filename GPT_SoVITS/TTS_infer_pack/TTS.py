@@ -1,28 +1,28 @@
+import gc
 import math
 import os
-import sys
-import gc
 import random
+import sys
 import traceback
-from typing import Union, Generator, Callable
 from time import time as ttime
+from typing import Callable, Generator, Union
 
-import numpy as np
 import librosa
+import numpy as np
 import torch
 from numpy.typing import NDArray
-from transformers import AutoModelForMaskedLM, AutoTokenizer
 from tqdm import tqdm
+from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from GPT_SoVITS.feature_extractor.cnhubert import CNHubert
-from GPT_SoVITS.module.models import SynthesizerTrn
 from GPT_SoVITS.module.mel_processing import spectrogram_torch
-from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSRequest
+from GPT_SoVITS.module.models import SynthesizerTrn
 from GPT_SoVITS.TTS_infer_pack.TextPreprocessor import TextPreprocessor
-from tools.cfg import Inference_WebUI_Cfg, API_Batch_Cfg, Speaker
+from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSRequest
+from tools.cfg import API_Batch_Cfg, Inference_WebUI_Cfg, Speaker
 from tools.server.schema import TTSResponse, TTSResponseFailed, TTSResponseSegment, TTSResponseSuccess
-from tools.utils.my_utils import load_audio, DictToAttrRecursive
+from tools.utils.my_utils import DictToAttrRecursive, load_audio
 
 
 def set_seed(seed: int):

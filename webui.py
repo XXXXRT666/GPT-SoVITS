@@ -1,4 +1,5 @@
-import os, sys
+import os
+import sys
 
 if len(sys.argv) == 1:
     sys.argv.append("v2")
@@ -9,10 +10,16 @@ sys.path.insert(0, now_dir)
 import warnings
 
 warnings.filterwarnings("ignore")
-import json, yaml, torch, pdb, re, shutil
+import json
+import pdb
 import platform
-import psutil
+import re
+import shutil
 import signal
+
+import psutil
+import torch
+import yaml
 
 torch.manual_seed(233333)
 tmp = os.path.join(now_dir, "TEMP")
@@ -53,20 +60,24 @@ for site_packages_root in site_packages_roots:
             break
         except PermissionError as e:
             traceback.print_exc()
-from utils import my_utils
-import shutil
 import pdb
-from subprocess import Popen
+import shutil
 import signal
-from config import python_exec, infer_device, is_half, exp_root, webui_port_main, webui_port_infer_tts, webui_port_uvr5, webui_port_subfix, is_share
+from subprocess import Popen
+
+from config import exp_root, infer_device, is_half, is_share, python_exec, webui_port_infer_tts, webui_port_main, webui_port_subfix, webui_port_uvr5
+from utils import my_utils
+
 from tools.i18n.i18n import I18nAuto, scan_language_list
 
 language = sys.argv[-1] if sys.argv[-1] in scan_language_list() else "Auto"
 os.environ["language"] = language
 i18n = I18nAuto(language=language)
-from scipy.io import wavfile
-from tools.utils.my_utils import load_audio, check_for_existance, check_details
 from multiprocessing import cpu_count
+
+from scipy.io import wavfile
+
+from tools.utils.my_utils import check_details, check_for_existance, load_audio
 
 # os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1' # 当遇到mps不支持的步骤时使用cpu
 try:

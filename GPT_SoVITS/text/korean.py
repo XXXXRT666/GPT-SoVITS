@@ -1,9 +1,10 @@
 # reference: https://github.com/ORI-Muchim/MB-iSTFT-VITS-Korean/blob/main/text/korean.py
 
 import re
-from jamo import h2j, j2hcj
+
 import ko_pron
 from g2pk2 import G2p
+from jamo import h2j, j2hcj
 
 from GPT_SoVITS.text.symbols2 import symbols
 

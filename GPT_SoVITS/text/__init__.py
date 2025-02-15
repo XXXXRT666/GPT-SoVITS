@@ -1,12 +1,13 @@
 import os
 
+from GPT_SoVITS.text import symbols as symbols_v1
+from GPT_SoVITS.text import symbols2 as symbols_v2
+
 # if os.environ.get("version","v1")=="v1":
 #   from GPT_SoVITS.text.symbols import symbols
 # else:
 #   from GPT_SoVITS.text.symbols2 import symbols
 
-from GPT_SoVITS.text import symbols as symbols_v1
-from GPT_SoVITS.text import symbols2 as symbols_v2
 
 _symbol_to_id_v1 = {s: i for i, s in enumerate(symbols_v1.symbols)}
 _symbol_to_id_v2 = {s: i for i, s in enumerate(symbols_v2.symbols)}

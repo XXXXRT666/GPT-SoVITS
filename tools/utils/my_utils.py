@@ -1,12 +1,13 @@
 import os
-import traceback
 import sys
-from typing import List
+import traceback
 from pathlib import Path
+from typing import List
 
 import ffmpeg
-import numpy as np
 import gradio as gr
+import numpy as np
+
 from tools.i18n.i18n import I18nAuto
 
 i18n = I18nAuto(language=os.environ.get("language", "Auto"))

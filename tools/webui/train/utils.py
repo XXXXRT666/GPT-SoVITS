@@ -1,11 +1,12 @@
-import re
 import os
 import platform
+import re
 import shutil
-from typing import List, Optional
 from argparse import ArgumentParser
+from typing import List, Optional
 
 import gradio as gr
+
 from tools.server.schema import TTSResponseFailed
 
 GPT_ROOT = ["GPT_weights_v2", "GPT_weights"]

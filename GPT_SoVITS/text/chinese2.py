@@ -3,8 +3,8 @@ import pdb
 import re
 
 import cn2an
-from pypinyin import lazy_pinyin, Style
-from pypinyin.contrib.tone_convert import to_normal, to_finals_tone3, to_initials, to_finals
+from pypinyin import Style, lazy_pinyin
+from pypinyin.contrib.tone_convert import to_finals, to_finals_tone3, to_initials, to_normal
 
 from GPT_SoVITS.text.symbols import punctuation
 from GPT_SoVITS.text.tone_sandhi import ToneSandhi

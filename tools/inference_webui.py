@@ -4,7 +4,7 @@ import click
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
 from tools.webui.inference.layout import build_app
-from tools.webui.inference.utils import parse_args, build_gradio_exception, list_root_directories
+from tools.webui.inference.utils import build_gradio_exception, list_root_directories, parse_args
 
 logging.getLogger("markdown_it").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)

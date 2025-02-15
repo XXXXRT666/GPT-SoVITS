@@ -13,17 +13,23 @@ version = os.environ.get("version", "v2")
 import torch
 
 is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
-import math, traceback
+import math
 import multiprocessing
-import sys, pdb
+import pdb
+import sys
+import traceback
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
-from random import shuffle
-import torch.multiprocessing as mp
+import logging
 from glob import glob
+from random import shuffle
+
+import librosa
+import torch.multiprocessing as mp
+import utils
 from tqdm import tqdm
-import logging, librosa, utils
+
 from GPT_SoVITS.module.models import SynthesizerTrn
 from tools.utils.my_utils import clean_path
 

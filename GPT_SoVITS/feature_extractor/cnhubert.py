@@ -1,13 +1,13 @@
-import os
 import logging
+import os
 
 import torch
 import torch.nn as nn
-from transformers import logging as tf_logging
 from transformers import (
-    Wav2Vec2FeatureExtractor,
     HubertModel,
+    Wav2Vec2FeatureExtractor,
 )
+from transformers import logging as tf_logging
 
 tf_logging.set_verbosity_error()
 logging.getLogger("numba").setLevel(logging.WARNING)

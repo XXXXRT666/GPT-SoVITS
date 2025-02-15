@@ -2,7 +2,7 @@
 #   LICENSE is in incl_licenses directory.
 
 import torch.nn as nn
-from alias_free_activation.torch.resample import UpSample1d, DownSample1d
+from alias_free_activation.torch.resample import DownSample1d, UpSample1d
 
 
 class Activation1d(nn.Module):

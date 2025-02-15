@@ -6,9 +6,9 @@
 
 """Residual vector quantizer implementation."""
 
-from dataclasses import dataclass, field
 import math
 import typing as tp
+from dataclasses import dataclass, field
 
 import torch
 from torch import nn

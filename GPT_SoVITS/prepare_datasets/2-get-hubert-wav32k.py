@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
-import sys, os
+import os
+import sys
 
 inp_text = os.environ.get("inp_text")
 inp_wav_dir = os.environ.get("inp_wav_dir")
@@ -17,13 +18,20 @@ import torch
 
 is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
 
-import pdb, traceback, numpy as np, logging
-from scipy.io import wavfile
+import logging
+import pdb
+import traceback
+
 import librosa
+import numpy as np
+from scipy.io import wavfile
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
-from tools.utils.my_utils import load_audio, clean_path
+import shutil
+from time import time as ttime
+
+from tools.utils.my_utils import clean_path, load_audio
 
 # from config import cnhubert_base_path
 # cnhubert.cnhubert_base_path=cnhubert_base_path
@@ -35,9 +43,6 @@ from tools.utils.my_utils import load_audio, clean_path
 # os.environ["CUDA_VISIBLE_DEVICES"]=sys.argv[6]
 # cnhubert.cnhubert_base_path=sys.argv[7]
 # opt_dir="/data/docker/liujing04/gpt-vits/fine_tune_dataset/%s"%exp_name
-
-from time import time as ttime
-import shutil
 
 
 def my_save(fea, path):  #####fix issue: torch.save doesn't support chinese path

@@ -1,7 +1,7 @@
 # modified from https://github.com/CjangCjengh/vits/blob/main/text/japanese.py
-import re
-import os
 import hashlib
+import os
+import re
 
 try:
     import pyopenjtalk

@@ -1,17 +1,16 @@
-import traceback
 import datetime
 import os
 import threading
+import traceback
+from dataclasses import dataclass
 from functools import partial
 from typing import List
-from dataclasses import dataclass
 
-import gradio as gr
-import numpy as np
-import librosa
-import soundfile
 import click
-
+import gradio as gr
+import librosa
+import numpy as np
+import soundfile
 
 from tools.i18n.i18n import I18nAuto
 from tools.webui.assets import seafoam

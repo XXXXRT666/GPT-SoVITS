@@ -5,9 +5,9 @@ from io import BytesIO
 from typing import Generator, Tuple
 
 import soundfile as sf
-from numpy.typing import NDArray
-from numpy import int16
 from fastapi import HTTPException
+from numpy import int16
+from numpy.typing import NDArray
 
 from tools.server.schema import TTSResponseFailed
 

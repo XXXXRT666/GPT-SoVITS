@@ -1,4 +1,5 @@
 import math
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -501,7 +502,7 @@ class FFT(nn.Module):
         proximal_bias=False,
         proximal_init=True,
         isflow=False,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.hidden_channels = hidden_channels

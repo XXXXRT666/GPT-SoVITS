@@ -1,19 +1,19 @@
 # pylint: disable=raise-missing-from
 
-import sys
+import datetime
 import os
 import signal
+import sys
 import traceback
-import datetime
 from typing import Annotated
 
-from fastapi import Query, Request, Body
+from fastapi import Body, Query, Request
 from fastapi.responses import StreamingResponse
 
 from GPT_SoVITS.TTS_infer_pack.TTS_Wrapper import TTSEngine
-from tools.server.schema import TTSRequestAPI, TTSResponseFailed, SpeakerAPI, TTSRequestAPI_Compiled
-from tools.server.utils import build_HTTPException, streaming_generator, base_generator
 from tools.cfg import Prompt
+from tools.server.schema import SpeakerAPI, TTSRequestAPI, TTSRequestAPI_Compiled, TTSResponseFailed
+from tools.server.utils import base_generator, build_HTTPException, streaming_generator
 
 
 async def tts_handle_query(tts_req: Annotated[TTSRequestAPI, Query()], request: Request):

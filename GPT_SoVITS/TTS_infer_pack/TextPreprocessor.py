@@ -1,14 +1,15 @@
 import re
 from typing import Callable, Dict, List, Tuple
 
-import torch
 import LangSegment
-from transformers import AutoModelForMaskedLM, AutoTokenizer
+import torch
 from tqdm import tqdm
+from transformers import AutoModelForMaskedLM, AutoTokenizer
 
-from GPT_SoVITS.text import cleaned_text_to_sequence, chinese
+from GPT_SoVITS.text import chinese, cleaned_text_to_sequence
 from GPT_SoVITS.text.cleaner import clean_text
-from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import split_big_text, splits, get_method as get_seg_method
+from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import get_method as get_seg_method
+from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import split_big_text, splits
 
 punctuation = set(["!", "?", "…", ",", ".", "-", " "])
 

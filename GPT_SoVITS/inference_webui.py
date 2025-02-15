@@ -8,7 +8,10 @@
 """
 
 import logging
-import traceback, torchaudio, warnings
+import traceback
+import warnings
+
+import torchaudio
 
 logging.getLogger("markdown_it").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
@@ -20,8 +23,13 @@ logging.getLogger("torchaudio._extension").setLevel(logging.ERROR)
 logging.getLogger("multipart.multipart").setLevel(logging.ERROR)
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
-import LangSegment, os, re, sys, json
+import json
+import os
 import pdb
+import re
+import sys
+
+import LangSegment
 import torch
 
 try:
@@ -83,21 +91,23 @@ if "_CUDA_VISIBLE_DEVICES" in os.environ:
 is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
 punctuation = set(["!", "?", "…", ",", ".", "-", " "])
 import gradio as gr
-from transformers import AutoModelForMaskedLM, AutoTokenizer
-import numpy as np
 import librosa
+import numpy as np
 from feature_extractor import cnhubert
+from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 cnhubert.cnhubert_base_path = cnhubert_base_path
 
-from GPT_SoVITS.module.models import SynthesizerTrn, SynthesizerTrnV3
+from time import time as ttime
+
 from AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from text import cleaned_text_to_sequence
 from text.cleaner import clean_text
-from time import time as ttime
+
 from GPT_SoVITS.module.mel_processing import spectrogram_torch
-from tools.utils.my_utils import load_audio
+from GPT_SoVITS.module.models import SynthesizerTrn, SynthesizerTrnV3
 from tools.i18n.i18n import I18nAuto, scan_language_list
+from tools.utils.my_utils import load_audio
 
 language = os.environ.get("language", "Auto")
 language = sys.argv[-1] if sys.argv[-1] in scan_language_list() else language
@@ -316,7 +326,8 @@ def change_gpt_weights(gpt_path):
 
 change_gpt_weights(gpt_path)
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-import torch, soundfile
+import soundfile
+import torch
 
 now_dir = os.getcwd()
 import soundfile
@@ -484,7 +495,7 @@ def get_phones_and_bert(text, language, version, final=False):
     return phones, bert.to(dtype), norm_text
 
 
-from GPT_SoVITS.module.mel_processing import spectrogram_torch, spec_to_mel_torch
+from GPT_SoVITS.module.mel_processing import spec_to_mel_torch, spectrogram_torch
 
 
 def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax, center=False):

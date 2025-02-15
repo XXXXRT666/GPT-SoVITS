@@ -3,11 +3,11 @@ from __future__ import annotations
 import os
 import warnings
 from functools import partial
-from typing import Dict, Optional, Annotated, Literal, TypeVar, Hashable
+from typing import Annotated, Dict, Hashable, Literal, Optional, TypeVar
 
 import torch
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 from pydantic_core import PydanticCustomError
-from pydantic import BaseModel, Field, model_validator, AfterValidator
 
 from tools.i18n.i18n import scan_language_list
 from tools.utils.my_utils import check_infer_device

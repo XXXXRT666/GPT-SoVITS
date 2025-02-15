@@ -2,13 +2,12 @@
 # reference: https://github.com/lifeiteng/vall-e
 import itertools
 import re
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import regex
 from gruut import sentences
-from gruut.const import Sentence
-from gruut.const import Word
+from gruut.const import Sentence, Word
+
 from GPT_SoVITS.AR.text_processing.symbols import SYMBOL_TO_ID
 
 

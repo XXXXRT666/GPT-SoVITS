@@ -1,19 +1,19 @@
 import gc
 import os
-import traceback
-import tempfile
-import wave
 import sys
-from typing import Union, Callable, Optional, Iterable
+import tempfile
+import traceback
+import wave
+from typing import Callable, Iterable, Optional, Union
 
 import numpy as np
 
-from tools.utils.my_utils import SilentPrint
-from tools.cfg import Speakers_Cfg, Inference_WebUI_Cfg, API_Batch_Cfg, Speaker, Prompt, Cfg
-from tools.i18n.i18n import I18nAuto
-from tools.server.schema import TTSRequest, TTSResponseFailed, TTSResponseSuccess, TTSResponseSegment
 from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import splits
 from GPT_SoVITS.TTS_infer_pack.TTS import TTS
+from tools.cfg import API_Batch_Cfg, Cfg, Inference_WebUI_Cfg, Prompt, Speaker, Speakers_Cfg
+from tools.i18n.i18n import I18nAuto
+from tools.server.schema import TTSRequest, TTSResponseFailed, TTSResponseSegment, TTSResponseSuccess
+from tools.utils.my_utils import SilentPrint
 
 
 def default_exception_handler(tts_response: TTSResponseFailed):

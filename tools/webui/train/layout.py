@@ -1,14 +1,14 @@
 import os
 from functools import partial
 
-import psutil
 import gradio as gr
+import psutil
 
 import tools.webui.train.subfix
 from tools.cfg import Main_WebUI_Cfg
 from tools.i18n.i18n import I18nAuto
-from tools.webui.assets import seafoam, js, css, top_html, info_html, uvr5_html, subfix_html
-from tools.webui.train.handler import open_subfix, close_subfix
+from tools.webui.assets import css, info_html, js, seafoam, subfix_html, top_html, uvr5_html
+from tools.webui.train.handler import close_subfix, open_subfix
 
 
 def build_app(configs: Main_WebUI_Cfg):
