@@ -28,16 +28,12 @@ from random import randint
 from process_ckpt import savee
 
 from GPT_SoVITS.module import commons
-from GPT_SoVITS.module.data_utils import (
-    DistributedBucketSampler,
-)
+from GPT_SoVITS.module.data_utils import DistributedBucketSampler
 from GPT_SoVITS.module.data_utils import TextAudioSpeakerCollateV3 as TextAudioSpeakerCollate
 from GPT_SoVITS.module.data_utils import TextAudioSpeakerLoaderV3 as TextAudioSpeakerLoader
 from GPT_SoVITS.module.losses import discriminator_loss, feature_loss, generator_loss, kl_loss
 from GPT_SoVITS.module.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
-from GPT_SoVITS.module.models import (
-    MultiPeriodDiscriminator,
-)
+from GPT_SoVITS.module.models import MultiPeriodDiscriminator
 from GPT_SoVITS.module.models import SynthesizerTrnV3 as SynthesizerTrn
 
 torch.backends.cudnn.benchmark = False
@@ -290,7 +286,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     #     text,
     #     text_lengths,
     # ) in enumerate(tqdm(train_loader)):
-    for batch_idx, (ssl, spec, mel, ssl_lengths, spec_lengths, text, text_lengths, mel_lengths) in tqdm(enumerate(train_loader)):
+    for batch_idx, (ssl, spec, mel, ssl_lengths, spec_lengths, text, text_lengths, mel_lengths) in enumerate(tqdm(train_loader)):
         if torch.cuda.is_available():
             spec, spec_lengths = spec.cuda(rank, non_blocking=True), spec_lengths.cuda(rank, non_blocking=True)
             mel, mel_lengths = mel.cuda(rank, non_blocking=True), mel_lengths.cuda(rank, non_blocking=True)
@@ -307,7 +303,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             text, text_lengths = text.to(device), text_lengths.to(device)
 
         with autocast(enabled=hps.train.fp16_run):
-            cfm_loss = net_g(ssl, spec, mel, ssl_lengths, spec_lengths, text, text_lengths, mel_lengths)
+            cfm_loss = net_g(ssl, spec, mel, ssl_lengths, spec_lengths, text, text_lengths, mel_lengths, use_grad_ckpt=hps.train.grad_ckpt)
             loss_gen_all = cfm_loss
         optim_g.zero_grad()
         scaler.scale(loss_gen_all).backward()

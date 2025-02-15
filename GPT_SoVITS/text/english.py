@@ -112,7 +112,7 @@ def replace_phs(phs):
 
 def replace_consecutive_punctuation(text):
     punctuations = "".join(re.escape(p) for p in punctuation)
-    pattern = f"([{punctuations}])([{punctuations}])+"
+    pattern = f"([{punctuations}\s])([{punctuations}])+"
     result = re.sub(pattern, r"\1", text)
     return result
 
@@ -234,12 +234,14 @@ def text_normalize(text):
 
     # 来自 g2p_en 文本格式化处理
     # 增加大写兼容
+    # 增加纯大写单词拆分
     text = unicode(text)
     text = normalize_numbers(text)
     text = "".join(char for char in unicodedata.normalize("NFD", text) if unicodedata.category(char) != "Mn")  # Strip accents
     text = re.sub("[^ A-Za-z'.,?!\-]", "", text)
     text = re.sub(r"(?i)i\.e\.", "that is", text)
     text = re.sub(r"(?i)e\.g\.", "for example", text)
+    text = re.sub(r"(?<!^)(?<![\s])([A-Z])", r" \1", text)
 
     # 避免重复标点引起的参考泄露
     text = replace_consecutive_punctuation(text)

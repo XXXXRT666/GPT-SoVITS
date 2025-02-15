@@ -17,10 +17,9 @@ import re
 import shutil
 import signal
 
-import psutil
 import torch
-import yaml
 
+os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
 torch.manual_seed(233333)
 tmp = os.path.join(now_dir, "TEMP")
 os.makedirs(tmp, exist_ok=True)
@@ -161,8 +160,8 @@ def set_default():
     else:
         default_sovits_epoch = 2
         default_sovits_save_every_epoch = 1
-        max_sovits_epoch = 6
-        max_sovits_save_every_epoch = 6
+        max_sovits_epoch = 3
+        max_sovits_save_every_epoch = 3
     default_max_batch_size = default_batch_size * 3
 
 
@@ -212,9 +211,7 @@ pretrained_model_list = (
 
 _ = ""
 for i in pretrained_model_list:
-    if os.path.exists(i):
-        ...
-    else:
+    if "s2Dv3" not in i and os.path.exists(i) == False:
         _ += f"\n    {i}"
 if _:
     print("warning:", i18n("以下模型不存在:") + _)
@@ -464,6 +461,7 @@ def open1Ba(
     gpu_numbers1Ba,
     pretrained_s2G,
     pretrained_s2D,
+    if_grad_ckpt,
 ):
     global p_train_SoVITS
     if p_train_SoVITS == None:
@@ -486,6 +484,7 @@ def open1Ba(
         data["train"]["if_save_every_weights"] = if_save_every_weights
         data["train"]["save_every_epoch"] = save_every_epoch
         data["train"]["gpu_numbers"] = gpu_numbers1Ba
+        data["train"]["grad_ckpt"] = if_grad_ckpt
         data["model"]["version"] = version
         data["data"]["exp_dir"] = data["s2_ckpt_dir"] = s2_dir
         data["save_weight_dir"] = SoVITS_weight_root[int(version[-1]) - 1]
@@ -1005,6 +1004,8 @@ def switch_version(version_):
         {"__type__": "update", "value": default_sovits_epoch, "maximum": max_sovits_epoch},
         {"__type__": "update", "value": default_sovits_save_every_epoch, "maximum": max_sovits_save_every_epoch},
         {"__type__": "update", "interactive": True if version != "v3" else False},
+        {"__type__": "update", "interactive": True if version == "v3" else False},
+        {"__type__": "update", "interactive": False if version == "v3" else True, "value": False},
     )
 
 
@@ -1322,6 +1323,9 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
                             if_save_every_weights = gr.Checkbox(
                                 label=i18n("是否在每次保存时间点将最终小模型保存至weights文件夹"), value=True, interactive=True, show_label=True
                             )
+                            if_grad_ckpt = gr.Checkbox(
+                                label="v3是否开启梯度检查点节省显存占用", value=False, interactive=True if version == "v3" else False, show_label=True
+                            )  # 只有V3s2可以用
                         with gr.Row():
                             gpu_numbers1Ba = gr.Textbox(label=i18n("GPU卡号以-分割，每个卡号一个进程"), value="%s" % (gpus), interactive=True)
                 with gr.Row():
@@ -1372,6 +1376,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
                     gpu_numbers1Ba,
                     pretrained_s2G,
                     pretrained_s2D,
+                    if_grad_ckpt,
                 ],
                 [info1Ba, button1Ba_open, button1Ba_close],
             )
@@ -1440,6 +1445,8 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
                     total_epoch,
                     save_every_epoch,
                     text_low_lr_rate,
+                    if_grad_ckpt,
+                    batched_infer_enabled,
                 ],
             )
         with gr.TabItem(i18n("2-GPT-SoVITS-变声")):
