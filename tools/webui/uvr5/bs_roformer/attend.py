@@ -1,14 +1,7 @@
 import torch
 import torch.nn.functional as F
-from einops import rearrange, reduce
 from packaging import version
 from torch import einsum, nn
-
-# constants
-
-FlashAttentionConfig = namedtuple("FlashAttentionConfig", ["enable_flash", "enable_math", "enable_mem_efficient"])
-
-# helpers
 
 
 def exists(val):
