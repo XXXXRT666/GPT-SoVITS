@@ -185,6 +185,7 @@ def run(rank, n_gpus, hps):
             net_g,
             optim_g,
         )
+        epoch_str += 1
         global_step = (epoch_str - 1) * len(train_loader)
         # epoch_str = 1
         # global_step = 0
@@ -196,15 +197,18 @@ def run(rank, n_gpus, hps):
             if rank == 0:
                 logger.info("loaded pretrained %s" % hps.train.pretrained_s2G)
             print(
-                net_g.module.load_state_dict(
-                    torch.load(hps.train.pretrained_s2G, map_location="cpu")["weight"],
-                    strict=False,
-                )
-                if torch.cuda.is_available()
-                else net_g.load_state_dict(
-                    torch.load(hps.train.pretrained_s2G, map_location="cpu")["weight"],
-                    strict=False,
-                )
+                "loaded pretrained %s" % hps.train.pretrained_s2G,
+                (
+                    net_g.module.load_state_dict(
+                        torch.load(hps.train.pretrained_s2G, map_location="cpu")["weight"],
+                        strict=False,
+                    )
+                    if torch.cuda.is_available()
+                    else net_g.load_state_dict(
+                        torch.load(hps.train.pretrained_s2G, map_location="cpu")["weight"],
+                        strict=False,
+                    )
+                ),
             )  ##测试不加载优化器
         # if hps.train.pretrained_s2D != ""and hps.train.pretrained_s2D != None and os.path.exists(hps.train.pretrained_s2D):
         #     if rank == 0:
@@ -231,6 +235,7 @@ def run(rank, n_gpus, hps):
     scaler = GradScaler(enabled=hps.train.fp16_run)
 
     net_d = optim_d = scheduler_d = None
+    print("start training from epoch %s" % epoch_str)
     for epoch in range(epoch_str, hps.train.epochs + 1):
         if rank == 0:
             train_and_evaluate(
@@ -261,6 +266,7 @@ def run(rank, n_gpus, hps):
             )
         scheduler_g.step()
         # scheduler_d.step()
+    print("training done")
 
 
 def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers):

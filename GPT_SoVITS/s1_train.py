@@ -1,13 +1,13 @@
 # modified from https://github.com/feng-yufei/shared_debugging_code/blob/main/train_t2s.py
-import os
-import pdb
-
-if "_CUDA_VISIBLE_DEVICES" in os.environ:
-    os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["_CUDA_VISIBLE_DEVICES"]
 import argparse
 import logging
+import os
+import pdb
 import platform
+import shutil
+from collections import OrderedDict
 from pathlib import Path
+from time import time as ttime
 
 import torch
 from pytorch_lightning import Trainer, seed_everything
@@ -18,23 +18,14 @@ from pytorch_lightning.strategies import DDPStrategy
 from GPT_SoVITS.AR.data.data_module import Text2SemanticDataModule
 from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from GPT_SoVITS.AR.utils.io import load_yaml_config
+from GPT_SoVITS.process_ckpt import my_save
+
+if "_CUDA_VISIBLE_DEVICES" in os.environ:
+    os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["_CUDA_VISIBLE_DEVICES"]
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 torch.set_float32_matmul_precision("high")
-import shutil
-from collections import OrderedDict
-from time import time as ttime
-
-from GPT_SoVITS.AR.utils import get_newest_ckpt
-
-
-def my_save(fea, path):  #####fix issue: torch.save doesn't support chinese path
-    dir = os.path.dirname(path)
-    name = os.path.basename(path)
-    tmp_path = "%s.pth" % (ttime())
-    torch.save(fea, tmp_path)
-    shutil.move(tmp_path, "%s/%s" % (dir, name))
 
 
 class my_model_ckpt(ModelCheckpoint):

@@ -141,27 +141,50 @@ if torch.cuda.is_available() or ngpu != 0:
 
 
 def set_default():
-    global default_batch_size, default_max_batch_size, gpu_info, default_sovits_epoch, default_sovits_save_every_epoch, max_sovits_epoch, max_sovits_save_every_epoch, default_batch_size_s1
+    global default_batch_size, default_max_batch_size, gpu_info, default_sovits_epoch, default_sovits_save_every_epoch, max_sovits_epoch, max_sovits_save_every_epoch, default_batch_size_s1, if_force_ckpt
+    if_force_ckpt = False
     if if_gpu_ok and len(gpu_infos) > 0:
         gpu_info = "\n".join(gpu_infos)
         minmem = min(mem)
-        default_batch_size = minmem // 2 if version != "v3" else minmem // 14
+        # if version == "v3" and minmem < 14:
+        #     # API读取不到共享显存,直接填充确认
+        #     try:
+        #         torch.zeros((1024,1024,1024,14),dtype=torch.int8,device="cuda")
+        #         torch.cuda.empty_cache()
+        #         minmem = 14
+        #     except RuntimeError as _:
+        #         # 强制梯度检查只需要12G显存
+        #         if minmem >= 12 :
+        #             if_force_ckpt = True
+        #             minmem = 14
+        #         else:
+        #             try:
+        #                 torch.zeros((1024,1024,1024,12),dtype=torch.int8,device="cuda")
+        #                 torch.cuda.empty_cache()
+        #                 if_force_ckpt = True
+        #                 minmem = 14
+        #             except RuntimeError as _:
+        #                 print("显存不足以开启V3训练")
+        default_batch_size = minmem // 2 if version != "v3" else minmem // 8
         default_batch_size_s1 = minmem // 2
     else:
         gpu_info = "%s\t%s" % ("0", "CPU")
         gpu_infos.append("%s\t%s" % ("0", "CPU"))
         set_gpu_numbers.add(0)
-        default_batch_size = default_batch_size_s1 = int(psutil.virtual_memory().total / 1024 / 1024 / 1024 / 2)
+        default_batch_size = default_batch_size_s1 = int(psutil.virtual_memory().total / 1024 / 1024 / 1024 / 4)
     if version != "v3":
         default_sovits_epoch = 8
         default_sovits_save_every_epoch = 4
-        max_sovits_epoch = 25
-        max_sovits_save_every_epoch = 25
+        max_sovits_epoch = 25  # 40
+        max_sovits_save_every_epoch = 25  # 10
     else:
         default_sovits_epoch = 2
         default_sovits_save_every_epoch = 1
-        max_sovits_epoch = 3
-        max_sovits_save_every_epoch = 3
+        max_sovits_epoch = 3  # 40
+        max_sovits_save_every_epoch = 3  # 10
+
+    default_batch_size = max(1, default_batch_size)
+    default_batch_size_s1 = max(1, default_batch_size_s1)
     default_max_batch_size = default_batch_size * 3
 
 
@@ -462,6 +485,7 @@ def open1Ba(
     pretrained_s2G,
     pretrained_s2D,
     if_grad_ckpt,
+    lora_rank,
 ):
     global p_train_SoVITS
     if p_train_SoVITS == None:
@@ -485,6 +509,7 @@ def open1Ba(
         data["train"]["save_every_epoch"] = save_every_epoch
         data["train"]["gpu_numbers"] = gpu_numbers1Ba
         data["train"]["grad_ckpt"] = if_grad_ckpt
+        data["train"]["lora_rank"] = lora_rank
         data["model"]["version"] = version
         data["data"]["exp_dir"] = data["s2_ckpt_dir"] = s2_dir
         data["save_weight_dir"] = SoVITS_weight_root[int(version[-1]) - 1]
@@ -496,7 +521,7 @@ def open1Ba(
         if version in ["v1", "v2"]:
             cmd = '"%s" GPT_SoVITS/s2_train.py --config "%s"' % (python_exec, tmp_config_path)
         else:
-            cmd = '"%s" GPT_SoVITS/s2_train_v3.py --config "%s"' % (python_exec, tmp_config_path)
+            cmd = '"%s" GPT_SoVITS/s2_train_v3_lora.py --config "%s"' % (python_exec, tmp_config_path)
         yield "SoVITS训练开始：%s" % cmd, {"__type__": "update", "visible": False}, {"__type__": "update", "visible": True}
         print(cmd)
         p_train_SoVITS = Popen(cmd, shell=True)
@@ -1003,9 +1028,10 @@ def switch_version(version_):
         {"__type__": "update", "value": default_batch_size, "maximum": default_max_batch_size},
         {"__type__": "update", "value": default_sovits_epoch, "maximum": max_sovits_epoch},
         {"__type__": "update", "value": default_sovits_save_every_epoch, "maximum": max_sovits_save_every_epoch},
-        {"__type__": "update", "interactive": True if version != "v3" else False},
-        {"__type__": "update", "interactive": True if version == "v3" else False},
+        {"__type__": "update", "visible": True if version != "v3" else False},
+        {"__type__": "update", "value": False if not if_force_ckpt else True, "interactive": True if not if_force_ckpt else False},
         {"__type__": "update", "interactive": False if version == "v3" else True, "value": False},
+        {"__type__": "update", "visible": True if version == "v3" else False},
     )
 
 
@@ -1305,8 +1331,11 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
                                 step=0.05,
                                 label=i18n("文本模块学习率权重"),
                                 value=0.4,
-                                interactive=True if version != "v3" else False,
+                                visible=True if version != "v3" else False,
                             )  # v3 not need
+                            lora_rank = gr.Radio(
+                                label=i18n("lora_rank"), value="32", choices=["16", "32", "64", "128"], visible=True if version == "v3" else False
+                            )  # v1v2 not need
                             save_every_epoch = gr.Slider(
                                 minimum=1,
                                 maximum=max_sovits_save_every_epoch,
@@ -1377,6 +1406,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
                     pretrained_s2G,
                     pretrained_s2D,
                     if_grad_ckpt,
+                    lora_rank,
                 ],
                 [info1Ba, button1Ba_open, button1Ba_close],
             )
@@ -1447,6 +1477,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
                     text_low_lr_rate,
                     if_grad_ckpt,
                     batched_infer_enabled,
+                    lora_rank,
                 ],
             )
         with gr.TabItem(i18n("2-GPT-SoVITS-变声")):
