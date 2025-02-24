@@ -1,15 +1,15 @@
 import logging
 import os
 
-logger = logging.getLogger(__name__)
-
 import librosa
 import numpy as np
 import soundfile as sf
 import torch
 from tqdm import tqdm
 
-cpu = torch.device("cpu")
+CPU = torch.device("cpu")
+
+logger = logging.getLogger(__name__)
 
 
 class ConvTDFNetTrim:
@@ -77,7 +77,7 @@ class Predictor:
 
         logger.info(ort.get_available_providers())
         self.args = args
-        self.model_ = get_models(device=cpu, dim_f=args.dim_f, dim_t=args.dim_t, n_fft=args.n_fft)
+        self.model_ = get_models(device=CPU, dim_f=args.dim_f, dim_t=args.dim_t, n_fft=args.n_fft)
         self.model = ort.InferenceSession(
             os.path.join(args.onnx, self.model_.target_name + ".onnx"),
             providers=[
@@ -89,6 +89,11 @@ class Predictor:
         logger.info("ONNX load done")
 
     def demix(self, mix):
+        """
+        mix:(2,big_sample)
+        segmented_mix:offset->(2,small_sample)
+        sources:(1,2,big_sample)
+        """
         samples = mix.shape[-1]
         margin = self.args.margin
         chunk_size = self.args.chunks * 44100
@@ -115,11 +120,6 @@ class Predictor:
                 break
 
         sources = self.demix_base(segmented_mix, margin_size=margin)
-        """
-        mix:(2,big_sample)
-        segmented_mix:offset->(2,small_sample)
-        sources:(1,2,big_sample)
-        """
         return sources
 
     def demix_base(self, mixes, margin_size):
@@ -141,15 +141,15 @@ class Predictor:
                 waves = np.array(mix_p[:, i : i + model.chunk_size])
                 mix_waves.append(waves)
                 i += gen_size
-            mix_waves = torch.tensor(mix_waves, dtype=torch.float32).to(cpu)
+            mix_waves = torch.tensor(mix_waves, dtype=torch.float32).to(CPU)
             with torch.no_grad():
                 _ort = self.model
                 spek = model.stft(mix_waves)
                 if self.args.denoise:
-                    spec_pred = -_ort.run(None, {"input": -spek.cpu().numpy()})[0] * 0.5 + _ort.run(None, {"input": spek.cpu().numpy()})[0] * 0.5
+                    spec_pred = -_ort.run(None, {"input": -spek.CPU().numpy()})[0] * 0.5 + _ort.run(None, {"input": spek.CPU().numpy()})[0] * 0.5
                     tar_waves = model.istft(torch.tensor(spec_pred))
                 else:
-                    tar_waves = model.istft(torch.tensor(_ort.run(None, {"input": spek.cpu().numpy()})[0]))
+                    tar_waves = model.istft(torch.tensor(_ort.run(None, {"input": spek.CPU().numpy()})[0]))
                 tar_signal = tar_waves[:, :, trim:-trim].transpose(0, 1).reshape(2, -1).numpy()[:, :-pad]
 
                 start = 0 if mix == 0 else margin_size
@@ -214,7 +214,7 @@ class MDXNetDereverb:
         self.n_fft = 6144
         self.denoise = True
         self.pred = Predictor(self)
-        self.device = cpu
+        self.device = CPU
 
     def _path_audio_(self, input, others_root, vocal_root, format, is_hp3=False):
         self.pred.prediction(input, vocal_root, others_root, format)

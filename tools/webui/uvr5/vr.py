@@ -51,6 +51,7 @@ class AudioPre:
             os.makedirs(vocal_root, exist_ok=True)
         X_wave, X_spec_s = {}, {}
         bands_n = len(self.mp.param["band"])
+
         for d in range(bands_n, 0, -1):
             bp = self.mp.param["band"][d]
             if d == bands_n:  # high-end band
@@ -86,7 +87,6 @@ class AudioPre:
             if d == bands_n and self.data["high_end_process"] != "none":
                 input_high_end_h = (bp["n_fft"] // 2 - bp["crop_stop"]) + (self.mp.param["pre_filter_stop"] - self.mp.param["pre_filter_start"])
                 input_high_end = X_spec_s[d][:, bp["n_fft"] // 2 - input_high_end_h : bp["n_fft"] // 2, :]
-
         X_spec_m = spec_utils.combine_spectrograms(X_spec_s, self.mp)
         aggresive_set = float(self.data["agg"] / 100)
         aggressiveness = {
@@ -104,7 +104,7 @@ class AudioPre:
 
         if is_hp3 is True:
             ins_root, vocal_root = vocal_root, ins_root
-
+        ins_root = None
         if ins_root is not None:
             if self.data["high_end_process"].startswith("mirroring"):
                 input_high_end_ = spec_utils.mirroring(self.data["high_end_process"], y_spec_m, input_high_end, self.mp)
@@ -122,7 +122,7 @@ class AudioPre:
                         ins_root,
                         head + f"{name}_{self.data['agg']}.{audio_format}",
                     ),
-                    (np.array(wav_instrument) * 32768).astype("int16"),
+                    (np.array(wav_instrument) * 32768).astype(np.int16),
                     self.mp.param["sr"],
                 )  #
             else:
@@ -132,7 +132,7 @@ class AudioPre:
                 )
                 sf.write(
                     path,
-                    (np.array(wav_instrument) * 32768).astype("int16"),
+                    (np.array(wav_instrument) * 32768).astype(np.int16),
                     self.mp.param["sr"],
                 )
                 if os.path.exists(path):
@@ -153,6 +153,7 @@ class AudioPre:
                 wav_vocals = spec_utils.cmb_spectrogram_to_wave(v_spec_m, self.mp, input_high_end_h, input_high_end_)
             else:
                 wav_vocals = spec_utils.cmb_spectrogram_to_wave(v_spec_m, self.mp)
+            return (wav_vocals,)
             logger.info("%s vocals done" % name)
             if audio_format in ["wav", "flac"]:
                 sf.write(
@@ -160,14 +161,14 @@ class AudioPre:
                         vocal_root,
                         head + "{}_{}.{}".format(name, self.data["agg"], audio_format),
                     ),
-                    (np.array(wav_vocals) * 32768).astype("int16"),
+                    (np.array(wav_vocals) * 32768).astype(np.int16),
                     self.mp.param["sr"],
                 )
             else:
                 path = os.path.join(vocal_root, head + "{}_{}.wav".format(name, self.data["agg"]))
                 sf.write(
                     path,
-                    (np.array(wav_vocals) * 32768).astype("int16"),
+                    (np.array(wav_vocals) * 32768).astype(np.int16),
                     self.mp.param["sr"],
                 )
                 if os.path.exists(path):
@@ -233,6 +234,7 @@ class AudioPreDeEcho:
                 )
                 if X_wave[d].ndim == 1:
                     X_wave[d] = np.asfortranarray([X_wave[d], X_wave[d]])
+
             else:  # lower bands
                 X_wave[d] = librosa.core.resample(
                     X_wave[d + 1],
@@ -268,13 +270,13 @@ class AudioPreDeEcho:
             pred = spec_utils.mask_silence(pred, pred_inv)
         y_spec_m = pred * X_phase
         v_spec_m = X_spec_m - y_spec_m
-
         if ins_root is not None:
             if self.data["high_end_process"].startswith("mirroring"):
                 input_high_end_ = spec_utils.mirroring(self.data["high_end_process"], y_spec_m, input_high_end, self.mp)
                 wav_instrument = spec_utils.cmb_spectrogram_to_wave(y_spec_m, self.mp, input_high_end_h, input_high_end_)
             else:
                 wav_instrument = spec_utils.cmb_spectrogram_to_wave(y_spec_m, self.mp)
+            return (wav_instrument,)
             logger.info("%s instruments done" % name)
             if audio_format in ["wav", "flac"]:
                 sf.write(
@@ -282,14 +284,14 @@ class AudioPreDeEcho:
                         ins_root,
                         "vocal_{}_{}.{}".format(name, self.data["agg"], audio_format),
                     ),
-                    (np.array(wav_instrument) * 32768).astype("int16"),
+                    (np.array(wav_instrument) * 32768).astype(np.int16),
                     self.mp.param["sr"],
                 )  #
             else:
                 path = os.path.join(ins_root, "vocal_{}_{}.wav".format(name, self.data["agg"]))
                 sf.write(
                     path,
-                    (np.array(wav_instrument) * 32768).astype("int16"),
+                    (np.array(wav_instrument) * 32768).astype(np.int16),
                     self.mp.param["sr"],
                 )
                 if os.path.exists(path):
@@ -300,6 +302,7 @@ class AudioPreDeEcho:
                             os.remove(path)
                         except:
                             pass
+        vocal_root = None
         if vocal_root is not None:
             if self.data["high_end_process"].startswith("mirroring"):
                 input_high_end_ = spec_utils.mirroring(self.data["high_end_process"], v_spec_m, input_high_end, self.mp)
@@ -313,14 +316,14 @@ class AudioPreDeEcho:
                         vocal_root,
                         "instrument_{}_{}.{}".format(name, self.data["agg"], audio_format),
                     ),
-                    (np.array(wav_vocals) * 32768).astype("int16"),
+                    (np.array(wav_vocals) * 32768).astype(np.int16),
                     self.mp.param["sr"],
                 )
             else:
                 path = os.path.join(vocal_root, "instrument_{}_{}.wav".format(name, self.data["agg"]))
                 sf.write(
                     path,
-                    (np.array(wav_vocals) * 32768).astype("int16"),
+                    (np.array(wav_vocals) * 32768).astype(np.int16),
                     self.mp.param["sr"],
                 )
                 if os.path.exists(path):

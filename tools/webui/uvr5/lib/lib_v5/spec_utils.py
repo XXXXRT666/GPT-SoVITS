@@ -1,11 +1,12 @@
-import hashlib
-import json
 import math
 import os
+import threading
 
 import librosa
 import numpy as np
 import soundfile as sf
+import torch
+import torchaudio
 from tqdm import tqdm
 
 
@@ -27,9 +28,7 @@ def crop_center(h1, h2):
     return h1
 
 
-def wave_to_spectrogram(
-    wave, hop_length, n_fft, mid_side=False, mid_side_b2=False, reverse=False
-):
+def wave_to_spectrogram(wave, hop_length, n_fft, mid_side=False, mid_side_b2=False, reverse=False):
     if reverse:
         wave_left = np.flip(np.asfortranarray(wave[0]))
         wave_right = np.flip(np.asfortranarray(wave[1]))
@@ -43,7 +42,7 @@ def wave_to_spectrogram(
         wave_left = np.asfortranarray(wave[0])
         wave_right = np.asfortranarray(wave[1])
 
-    spec_left  = librosa.stft(wave_left,  n_fft=n_fft, hop_length=hop_length)
+    spec_left = librosa.stft(wave_left, n_fft=n_fft, hop_length=hop_length)
     spec_right = librosa.stft(wave_right, n_fft=n_fft, hop_length=hop_length)
 
     spec = np.asfortranarray([spec_left, spec_right])
@@ -51,10 +50,7 @@ def wave_to_spectrogram(
     return spec
 
 
-def wave_to_spectrogram_mt(
-    wave, hop_length, n_fft, mid_side=False, mid_side_b2=False, reverse=False
-):
-    import threading
+def wave_to_spectrogram_mt(wave, hop_length, n_fft, mid_side=False, mid_side_b2=False, reverse=False):
 
     if reverse:
         wave_left = np.flip(np.asfortranarray(wave[0]))
@@ -69,8 +65,11 @@ def wave_to_spectrogram_mt(
         wave_left = np.asfortranarray(wave[0])
         wave_right = np.asfortranarray(wave[1])
 
+    spec_left = None
+    spec_right = None
+
     def run_thread(**kwargs):
-        global spec_left
+        nonlocal spec_left
         spec_left = librosa.stft(**kwargs)
 
     thread = threading.Thread(
@@ -86,6 +85,79 @@ def wave_to_spectrogram_mt(
     return spec
 
 
+def wave_to_spectrogram_torch(wave: torch.Tensor, hop_length, n_fft, mid_side=False, mid_side_b2=False, reverse=False) -> torch.Tensor:
+    """
+    Args:
+        wave: Tensor shape [2, T]
+
+    Returns:
+        torch.Tensor [2, F, T]
+    """
+    # 处理输入
+    window = torch.hann_window(n_fft, device=wave.device)
+    if reverse:
+        wave_left = torch.flip(wave[0], dims=[0])
+        wave_right = torch.flip(wave[1], dims=[0])
+    elif mid_side:
+        wave_left = (wave[0] + wave[1]) / 2
+        wave_right = wave[0] - wave[1]
+    elif mid_side_b2:
+        wave_left = wave[1] + wave[0] * 0.5
+        wave_right = wave[0] - wave[1] * 0.5
+    else:
+        wave_left = wave[0]
+        wave_right = wave[1]
+
+    # 计算 STFT
+    spec_left = torchaudio.functional.spectrogram(
+        wave_left.unsqueeze(0), pad=0, window=window, n_fft=n_fft, hop_length=hop_length, win_length=n_fft, power=None, normalized=False
+    )
+    spec_right = torchaudio.functional.spectrogram(
+        wave_right.unsqueeze(0), pad=0, window=window, n_fft=n_fft, hop_length=hop_length, win_length=n_fft, power=None, normalized=False
+    )
+    # 组合左右声道
+    spec = torch.cat([spec_left, spec_right], dim=0)  # shape [2, F, T]
+    return spec
+
+
+def combine_spectrograms_torch(specs: list[torch.Tensor], mp):
+    """
+    Args:
+        specs (list[torch.Tensor]): [2, F, T]
+        mp (dict): params dict
+
+    Returns:
+        torch.Tensor: [2, bins+1, T], torch.complex64。
+    """
+
+    l = min([spec.shape[2] for spec in specs])
+    spec_c = torch.zeros((2, mp.param["bins"] + 1, l), device=specs[0].device, dtype=torch.complex64)
+
+    offset = 0
+    bands_n = len(mp.param["band"])
+
+    for d in range(1, bands_n + 1):
+        band = mp.param["band"][d]
+        h = band["crop_stop"] - band["crop_start"]
+        spec_c[:, offset : offset + h, :l] = specs[d - 1][:, band["crop_start"] : band["crop_stop"], :l].to(torch.complex64)
+        offset += h
+
+    if offset > mp.param["bins"]:
+        raise ValueError("Too much bins")
+
+    if mp.param["pre_filter_start"] > 0:
+        if bands_n == 1:
+            spec_c = fft_lp_filter_torch(spec_c, mp.param["pre_filter_start"], mp.param["pre_filter_stop"])
+        else:
+            gp = 1
+            for b in range(mp.param["pre_filter_start"] + 1, mp.param["pre_filter_stop"]):
+                g = math.pow(10, -(b - mp.param["pre_filter_start"]) * (3.5 - gp) / 20.0)
+                gp = g
+                spec_c[:, b, :] *= g  # 滤波系数
+
+    return spec_c
+
+
 def combine_spectrograms(specs, mp):
     l = min([specs[i].shape[2] for i in specs])
     spec_c = np.zeros(shape=(2, mp.param["bins"] + 1, l), dtype=np.complex64)
@@ -94,30 +166,20 @@ def combine_spectrograms(specs, mp):
 
     for d in range(1, bands_n + 1):
         h = mp.param["band"][d]["crop_stop"] - mp.param["band"][d]["crop_start"]
-        spec_c[:, offset : offset + h, :l] = specs[d][
-            :, mp.param["band"][d]["crop_start"] : mp.param["band"][d]["crop_stop"], :l
-        ]
+        spec_c[:, offset : offset + h, :l] = specs[d][:, mp.param["band"][d]["crop_start"] : mp.param["band"][d]["crop_stop"], :l]
         offset += h
 
     if offset > mp.param["bins"]:
         raise ValueError("Too much bins")
 
     # lowpass fiter
-    if (
-        mp.param["pre_filter_start"] > 0
-    ):  # and mp.param['band'][bands_n]['res_type'] in ['scipy', 'polyphase']:
+    if mp.param["pre_filter_start"] > 0:  # and mp.param['band'][bands_n]['res_type'] in ['scipy', 'polyphase']:
         if bands_n == 1:
-            spec_c = fft_lp_filter(
-                spec_c, mp.param["pre_filter_start"], mp.param["pre_filter_stop"]
-            )
+            spec_c = fft_lp_filter(spec_c, mp.param["pre_filter_start"], mp.param["pre_filter_stop"])
         else:
             gp = 1
-            for b in range(
-                mp.param["pre_filter_start"] + 1, mp.param["pre_filter_stop"]
-            ):
-                g = math.pow(
-                    10, -(b - mp.param["pre_filter_start"]) * (3.5 - gp) / 20.0
-                )
+            for b in range(mp.param["pre_filter_start"] + 1, mp.param["pre_filter_stop"]):
+                g = math.pow(10, -(b - mp.param["pre_filter_start"]) * (3.5 - gp) / 20.0)
                 gp = g
                 spec_c[:, b, :] *= g
 
@@ -159,6 +221,60 @@ def reduce_vocal_aggressively(X, y, softmask):
     return y_mag * np.exp(1.0j * np.angle(y))
 
 
+def mask_silence_torch(mag, ref, thres=0.2, min_range=64, fade_size=32):
+    """
+    Args:
+        mag (torch.Tensor): [2, F, T]
+        ref (torch.Tensor): [2, F, T]
+        thres (float, optional): threshold
+        min_range (int, optional): min step
+        fade_size (int, optional): fade step
+
+    Returns:
+        torch.Tensor: [2, F, T]
+    """
+    if min_range < fade_size * 2:
+        raise ValueError("min_range must be >= fade_size * 2")
+
+    mag = mag.clone()
+
+    ref_mean = ref.mean(dim=(0, 1))  # shape: (T,)
+
+    idx = torch.where(ref_mean < thres)[0]
+
+    diffs = torch.diff(idx)
+    start_mask = torch.cat([torch.tensor([True], device=idx.device), diffs != 1])
+    end_mask = torch.cat([diffs != 1, torch.tensor([True], device=idx.device)])
+
+    starts = idx[start_mask]
+    ends = idx[end_mask]
+
+    valid = (ends - starts) > min_range
+    starts, ends = starts[valid], ends[valid]
+
+    old_e = None
+    for s, e in zip(starts.tolist(), ends.tolist()):
+        if old_e is not None and s - old_e < fade_size:
+            s = old_e - fade_size * 2
+
+        if s != 0:
+            weight = torch.linspace(0, 1, fade_size, device=mag.device).view(1, 1, -1)
+            mag[:, :, s : s + fade_size] += weight * ref[:, :, s : s + fade_size]
+        else:
+            s -= fade_size
+
+        if e != mag.shape[2]:
+            weight = torch.linspace(1, 0, fade_size, device=mag.device).view(1, 1, -1)
+            mag[:, :, e - fade_size : e] += weight * ref[:, :, e - fade_size : e]
+        else:
+            e += fade_size
+
+        mag[:, :, s + fade_size : e - fade_size] += ref[:, :, s + fade_size : e - fade_size]
+        old_e = e
+
+    return mag
+
+
 def mask_silence(mag, ref, thres=0.2, min_range=64, fade_size=32):
     if min_range < fade_size * 2:
         raise ValueError("min_range must be >= fade_area * 2")
@@ -189,9 +305,7 @@ def mask_silence(mag, ref, thres=0.2, min_range=64, fade_size=32):
             else:
                 e += fade_size
 
-            mag[:, :, s + fade_size : e - fade_size] += ref[
-                :, :, s + fade_size : e - fade_size
-            ]
+            mag[:, :, s + fade_size : e - fade_size] += ref[:, :, s + fade_size : e - fade_size]
             old_e = e
 
     return mag
@@ -203,93 +317,57 @@ def align_wave_head_and_tail(a, b):
     return a[:l, :l], b[:l, :l]
 
 
-def cache_or_load(mix_path, inst_path, mp):
-    mix_basename = os.path.splitext(os.path.basename(mix_path))[0]
-    inst_basename = os.path.splitext(os.path.basename(inst_path))[0]
+def spectrogram_to_wave_torch(spec, hop_length, mid_side=False, mid_side_b2=False, reverse=False):
+    """
+    Args:
+        spec (torch.Tensor): [2, F, T] (torch.complex64 / complex128)。
+        hop_length (int): Windows size
+        mid_side (bool, optional): mid_side
+        mid_side_b2 (bool, optional): mid_side
+        reverse (bool, optional): flip audios
 
-    cache_dir = "mph{}".format(
-        hashlib.sha1(json.dumps(mp.param, sort_keys=True).encode("utf-8")).hexdigest()
-    )
-    mix_cache_dir = os.path.join("cache", cache_dir)
-    inst_cache_dir = os.path.join("cache", cache_dir)
+    Returns:
+        torch.Tensor: [2, T]
+    """
+    n_fft = 2 * (spec.shape[-2] - 1)
+    win_length = n_fft
 
-    os.makedirs(mix_cache_dir, exist_ok=True)
-    os.makedirs(inst_cache_dir, exist_ok=True)
+    window = torch.hann_window(win_length, device=spec.device)
+    frames = spec.shape[-1]
+    length = (frames - 1) * hop_length
 
-    mix_cache_path = os.path.join(mix_cache_dir, mix_basename + ".npy")
-    inst_cache_path = os.path.join(inst_cache_dir, inst_basename + ".npy")
+    wave_left = torchaudio.functional.inverse_spectrogram(
+        spec[0],
+        n_fft=n_fft,
+        hop_length=hop_length,
+        win_length=win_length,
+        length=length,
+        pad=0,
+        window=window,
+        normalized=False,
+    ).cpu()
+    wave_right = torchaudio.functional.inverse_spectrogram(
+        spec[1],
+        n_fft=n_fft,
+        hop_length=hop_length,
+        win_length=win_length,
+        length=length,
+        pad=0,
+        window=window,
+        normalized=False,
+    ).cpu()
 
-    if os.path.exists(mix_cache_path) and os.path.exists(inst_cache_path):
-        X_spec_m = np.load(mix_cache_path)
-        y_spec_m = np.load(inst_cache_path)
+    if reverse:
+        return torch.stack([torch.flip(wave_left, dims=[0]), torch.flip(wave_right, dims=[0])])
+
+    elif mid_side:
+        return torch.stack([wave_left + wave_right / 2, wave_left - wave_right / 2])
+
+    elif mid_side_b2:
+        return torch.stack([wave_right / 1.25 + 0.4 * wave_left, wave_left / 1.25 - 0.4 * wave_right])
+
     else:
-        X_wave, y_wave, X_spec_s, y_spec_s = {}, {}, {}, {}
-
-        for d in range(len(mp.param["band"]), 0, -1):
-            bp = mp.param["band"][d]
-
-            if d == len(mp.param["band"]):  # high-end band
-                X_wave[d], _ = librosa.load(
-                    mix_path, 
-                    sr       = bp["sr"],
-                    mono     = False,
-                    dtype    = np.float32,
-                    res_type = bp["res_type"]
-                )
-                y_wave[d], _ = librosa.load(
-                    inst_path,
-                    sr       = bp["sr"],
-                    mono     = False,
-                    dtype    = np.float32,
-                    res_type = bp["res_type"],
-                )
-            else:  # lower bands
-                X_wave[d] = librosa.resample(
-                    X_wave[d + 1],
-                    orig_sr   = mp.param["band"][d + 1]["sr"],
-                    target_sr = bp["sr"],
-                    res_type  = bp["res_type"],
-                )
-                y_wave[d] = librosa.resample(
-                    y_wave[d + 1],
-                    orig_sr   = mp.param["band"][d + 1]["sr"],
-                    target_sr = bp["sr"],
-                    res_type  = bp["res_type"],
-                )
-
-            X_wave[d], y_wave[d] = align_wave_head_and_tail(X_wave[d], y_wave[d])
-
-            X_spec_s[d] = wave_to_spectrogram(
-                X_wave[d],
-                bp["hl"],
-                bp["n_fft"],
-                mp.param["mid_side"],
-                mp.param["mid_side_b2"],
-                mp.param["reverse"],
-            )
-            y_spec_s[d] = wave_to_spectrogram(
-                y_wave[d],
-                bp["hl"],
-                bp["n_fft"],
-                mp.param["mid_side"],
-                mp.param["mid_side_b2"],
-                mp.param["reverse"],
-            )
-
-        del X_wave, y_wave
-
-        X_spec_m = combine_spectrograms(X_spec_s, mp)
-        y_spec_m = combine_spectrograms(y_spec_s, mp)
-
-        if X_spec_m.shape != y_spec_m.shape:
-            raise ValueError("The combined spectrograms are different: " + mix_path)
-
-        _, ext = os.path.splitext(mix_path)
-
-        np.save(mix_cache_path, X_spec_m)
-        np.save(inst_cache_path, y_spec_m)
-
-    return X_spec_m, y_spec_m
+        return torch.stack([wave_left, wave_right])
 
 
 def spectrogram_to_wave(spec, hop_length, mid_side, mid_side_b2, reverse):
@@ -302,9 +380,7 @@ def spectrogram_to_wave(spec, hop_length, mid_side, mid_side_b2, reverse):
     if reverse:
         return np.asfortranarray([np.flip(wave_left), np.flip(wave_right)])
     elif mid_side:
-        return np.asfortranarray(
-            [np.add(wave_left, wave_right / 2), np.subtract(wave_left, wave_right / 2)]
-        )
+        return np.asfortranarray([np.add(wave_left, wave_right / 2), np.subtract(wave_left, wave_right / 2)])
     elif mid_side_b2:
         return np.asfortranarray(
             [
@@ -317,7 +393,6 @@ def spectrogram_to_wave(spec, hop_length, mid_side, mid_side_b2, reverse):
 
 
 def spectrogram_to_wave_mt(spec, hop_length, mid_side, reverse, mid_side_b2):
-    import threading
 
     spec_left = np.asfortranarray(spec[0])
     spec_right = np.asfortranarray(spec[1])
@@ -326,9 +401,7 @@ def spectrogram_to_wave_mt(spec, hop_length, mid_side, reverse, mid_side_b2):
         global wave_left
         wave_left = librosa.istft(**kwargs)
 
-    thread = threading.Thread(
-        target=run_thread, kwargs={"stft_matrix": spec_left, "hop_length": hop_length}
-    )
+    thread = threading.Thread(target=run_thread, kwargs={"stft_matrix": spec_left, "hop_length": hop_length})
     thread.start()
     wave_right = librosa.istft(spec_right, hop_length=hop_length)
     thread.join()
@@ -336,9 +409,7 @@ def spectrogram_to_wave_mt(spec, hop_length, mid_side, reverse, mid_side_b2):
     if reverse:
         return np.asfortranarray([np.flip(wave_left), np.flip(wave_right)])
     elif mid_side:
-        return np.asfortranarray(
-            [np.add(wave_left, wave_right / 2), np.subtract(wave_left, wave_right / 2)]
-        )
+        return np.asfortranarray([np.add(wave_left, wave_right / 2), np.subtract(wave_left, wave_right / 2)])
     elif mid_side_b2:
         return np.asfortranarray(
             [
@@ -350,6 +421,62 @@ def spectrogram_to_wave_mt(spec, hop_length, mid_side, reverse, mid_side_b2):
         return np.asfortranarray([wave_left, wave_right])
 
 
+def cmb_spectrogram_to_wave_torch(spec_m, mp, extra_bins_h=None, extra_bins=None):
+    """
+    Args:
+        spec_m (torch.Tensor): [2, F, T]
+        mp (dict): params
+        extra_bins_h (int, optional): High freq bins
+        extra_bins (torch.Tensor, optional): High freq extra
+
+    Returns:
+        torch.Tensor: [2, T]
+    """
+
+    wave = None
+    bands_n = len(mp.param["band"])
+    offset = 0
+    for d in range(1, bands_n + 1):
+        bp = mp.param["band"][d]
+        n_fft = bp["n_fft"]
+        crop_start, crop_stop = bp["crop_start"], bp["crop_stop"]
+
+        spec_s = torch.zeros((2, n_fft // 2 + 1, spec_m.shape[2]), dtype=spec_m.dtype, device=spec_m.device)
+        h = crop_stop - crop_start
+        spec_s[:, crop_start:crop_stop, :] = spec_m[:, offset : offset + h, :]
+        offset += h
+        if d == bands_n:
+            if extra_bins_h:
+                max_bin = n_fft // 2
+                spec_s[:, max_bin - extra_bins_h : max_bin, :] = extra_bins[:, :extra_bins_h, :]
+            if bp["hpf_start"] > 0:
+                spec_s = fft_hp_filter_torch(spec_s, bp["hpf_start"], bp["hpf_stop"] - 1)
+            if bands_n == 1:
+                wave = spectrogram_to_wave_torch(spec_s, bp["hl"], mp.param["mid_side"], mp.param["mid_side_b2"], mp.param["reverse"]).cpu()
+            else:
+                wave += spectrogram_to_wave_torch(spec_s, bp["hl"], mp.param["mid_side"], mp.param["mid_side_b2"], mp.param["reverse"]).cpu()
+        else:
+            sr = mp.param["band"][d + 1]["sr"]
+            if d == 1:
+                spec_s = fft_lp_filter_torch(spec_s, bp["lpf_start"], bp["lpf_stop"])
+                wave = torchaudio.functional.resample(
+                    spectrogram_to_wave_torch(spec_s, bp["hl"], mp.param["mid_side"], mp.param["mid_side_b2"], mp.param["reverse"]),
+                    orig_freq=bp["sr"],
+                    new_freq=sr,
+                ).cpu()
+            else:
+                spec_s = fft_hp_filter_torch(spec_s, bp["hpf_start"], bp["hpf_stop"] - 1)
+                spec_s = fft_lp_filter_torch(spec_s, bp["lpf_start"], bp["lpf_stop"])
+                wave2 = wave + spectrogram_to_wave_torch(spec_s, bp["hl"], mp.param["mid_side"], mp.param["mid_side_b2"], mp.param["reverse"]).cpu()
+                wave = torchaudio.functional.resample(
+                    wave2,
+                    orig_freq=bp["sr"],
+                    new_freq=sr,
+                ).cpu()
+
+    return wave.T
+
+
 def cmb_spectrogram_to_wave(spec_m, mp, extra_bins_h=None, extra_bins=None):
     wave_band = {}
     bands_n = len(mp.param["band"])
@@ -357,21 +484,15 @@ def cmb_spectrogram_to_wave(spec_m, mp, extra_bins_h=None, extra_bins=None):
 
     for d in range(1, bands_n + 1):
         bp = mp.param["band"][d]
-        spec_s = np.ndarray(
-            shape=(2, bp["n_fft"] // 2 + 1, spec_m.shape[2]), dtype=complex
-        )
+        spec_s = np.ndarray(shape=(2, bp["n_fft"] // 2 + 1, spec_m.shape[2]), dtype=complex)
         h = bp["crop_stop"] - bp["crop_start"]
-        spec_s[:, bp["crop_start"] : bp["crop_stop"], :] = spec_m[
-            :, offset : offset + h, :
-        ]
+        spec_s[:, bp["crop_start"] : bp["crop_stop"], :] = spec_m[:, offset : offset + h, :]
 
         offset += h
         if d == bands_n:  # higher
             if extra_bins_h:  # if --high_end_process bypass
                 max_bin = bp["n_fft"] // 2
-                spec_s[:, max_bin - extra_bins_h : max_bin, :] = extra_bins[
-                    :, :extra_bins_h, :
-                ]
+                spec_s[:, max_bin - extra_bins_h : max_bin, :] = extra_bins[:, :extra_bins_h, :]
             if bp["hpf_start"] > 0:
                 spec_s = fft_hp_filter(spec_s, bp["hpf_start"], bp["hpf_stop"] - 1)
             if bands_n == 1:
@@ -405,9 +526,9 @@ def cmb_spectrogram_to_wave(spec_m, mp, extra_bins_h=None, extra_bins=None):
                         mp.param["mid_side_b2"],
                         mp.param["reverse"],
                     ),
-                    orig_sr   = bp["sr"],
-                    target_sr = sr,
-                    res_type  = "sinc_fastest",
+                    orig_sr=bp["sr"],
+                    target_sr=sr,
+                    res_type="sinc_fastest",
                 )
             else:  # mid
                 spec_s = fft_hp_filter(spec_s, bp["hpf_start"], bp["hpf_stop"] - 1)
@@ -428,6 +549,19 @@ def cmb_spectrogram_to_wave(spec_m, mp, extra_bins_h=None, extra_bins=None):
     return wave.T
 
 
+def fft_lp_filter_torch(spec: torch.Tensor, bin_start: int, bin_stop: int) -> torch.Tensor:
+    g = 1.0
+    step = 1 / (bin_stop - bin_start)
+
+    for b in range(bin_start, bin_stop):
+        g -= step
+        spec[:, b, :] *= g
+
+    spec[:, bin_stop:, :] *= 0
+
+    return spec
+
+
 def fft_lp_filter(spec, bin_start, bin_stop):
     g = 1.0
     for b in range(bin_start, bin_stop):
@@ -435,6 +569,18 @@ def fft_lp_filter(spec, bin_start, bin_stop):
         spec[:, b, :] = g * spec[:, b, :]
 
     spec[:, bin_stop:, :] *= 0
+
+    return spec
+
+
+def fft_hp_filter_torch(spec: torch.Tensor, bin_start: int, bin_stop: int) -> torch.Tensor:
+
+    g = 1.0
+    for b in range(bin_start, bin_stop, -1):
+        g -= 1 / (bin_start - bin_stop)
+        spec[:, b, :] = g * spec[:, b, :]
+
+    spec[:, 0 : bin_stop + 1, :] *= 0
 
     return spec
 
@@ -450,16 +596,43 @@ def fft_hp_filter(spec, bin_start, bin_stop):
     return spec
 
 
+def mirroring_torch(a, spec_m, input_high_end, mp):
+    """
+    Args:
+        a (str): "mirroring" or "mirroring2"
+        spec_m (torch.Tensor): [2, F, T]
+        input_high_end (torch.Tensor): [2, H, T]
+        mp (dict): params
+
+    Returns:
+        torch.Tensor: [2, H, T]
+    """
+    pre_filter_start = mp.param["pre_filter_start"]
+
+    mirror_idx_start = pre_filter_start - 10 - input_high_end.shape[1]
+    mirror_idx_end = pre_filter_start - 10
+
+    mirror = torch.flip(torch.abs(spec_m[:, mirror_idx_start:mirror_idx_end, :]), dims=[1])
+
+    if a == "mirroring":
+        mirror = mirror * torch.exp(1.0j * torch.angle(input_high_end))
+        return torch.where(torch.abs(input_high_end) <= torch.abs(mirror), input_high_end, mirror)
+
+    elif a == "mirroring2":
+        mi = mirror * (input_high_end * 1.7)
+        return torch.where(torch.abs(input_high_end) <= torch.abs(mi), input_high_end, mi)
+
+    else:
+        raise ValueError("Invalid Choice")
+
+
 def mirroring(a, spec_m, input_high_end, mp):
     if "mirroring" == a:
         mirror = np.flip(
             np.abs(
                 spec_m[
                     :,
-                    mp.param["pre_filter_start"]
-                    - 10
-                    - input_high_end.shape[1] : mp.param["pre_filter_start"]
-                    - 10,
+                    mp.param["pre_filter_start"] - 10 - input_high_end.shape[1] : mp.param["pre_filter_start"] - 10,
                     :,
                 ]
             ),
@@ -467,19 +640,14 @@ def mirroring(a, spec_m, input_high_end, mp):
         )
         mirror = mirror * np.exp(1.0j * np.angle(input_high_end))
 
-        return np.where(
-            np.abs(input_high_end) <= np.abs(mirror), input_high_end, mirror
-        )
+        return np.where(np.abs(input_high_end) <= np.abs(mirror), input_high_end, mirror)
 
     if "mirroring2" == a:
         mirror = np.flip(
             np.abs(
                 spec_m[
                     :,
-                    mp.param["pre_filter_start"]
-                    - 10
-                    - input_high_end.shape[1] : mp.param["pre_filter_start"]
-                    - 10,
+                    mp.param["pre_filter_start"] - 10 - input_high_end.shape[1] : mp.param["pre_filter_start"] - 10,
                     :,
                 ]
             ),
@@ -528,11 +696,11 @@ def istft(spec, hl):
 
 if __name__ == "__main__":
     import argparse
-    import sys
     import time
 
     import cv2
-    from model_param_init import ModelParameters
+
+    from tools.webui.uvr5.lib.lib_v5.model_param_init import ModelParameters
 
     p = argparse.ArgumentParser()
     p.add_argument(
@@ -564,7 +732,7 @@ if __name__ == "__main__":
     wave, specs = {}, {}
     mp = ModelParameters(args.model_params)
 
-    for i in range(len(args.input)):
+    for idx, audio in enumerate(args.input):
         spec = {}
 
         for d in range(len(mp.param["band"]), 0, -1):
@@ -572,11 +740,11 @@ if __name__ == "__main__":
 
             if d == len(mp.param["band"]):  # high-end band
                 wave[d], _ = librosa.load(
-                    args.input[i],
-                    sr       = bp["sr"],
-                    mono     = False,
-                    dtype    = np.float32,
-                    res_type = bp["res_type"],
+                    audio,
+                    sr=bp["sr"],
+                    mono=False,
+                    dtype=np.float32,
+                    res_type=bp["res_type"],
                 )
 
                 if len(wave[d].shape) == 1:  # mono to stereo
@@ -584,9 +752,9 @@ if __name__ == "__main__":
             else:  # lower bands
                 wave[d] = librosa.resample(
                     wave[d + 1],
-                    orig_sr   = mp.param["band"][d + 1]["sr"],
-                    target_sr = bp["sr"],
-                    res_type  = bp["res_type"],
+                    orig_sr=mp.param["band"][d + 1]["sr"],
+                    target_sr=bp["sr"],
+                    res_type=bp["res_type"],
                 )
 
             spec[d] = wave_to_spectrogram(
@@ -598,7 +766,7 @@ if __name__ == "__main__":
                 mp.param["reverse"],
             )
 
-        specs[i] = combine_spectrograms(spec, mp)
+        specs[idx] = combine_spectrograms(spec, mp)
 
     del wave
 

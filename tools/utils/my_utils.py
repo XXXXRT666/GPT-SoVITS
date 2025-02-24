@@ -2,7 +2,7 @@ import os
 import sys
 import traceback
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import ffmpeg
 import gradio as gr
@@ -13,7 +13,7 @@ from tools.i18n.i18n import I18nAuto
 i18n = I18nAuto(language=os.environ.get("language", "Auto"))
 
 
-def load_audio(file: str, sr: int):
+def load_audio(file: str, sr: Optional[int] = None, channel=1):
     try:
         # https://github.com/openai/whisper/blob/main/whisper/audio.py#L26
         # This launches a subprocess to decode audio while down-mixing and resampling as necessary.
@@ -23,14 +23,14 @@ def load_audio(file: str, sr: int):
             raise RuntimeError("You input a wrong audio path that does not exists, please fix it!")
         out, _ = (
             ffmpeg.input(str(file), threads=0)
-            .output("-", format="f32le", acodec="pcm_f32le", ac=1, ar=sr)
+            .output("-", format="f32le", acodec="pcm_f32le", ac=channel, ar=sr)
             .run(cmd=["ffmpeg", "-nostdin"], capture_stdout=True, capture_stderr=True)
         )
     except Exception as e:
         traceback.print_exc()
         raise RuntimeError(i18n("音频加载失败"))
 
-    return np.frombuffer(out, np.float32).flatten()
+    return np.frombuffer(out, np.float32).flatten().reshape(-1, channel).T
 
 
 def clean_path(path_str: str) -> str:
