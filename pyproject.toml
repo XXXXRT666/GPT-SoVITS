@@ -22,7 +22,7 @@ dependencies = [
     "librosa==0.9.2",
     "numba==0.60.0",
     "pytorch-lightning",
-    "uvicorn[standard]",
+    "fastapi[standard]",
     "gradio",
     "ffmpeg-python",
     "onnxruntime; sys_platform == 'darwin'",
