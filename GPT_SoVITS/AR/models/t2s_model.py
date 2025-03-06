@@ -585,6 +585,13 @@ class Text2SemanticDecoder(nn.Module):
         y_pos = self.ar_audio_position(y_emb)
         xy_pos = torch.concat([x, y_pos], dim=1)
 
+        y_emb = self.ar_audio_embedding(y)
+        y_len = y_emb.shape[1]
+        prefix_len = y.shape[1]
+        y_lens = torch.LongTensor([y_emb.shape[1]] * y_emb.shape[0]).to(x.device)
+        y_pos = self.ar_audio_position(y_emb)
+        xy_pos = torch.concat([x, y_pos], dim=1)
+
         ##### create mask #####
         bsz = x.shape[0]
         src_len = x_len + y_len
