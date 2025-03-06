@@ -21,4 +21,6 @@ ffprobe*
 
 .mypy_cache
 
-output*.wav*.pkl
+output*.wav
+
+*.pkl
