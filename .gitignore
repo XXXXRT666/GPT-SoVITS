@@ -18,3 +18,7 @@ TEMP
 weight.json
 ffmpeg*
 ffprobe*
+
+.mypy_cache
+
+output*.wav*.pkl
