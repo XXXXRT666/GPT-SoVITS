@@ -185,8 +185,8 @@ class TransformerBlock(nn.Module):
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
-    def forward_prefill(self, x: Tensor, mask: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.attention.forward_prefill(x, mask))
+    def forward_prefill(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
+        h = self.attention_norm.forward(x + self.attention.forward_prefill(x, mask, input_pos))
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
@@ -239,7 +239,7 @@ class TransformerDecoder(nn.Module):
 
     def forward_prefill(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         for layer in self.layers:
-            x = layer.forward_prefill(x, mask)
+            x = layer.forward_prefill(x, input_pos, mask)
         return x
 
     def forward_static(self, input_pos: Optional[Tensor] = None) -> Tensor:
@@ -302,8 +302,8 @@ class T2SDecoder(nn.Module):
 
         self.register_buffer("xy_attn_mask", torch.ones(max_batch_size, num_heads, 1, max_seq_length).bool(), persistent=False)
         self.register_buffer("xy_attn_mask_", torch.zeros(max_batch_size, num_heads, 1, max_seq_length).bool(), persistent=False)
-        self.register_buffer("input_pos", torch.tensor(0).to(torch.int32), persistent=False)
-        self.register_buffer("input_pos_", torch.tensor(0).to(torch.int32), persistent=False)
+        self.input_pos = 0
+        self.input_pos_ = 0
 
         self.device = torch.device("cpu")
         self.dtype = torch.float32
@@ -413,7 +413,7 @@ class T2SDecoder(nn.Module):
             self.h.static_attn_mask.fill_(True)
             self.h.static_xy_pos.zero_()
             self.h.static_out.zero_()
-            self.input_pos.zero_()
+            self.input_pos = 0
 
     def empty_cache_static(self):
         with self.device:
@@ -426,7 +426,7 @@ class T2SDecoder(nn.Module):
             self.h.static_attn_mask_.fill_(False)
             self.h.static_xy_pos_.zero_()
             self.h.static_out_.zero_()
-            self.input_pos_.zero_()
+            self.input_pos_ = 0
 
     def forward(self): ...
 
@@ -479,7 +479,7 @@ class T2SDecoder(nn.Module):
 
         completed = [False] * bsz
         y_results = [None] * bsz
-        self.input_pos.copy_(torch.tensor(prefill_len).to(torch.int32).to(xy_pos.device))
+        self.input_pos = prefill_len
 
         # with torch.profiler.profile(
         #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA], record_shapes=True, with_stack=True
@@ -613,7 +613,7 @@ class T2SDecoder(nn.Module):
 
         completed = [False] * bsz
         y_results = [None] * bsz
-        self.input_pos_.copy_(torch.tensor(prefill_len).to(torch.int32).to(xy_pos.device))
+        self.input_pos_ = prefill_len
 
         # with torch.profiler.profile(
         #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA], record_shapes=True, with_stack=True
@@ -705,12 +705,12 @@ class T2SDecoder(nn.Module):
 
         with torch.cuda.stream(s):
             for _ in range(5):
-                self.h.forward(input_pos)
+                self.h.forward_static(input_pos)
         torch.cuda.current_stream().wait_stream(s)
 
         self._CUDA_GRAPH_STATIC = torch.cuda.CUDAGraph()
 
         with torch.cuda.graph(self._CUDA_GRAPH_STATIC):
-            self.h.static_out_ = self.h.forward(input_pos)
+            self.h.static_out_ = self.h.forward_static(input_pos)
 
         torch.cuda.synchronize()
