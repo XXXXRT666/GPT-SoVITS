@@ -10,14 +10,15 @@ from GPT_SoVITS.AR.models.utils import sample
 from GPT_SoVITS.AR.modules.embedding import SinePositionalEmbedding, TokenEmbedding
 
 Tensor = torch.Tensor
+dtype = torch.dtype
 
 
 class KVCache(nn.Module):
-    def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim):
+    def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim, dtype):
         super().__init__()
         cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
-        self.register_buffer("k_cache", torch.zeros(cache_shape), persistent=False)
-        self.register_buffer("v_cache", torch.zeros(cache_shape), persistent=False)
+        self.register_buffer("k_cache", torch.zeros(cache_shape, dtype=dtype), persistent=False)
+        self.register_buffer("v_cache", torch.zeros(cache_shape, dtype=dtype), persistent=False)
 
     def update(self, input_pos, k_val, v_val):
         # input_pos: [S], k_val: [B, H, S, D]
@@ -222,12 +223,12 @@ class TransformerDecoder(nn.Module):
         self.register_buffer("static_attn_mask", torch.ones(max_batch_size, num_heads, 1, max_seq_length).bool(), persistent=False)
         self.register_buffer("static_attn_mask_", torch.zeros(max_batch_size, num_heads, 1, max_seq_length).bool(), persistent=False)
 
-    def setup_caches(self, max_batch_size=5, max_seq_length=2500):
+    def setup_caches(self, max_batch_size=5, max_seq_length=2500, dtype=None):
         self.max_seq_length = max_seq_length
         self.max_batch_size = max_batch_size
 
         for b in self.layers:
-            b.attention.kv_cache = KVCache(self.max_batch_size, self.max_seq_length, self.num_heads, self.head_dim)
+            b.attention.kv_cache = KVCache(self.max_batch_size, self.max_seq_length, self.num_heads, self.head_dim, dtype)
 
     def forward(self, input_pos: Optional[Tensor] = None) -> Tensor:
         x = self.static_xy_pos
@@ -303,7 +304,9 @@ class T2SDecoder(nn.Module):
         self.register_buffer("xy_attn_mask_", torch.zeros(max_batch_size, num_heads, 1, max_seq_length).bool(), persistent=False)
         self.register_buffer("input_pos", torch.tensor(0).to(torch.int32), persistent=False)
         self.register_buffer("input_pos_", torch.tensor(0).to(torch.int32), persistent=False)
-        # self.register_buffer("static_xy_pos", torch.ones(max_batch_size, 1, self.embedding_dim), persistent=False)
+
+        self.device = torch.device("cpu")
+        self.dtype = torch.float32
 
         # self.h.setup_caches(max_batch_size=max_batch_size, max_seq_length=max_seq_length)
 
@@ -314,6 +317,42 @@ class T2SDecoder(nn.Module):
         for key in model_keys:
             new_key = key[len("model.") :]
             state_dict[new_key] = state_dict.pop(key)
+
+    def to(self, *args, **kwds):
+        device, dtype, _, __ = torch._C._nn._parse_to(*args, **kwds)
+        self.device = device
+        self.dtype = dtype
+        return super().to(*args, **kwds)
+
+    def cpu(self):
+        self.device = torch.device("cpu")
+        return super().cpu()
+
+    def cuda(self, device=None):
+        if device:
+            if isinstance(device, int):
+                self.device = torch.device(f"cuda:{device}")
+            else:
+                self.device = device
+        else:
+            self.device = torch.device("cuda")
+        return super().cuda(device)
+
+    def xpu(self, device=None):
+        self.device = torch.device("xpu")
+        return super().xpu(device)
+
+    def float(self):
+        self.dtype = torch.float16
+        return super().float()
+
+    def half(self):
+        self.dtype = torch.float16
+        return super().half()
+
+    def bfloat16(self):
+        self.dtype = torch.bfloat16
+        return super().bfloat16()
 
     def embed(
         self,
@@ -364,28 +403,30 @@ class T2SDecoder(nn.Module):
         return x_pos, y_pos
 
     def empty_cache(self):
-        if self.h.layers[0].attention.kv_cache is None:
-            self.h.setup_caches(self.max_batch_size, self.max_seq_length)
-            return
-        for layer in self.h.layers:
-            layer.attention.kv_cache.empty()
-        self.xy_attn_mask.fill_(True)
-        self.h.static_attn_mask.fill_(True)
-        self.h.static_xy_pos.zero_()
-        self.h.static_out.zero_()
-        self.input_pos.zero_()
+        with self.device:
+            if self.h.layers[0].attention.kv_cache is None:
+                self.h.setup_caches(self.max_batch_size, self.max_seq_length, self.dtype)
+                return
+            for layer in self.h.layers:
+                layer.attention.kv_cache.empty()
+            self.xy_attn_mask.fill_(True)
+            self.h.static_attn_mask.fill_(True)
+            self.h.static_xy_pos.zero_()
+            self.h.static_out.zero_()
+            self.input_pos.zero_()
 
     def empty_cache_static(self):
-        if self.h.layers[0].attention.kv_cache is None:
-            self.h.setup_caches(self.max_batch_size, self.max_seq_length)
-            return
-        for layer in self.h.layers:
-            layer.attention.kv_cache.empty()
-        self.xy_attn_mask_.fill_(False)
-        self.h.static_attn_mask_.fill_(False)
-        self.h.static_xy_pos_.zero_()
-        self.h.static_out_.zero_()
-        self.input_pos_.zero_()
+        with self.device:
+            if self.h.layers[0].attention.kv_cache is None:
+                self.h.setup_caches(self.max_batch_size, self.max_seq_length, self.dtype)
+                return
+            for layer in self.h.layers:
+                layer.attention.kv_cache.empty()
+            self.xy_attn_mask_.fill_(False)
+            self.h.static_attn_mask_.fill_(False)
+            self.h.static_xy_pos_.zero_()
+            self.h.static_out_.zero_()
+            self.input_pos_.zero_()
 
     def forward(self): ...
 
