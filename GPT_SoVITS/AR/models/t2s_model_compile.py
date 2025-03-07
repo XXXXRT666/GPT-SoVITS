@@ -120,15 +120,15 @@ class Attention(nn.Module):
 
         return attn
 
-    def forward_prefill(self, x: Tensor, mask: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
+    def forward_prefill(self, x: Tensor, mask: Tensor) -> Tensor:
 
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
 
-        q = q.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
-        k = k.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
-        v = v.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        q = q.view(bsz, -1, self.num_heads, self.head_dim)
+        k = k.view(bsz, -1, self.num_heads, self.head_dim)
+        v = v.view(bsz, -1, self.num_heads, self.head_dim)
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
@@ -185,8 +185,8 @@ class TransformerBlock(nn.Module):
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
-    def forward_prefill(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.attention.forward_prefill(x, mask, input_pos))
+    def forward_prefill(self, x: Tensor, mask: Tensor) -> Tensor:
+        h = self.attention_norm.forward(x + self.attention.forward_prefill(x, mask))
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
@@ -237,9 +237,9 @@ class TransformerDecoder(nn.Module):
             x = layer.forward(x, input_pos, mask)
         return x
 
-    def forward_prefill(self, x: Tensor, mask: Optional[Tensor] = None, input_pos: Optional[Tensor] = None) -> Tensor:
+    def forward_prefill(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         for layer in self.layers:
-            x = layer.forward_prefill(x, input_pos, mask)
+            x = layer.forward_prefill(x, mask)
         return x
 
     def forward_static(self, input_pos: Optional[Tensor] = None) -> Tensor:
@@ -254,10 +254,10 @@ class T2SDecoder(nn.Module):
     def __init__(
         self,
         config,
+        *args,
         norm_first=False,
         max_seq_length=2500,
         max_batch_size=5,
-        *args,
         **kwds,
     ) -> None:
         super().__init__()
@@ -492,7 +492,7 @@ class T2SDecoder(nn.Module):
                     if idx == 0:
                         # input_pos += 1
                         # continue
-                        xy_dec = self.h.forward_prefill(xy_pos, xy_attn_mask, self.input_pos)
+                        xy_dec = self.h.forward_prefill(xy_pos, xy_attn_mask)
                     else:
                         if idx == 1:
                             import pickle
@@ -593,7 +593,6 @@ class T2SDecoder(nn.Module):
         self.empty_cache_static()
 
         y = prompts
-        y_lens = torch.LongTensor(y.size(-2))
         x_pos, y_pos = self.embed(x, x_lens, y, bert_feature)
         xy_pos = torch.concat([x_pos, y_pos], dim=1)
 
@@ -625,7 +624,7 @@ class T2SDecoder(nn.Module):
                 # with torch.profiler.record_function("AR"):  # 只追踪 a_operation
                 with contextlib.nullcontext():
                     if idx == 0:
-                        xy_dec = self.h.forward_prefill(xy_pos, xy_attn_mask, self.input_pos_)
+                        xy_dec = self.h.forward_prefill(xy_pos, xy_attn_mask)
                     else:
                         self.h.static_xy_pos_.copy_(xy_pos)
                         if use_cuda_graph and self._CUDA_GRAPH is None:
@@ -687,7 +686,7 @@ class T2SDecoder(nn.Module):
         s.wait_stream(torch.cuda.current_stream())
 
         with torch.cuda.stream(s):
-            for i in range(5):
+            for _ in range(5):
                 self.h.forward(input_pos)
         torch.cuda.current_stream().wait_stream(s)
 
@@ -705,7 +704,7 @@ class T2SDecoder(nn.Module):
         s.wait_stream(torch.cuda.current_stream())
 
         with torch.cuda.stream(s):
-            for i in range(5):
+            for _ in range(5):
                 self.h.forward(input_pos)
         torch.cuda.current_stream().wait_stream(s)
 
