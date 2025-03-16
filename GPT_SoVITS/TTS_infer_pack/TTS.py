@@ -705,7 +705,7 @@ class TTS:
         else:
             print(i18n("并行推理模式已关闭"))
             # self.t2s_model.model.infer_panel = self.t2s_model.model.infer_panel_naive_batched
-            self.t2s_model.model.infer_panel = self.t2s_model.model.infer_batch_static
+            self.t2s_model.model.infer_panel = self.t2s_model.model.infer_batch
 
         if return_fragment:
             print(i18n("分段返回模式已开启"))

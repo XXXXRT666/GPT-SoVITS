@@ -48,14 +48,13 @@ def with_sdpa_kernel_flash(func):
 @click.command()
 @click.option("--cuda-graph", is_flag=True, help="Enable CUDA Graph.")
 @click.option("--compile", is_flag=True, help="Enable compilation mode.")
-@click.option("--static", is_flag=True, help="Enable static mode.")
-def main(cuda_graph=False, compile=False, static=False):
+# @click.option("--static", is_flag=True, help="Enable static mode.")
+def main(cuda_graph=False, compile=False):
     if cuda_graph and compile:
         raise click.UsageError("Options --cuda-graph and --compile cannot be used together.")
 
     click.echo(f"CUDA Graph: {cuda_graph}")
     click.echo(f"Compile: {compile}")
-    click.echo(f"Static: {static}")
 
     tts_config = TTS_Config("GPT_SoVITS/configs/tts_infer.yaml")
 
@@ -87,8 +86,6 @@ def main(cuda_graph=False, compile=False, static=False):
 
     tts_pipeline.t2s_model.model = tts_pipeline.t2s_model.model.cuda().half()
 
-    tts_pipeline.t2s_model.model.h.setup_caches(BATCH_SIZE)
-
     tts_pipeline.t2s_model.model = tts_pipeline.t2s_model.model.cuda().half().requires_grad_(False)
 
     if cuda_graph:
@@ -104,25 +101,14 @@ def main(cuda_graph=False, compile=False, static=False):
 
         torch._inductor.config.triton.cudagraph_support_input_mutation = True
 
-        if not static:
-            tts_pipeline.t2s_model.model.h.forward = torch.compile(
-                with_sdpa_kernel_math(tts_pipeline.t2s_model.model.h.forward),
-                # mode="reduce-overhead",
-                mode="max-autotune",
-                # mode="max-autotune-no-cudagraphs",
-                fullgraph=True,
-                # dynamic=True,
-            )
-        else:
-            tts_pipeline.t2s_model.model.h.forward_static = torch.compile(
-                with_sdpa_kernel_math(tts_pipeline.t2s_model.model.h.forward_static),
-                # mode="reduce-overhead",
-                # mode="max-autotune",
-                # mode="max-autotune-no-cudagraphs",
-                backend="tensorrt",
-                fullgraph=True,
-                # dynamic=True,
-            )
+        tts_pipeline.t2s_model.model.h.forward = torch.compile(
+            with_sdpa_kernel_math(tts_pipeline.t2s_model.model.h.forward),
+            # mode="reduce-overhead",
+            mode="max-autotune",
+            # mode="max-autotune-no-cudagraphs",
+            fullgraph=True,
+            # dynamic=True,
+        )
 
     tts_req = {
         "text": text,
@@ -134,7 +120,7 @@ def main(cuda_graph=False, compile=False, static=False):
         "text_split_method": "cut1",
         "seed": 6666666,
         "split_bucket": False,
-        "parallel_infer": not static,
+        "parallel_infer": True,
     }
 
     t1 = time.time()
