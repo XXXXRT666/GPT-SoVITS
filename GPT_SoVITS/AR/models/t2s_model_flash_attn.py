@@ -30,7 +30,7 @@ class KVCache(nn.Module):
     def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor):
         # input_pos: [B, 1], k_val: [B, 1, H, D]
 
-        index = (input_pos - 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.num_heads, self.head_dim)  # (bs, 1, num_head, head_dim)
+        index = (input_pos - 1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.num_heads, self.head_dim)  # (bs, 1, num_head, head_dim)
 
         k_out = self.k_cache
         v_out = self.v_cache
@@ -198,7 +198,7 @@ class TransformerDecoder(nn.Module):
         self.max_seq_length: int = max_seq_length
         self.max_batch_size: int = max_batch_size
 
-        self.register_buffer("input_pos", torch.zeros((5, 1)))
+        self.register_buffer("input_pos", torch.zeros((5,)).to(torch.int32))
         self.register_buffer("xy_pos", torch.zeros((self.max_batch_size, 1, self.hidden_dim)))
         self.register_buffer("xy_dec", torch.zeros((self.max_batch_size, 1, self.hidden_dim)))
 
@@ -402,14 +402,14 @@ class T2SDecoder(nn.Module):
 
             for i in EOS_indices:
                 if not completed[i]:
-                    y_results[i] = y[i, y_len:-1]  # type: ignore
+                    y_results[i] = y[i, y_len : input_pos[i]]  # type: ignore
                     completed[i] = True
 
             if (early_stop_num != -1 and (y.shape[1] - y_len) > early_stop_num) or idx == 1499:
                 tqdm.write(f"Reached early stop limit: {early_stop_num}")
                 for i in range(bsz):
                     if not completed[i]:
-                        y_results[i] = y[i, y_len:]  # type: ignore
+                        y_results[i] = y[i, y_len : input_pos[i]]  # type: ignore
                         completed[i] = True
                 break
 
