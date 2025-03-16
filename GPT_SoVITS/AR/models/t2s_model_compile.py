@@ -4,6 +4,7 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from tqdm import tqdm
 
 from GPT_SoVITS.AR.models.utils import sample
@@ -17,16 +18,16 @@ class KVCache(nn.Module):
     def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim, dtype):
         super().__init__()
         cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
-        self.register_buffer("k_cache", torch.zeros(cache_shape, dtype=dtype), persistent=False)
-        self.register_buffer("v_cache", torch.zeros(cache_shape, dtype=dtype), persistent=False)
+        self.register_buffer("k_cache", torch.zeros(size=cache_shape), persistent=False)
+        self.register_buffer("v_cache", torch.zeros(size=cache_shape), persistent=False)
 
     def update(self, input_pos, k_val, v_val):
         # input_pos: [S], k_val: [B, H, S, D]
 
         k_out = self.k_cache
         v_out = self.v_cache
-        k_out[:, :, input_pos - 1 : input_pos] = k_val
-        v_out[:, :, input_pos - 1 : input_pos] = v_val
+        k_out[:, :, input_pos - 1 : input_pos] = k_val[:, :]
+        v_out[:, :, input_pos - 1 : input_pos] = v_val[:, :]
 
         return k_out[:, :, :input_pos], v_out[:, :, :input_pos]
 
@@ -35,8 +36,20 @@ class KVCache(nn.Module):
 
         k_out = self.k_cache
         v_out = self.v_cache
-        k_out[:, :, input_pos - 1 : input_pos] = k_val
-        v_out[:, :, input_pos - 1 : input_pos] = v_val
+        k_out[:, :, [input_pos - 1]] = k_val
+        v_out[:, :, [input_pos - 1]] = v_val
+
+        return k_out, v_out
+
+    def update_cuda_graph_static(self, input_pos, k_val, v_val):
+        # input_pos: [S], k_val: [B, H, S, D]
+
+        k_out = self.k_cache
+        v_out = self.v_cache
+        k_out[:, :, input_pos - 1] = k_val
+        v_out[:, :, input_pos - 1] = v_val
+        # k_out.scatter_(2, index, k_val)
+        # v_out.scatter_(2, index, v_val)
 
         return k_out, v_out
 
@@ -74,20 +87,19 @@ class Attention(nn.Module):
             new_key = key.replace("in_proj_", "in_proj.")  # in_proj_ -> in_proj.
             state_dict[new_key] = state_dict.pop(key)
 
-    def forward(self, x: Tensor, mask: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, mask: Tensor, input_pos: Optional[torch.tensor] = None) -> Tensor:
 
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
 
-        q = q.view(bsz, -1, self.num_heads, self.head_dim)
-        k = k.view(bsz, -1, self.num_heads, self.head_dim)
-        v = v.view(bsz, -1, self.num_heads, self.head_dim)
+        q = q.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        k = k.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        v = v.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
-        if self.kv_cache is not None:
-            k, v = self.kv_cache.update(input_pos, k, v)
+        k, v = self.kv_cache.update(input_pos, k, v)
 
         attn = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
@@ -97,20 +109,43 @@ class Attention(nn.Module):
 
         return attn
 
-    def forward_static(self, x: Tensor, mask: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
+    def forward_static(self, x: Tensor, mask: Tensor, input_pos: Optional[torch.tensor] = None) -> Tensor:
 
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
 
-        q = q.view(bsz, -1, self.num_heads, self.head_dim)
-        k = k.view(bsz, -1, self.num_heads, self.head_dim)
-        v = v.view(bsz, -1, self.num_heads, self.head_dim)
+        q = q.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        k = k.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        v = v.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
         if self.kv_cache is not None:
             k, v = self.kv_cache.update_static(input_pos, k, v)
+
+        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+
+        attn = attn.transpose(1, 2).contiguous().view(bsz, seqlen, self.hidden_dim)
+
+        attn = self.out_proj.forward(attn)
+
+        return attn
+
+    def forward_cuda_graph_static(self, x: Tensor, mask: Tensor, input_pos: Optional[torch.tensor] = None) -> Tensor:
+
+        bsz, seqlen, _ = x.shape
+
+        q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
+
+        q = q.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        k = k.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        v = v.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+
+        q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
+
+        if self.kv_cache is not None:
+            k, v = self.kv_cache.update_cuda_graph_static(input_pos, k, v)
 
         attn = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
@@ -126,9 +161,9 @@ class Attention(nn.Module):
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
 
-        q = q.view(bsz, -1, self.num_heads, self.head_dim)
-        k = k.view(bsz, -1, self.num_heads, self.head_dim)
-        v = v.view(bsz, -1, self.num_heads, self.head_dim)
+        q = q.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        k = k.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        v = v.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
@@ -185,8 +220,13 @@ class TransformerBlock(nn.Module):
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
-    def forward_prefill(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.attention.forward_prefill(x, mask, input_pos))
+    def forward_cuda_graph_static(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
+        h = self.attention_norm.forward(x + self.attention.forward_cuda_graph_static(x, mask, input_pos))
+        out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
+        return out
+
+    def forward_prefill(self, x: Tensor, mask: Tensor) -> Tensor:
+        h = self.attention_norm.forward(x + self.attention.forward_prefill(x, mask))
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
@@ -216,6 +256,11 @@ class TransformerDecoder(nn.Module):
         self.max_seq_length = max_seq_length
         self.max_batch_size = max_batch_size
 
+        self.input_pos = 0
+        self.input_pos_ = 0
+        # self.register_buffer("input_pos", torch.tensor(0, dtype=torch.int64), persistent=False)
+        # self.register_buffer("input_pos_", torch.tensor(0, dtype=torch.int64), persistent=False)
+
         self.register_buffer("static_xy_pos", torch.zeros((self.max_batch_size, 1, self.hidden_dim)), persistent=False)
         self.register_buffer("static_xy_pos_", torch.zeros((self.max_batch_size, 1, self.hidden_dim)), persistent=False)
         self.register_buffer("static_out", torch.zeros((self.max_batch_size, 1, self.hidden_dim)), persistent=False)
@@ -223,28 +268,36 @@ class TransformerDecoder(nn.Module):
         self.register_buffer("static_attn_mask", torch.ones(max_batch_size, num_heads, 1, max_seq_length).bool(), persistent=False)
         self.register_buffer("static_attn_mask_", torch.zeros(max_batch_size, num_heads, 1, max_seq_length).bool(), persistent=False)
 
-    def setup_caches(self, max_batch_size=5, max_seq_length=2500, dtype=None):
+    def setup_caches(self, max_batch_size=10, max_seq_length=2500, dtype=None):
         self.max_seq_length = max_seq_length
         self.max_batch_size = max_batch_size
 
         for b in self.layers:
             b.attention.kv_cache = KVCache(self.max_batch_size, self.max_seq_length, self.num_heads, self.head_dim, dtype)
 
-    def forward(self, input_pos: Optional[Tensor] = None) -> Tensor:
-        x = self.static_xy_pos
-        mask = self.static_attn_mask[:, :, :, :input_pos]
-        for layer in self.layers:
-            x = layer.forward(x, input_pos, mask)
-        return x
+    # def forward(self) -> Tensor:
+    #     x = self.static_xy_pos
+    #     input_pos = self.input_pos
+    #     mask = self.static_attn_mask[:, :, :, :input_pos]
+    #     for layer in self.layers:
+    #         x = layer.forward(x, input_pos, mask)
+    #     return x
 
-    def forward_prefill(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
-        for layer in self.layers:
-            x = layer.forward_prefill(x, input_pos, mask)
-        return x
-
-    def forward_static(self, input_pos: Optional[Tensor] = None) -> Tensor:
+    def forward_cuda_graph_static(self) -> Tensor:
         x = self.static_xy_pos_
+        input_pos = self.input_pos_
         mask = self.static_attn_mask_
+        for layer in self.layers:
+            x = layer.forward_cuda_graph_static(x, input_pos, mask)
+        return x
+
+    def _forward_prefill(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        for layer in self.layers:
+            x = layer.forward_prefill(x, mask)
+        return x
+
+    def forward(self, x, mask) -> Tensor:
+        input_pos = self.input_pos_
         for layer in self.layers:
             x = layer.forward_static(x, input_pos, mask)
         return x
@@ -257,7 +310,7 @@ class T2SDecoder(nn.Module):
         *args,
         norm_first=False,
         max_seq_length=2500,
-        max_batch_size=5,
+        max_batch_size=10,
         **kwds,
     ) -> None:
         super().__init__()
@@ -288,7 +341,6 @@ class T2SDecoder(nn.Module):
         assert self.EOS == self.vocab_size - 1
 
         self._CUDA_GRAPH = None
-
         self._CUDA_GRAPH_STATIC = None
 
         self.bert_proj = nn.Linear(1024, self.embedding_dim)
@@ -302,8 +354,6 @@ class T2SDecoder(nn.Module):
 
         self.register_buffer("xy_attn_mask", torch.ones(max_batch_size, num_heads, 1, max_seq_length).bool(), persistent=False)
         self.register_buffer("xy_attn_mask_", torch.zeros(max_batch_size, num_heads, 1, max_seq_length).bool(), persistent=False)
-        self.input_pos = 0
-        self.input_pos_ = 0
 
         self.device = torch.device("cpu")
         self.dtype = torch.float32
@@ -373,8 +423,8 @@ class T2SDecoder(nn.Module):
             x_item = self.ar_text_position.forward(x_item).squeeze(0)
             x_pos[idx, : x_lens[idx]] = x_item
 
-        y_emb = self.ar_audio_embedding(y)
-        y_pos = self.ar_audio_position(y_emb)
+        y_emb = self.ar_audio_embedding.forward(y)
+        y_pos = self.ar_audio_position.forward(y_emb)
 
         return x_pos, y_pos
 
@@ -397,8 +447,8 @@ class T2SDecoder(nn.Module):
             x_item = self.ar_text_position.forward(x_item).squeeze(0)
             x_pos[idx, -x_lens[idx] :] = x_item
 
-        y_emb = self.ar_audio_embedding(y)
-        y_pos = self.ar_audio_position(y_emb)
+        y_emb = self.ar_audio_embedding.forward(y)
+        y_pos = self.ar_audio_position.forward(y_emb)
 
         return x_pos, y_pos
 
@@ -413,7 +463,9 @@ class T2SDecoder(nn.Module):
             self.h.static_attn_mask.fill_(True)
             self.h.static_xy_pos.zero_()
             self.h.static_out.zero_()
-            self.input_pos = 0
+            self._CUDA_GRAPH = None
+            # self.h.input_pos.zero_()
+            self.h.input_pos = 0
 
     def empty_cache_static(self):
         with self.device:
@@ -426,7 +478,8 @@ class T2SDecoder(nn.Module):
             self.h.static_attn_mask_.fill_(False)
             self.h.static_xy_pos_.zero_()
             self.h.static_out_.zero_()
-            self.input_pos_ = 0
+            self._CUDA_GRAPH_STATIC = None
+            self.h.input_pos_ = 0
 
     def forward(self): ...
 
@@ -479,12 +532,11 @@ class T2SDecoder(nn.Module):
 
         completed = [False] * bsz
         y_results = [None] * bsz
-        self.input_pos = prefill_len
+        self.h.input_pos += prefill_len
 
         # with torch.profiler.profile(
         #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA], record_shapes=True, with_stack=True
         # ) as prof:
-
         with contextlib.nullcontext():
             for idx in tqdm(range(1500)):
                 # with torch.profiler.record_function("AR"):  # 只追踪 a_operation
@@ -520,16 +572,16 @@ class T2SDecoder(nn.Module):
                             #         2,
                             #     )
                         self.h.static_xy_pos.copy_(xy_pos)
-
                         if use_cuda_graph and self._CUDA_GRAPH is None:
-                            self.CUDAGraphCapture(self.input_pos)
+                            self.h.input_pos = torch.tensor([self.h.input_pos]).to(torch.int32)
+                            torch.cuda.make_graphed_callables(self.h.forward, ())
+                            self._CUDA_GRAPH = True
                         if self._CUDA_GRAPH is not None:
-                            self._CUDA_GRAPH.replay()
-                            xy_dec = self.h.static_out.clone()
+                            xy_dec = self.h.forward()
                         else:
-                            xy_dec = self.h.forward(self.input_pos)
+                            xy_dec = self.h.forward()
                     logits = self.ar_predict_layer(xy_dec[:, -1])
-                self.input_pos += 1
+                self.h.input_pos += 1
 
                 if idx == 0:
                     logits = logits[:, :-1]
@@ -613,7 +665,7 @@ class T2SDecoder(nn.Module):
 
         completed = [False] * bsz
         y_results = [None] * bsz
-        self.input_pos_ = prefill_len
+        self.h.input_pos_ += prefill_len
 
         # with torch.profiler.profile(
         #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA], record_shapes=True, with_stack=True
@@ -624,19 +676,21 @@ class T2SDecoder(nn.Module):
                 # with torch.profiler.record_function("AR"):  # 只追踪 a_operation
                 with contextlib.nullcontext():
                     if idx == 0:
-                        xy_dec = self.h.forward_prefill(xy_pos, xy_attn_mask)
+                        xy_dec = self.h._forward_prefill(xy_pos, xy_attn_mask)
+                        # self.h.input_pos_ = torch.tensor(self.h.input_pos_, device=self.device, dtype=torch.int32)
                     else:
                         self.h.static_xy_pos_.copy_(xy_pos)
-                        if use_cuda_graph and self._CUDA_GRAPH is None:
-                            self.CUDAGraphCaptureStatic(self.input_pos_)
+                        if use_cuda_graph and self._CUDA_GRAPH_STATIC is None:
+                            self.h.input_pos_ = torch.tensor([self.h.input_pos_], device=self.device, dtype=torch.int32)
+                            self.CUDAGraphCaptureStatic()
                         if self._CUDA_GRAPH_STATIC is not None:
                             self._CUDA_GRAPH_STATIC.replay()
                             xy_dec = self.h.static_out_.clone()
                         else:
-                            xy_dec = self.h.forward_static(self.input_pos_)
+                            xy_dec = self.h.forward(self.h.static_xy_pos_, self.h.static_attn_mask_)
                     logits = self.ar_predict_layer(xy_dec[:, -1])
-                self.h.static_attn_mask_[:, :, :, self.input_pos_] = True
-                self.input_pos_ += 1
+                self.h.static_attn_mask_[:, :, :, self.h.input_pos_] = True
+                self.h.input_pos_ += 1
 
                 if idx == 0:
                     logits = logits[:, :-1]
@@ -679,7 +733,8 @@ class T2SDecoder(nn.Module):
 
         return y_results
 
-    def CUDAGraphCapture(self, input_pos):
+    def CUDAGraphCapture(self):
+        raise NotImplementedError("Can Not Capture Graph With Dynamic Shape")
         assert self._CUDA_GRAPH is None
 
         s = torch.cuda.Stream()
@@ -687,30 +742,32 @@ class T2SDecoder(nn.Module):
 
         with torch.cuda.stream(s):
             for _ in range(5):
-                self.h.forward(input_pos)
+                self.h.forward()
         torch.cuda.current_stream().wait_stream(s)
 
         self._CUDA_GRAPH = torch.cuda.CUDAGraph()
 
         with torch.cuda.graph(self._CUDA_GRAPH):
-            self.h.static_out = self.h.forward(input_pos)
+            self.h.static_out = self.h.forward()
 
         torch.cuda.synchronize()
 
-    def CUDAGraphCaptureStatic(self, input_pos):
+    def CUDAGraphCaptureStatic(self):
         assert self._CUDA_GRAPH_STATIC is None
 
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
 
-        with torch.cuda.stream(s):
-            for _ in range(5):
-                self.h.forward_static(input_pos)
-        torch.cuda.current_stream().wait_stream(s)
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
 
-        self._CUDA_GRAPH_STATIC = torch.cuda.CUDAGraph()
+            with torch.cuda.stream(s):
+                for _ in range(5):
+                    self.h.forward_cuda_graph_static()
+            torch.cuda.current_stream().wait_stream(s)
 
-        with torch.cuda.graph(self._CUDA_GRAPH_STATIC):
-            self.h.static_out_ = self.h.forward_static(input_pos)
+            self._CUDA_GRAPH_STATIC = torch.cuda.CUDAGraph()
 
-        torch.cuda.synchronize()
+            with torch.cuda.graph(self._CUDA_GRAPH_STATIC):
+                self.h.static_out_ = self.h.forward_cuda_graph_static()
+
+            torch.cuda.synchronize()

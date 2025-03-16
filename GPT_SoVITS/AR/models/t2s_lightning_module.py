@@ -9,19 +9,20 @@ from typing import Dict
 
 import torch
 from AR.models.t2s_model import Text2SemanticDecoder
-from AR.models.t2s_model_compile import T2SDecoder
+from AR.models.t2s_model_compile import T2SDecoder as T2SDecoderCompile
+from AR.models.t2s_model_flash_attn import T2SDecoder
 from AR.modules.lr_schedulers import WarmupCosineLRSchedule
 from AR.modules.optim import ScaledAdam
 from pytorch_lightning import LightningModule
 
 
 class Text2SemanticLightningModule(LightningModule):
-    def __init__(self, config, output_dir, is_train=True):
+    def __init__(self, config, output_dir, is_train=True, batch_size=10):
         super().__init__()
         self.config = config
         self.top_k = 3
         # self.model = Text2SemanticDecoder(config=config, top_k=3)
-        self.model = T2SDecoder(config=config)
+        self.model = T2SDecoder(config=config, max_batch_size=batch_size)
         pretrained_s1 = config.get("pretrained_s1")
         if pretrained_s1 and is_train:
             # print(self.load_state_dict(torch.load(pretrained_s1,map_location="cpu")["state_dict"]))

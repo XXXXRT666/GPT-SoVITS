@@ -247,7 +247,7 @@ class TTS_Config:
 
 
 class TTS:
-    def __init__(self, configs: Union[dict, str, TTS_Config]):
+    def __init__(self, configs: Union[dict, str, TTS_Config], batch_size: int):
         if isinstance(configs, TTS_Config):
             self.configs = configs
         else:
@@ -258,6 +258,8 @@ class TTS:
         self.bert_tokenizer: AutoTokenizer = None
         self.bert_model: AutoModelForMaskedLM = None
         self.cnhuhbert_model: CNHubert = None
+
+        self.batch_size = batch_size
 
         self._init_models()
 
@@ -346,7 +348,7 @@ class TTS:
         dict_s1 = torch.load(weights_path, map_location=self.configs.device)
         config = dict_s1["config"]
         self.configs.max_sec = config["data"]["max_sec"]
-        t2s_model = Text2SemanticLightningModule(config, "****", is_train=False)
+        t2s_model = Text2SemanticLightningModule(config, "****", is_train=False, batch_size=self.batch_size)
         t2s_model.load_state_dict(dict_s1["weight"])
         t2s_model = t2s_model.to(self.configs.device)
         t2s_model = t2s_model.eval()
@@ -702,6 +704,7 @@ class TTS:
             self.t2s_model.model.infer_panel = self.t2s_model.model.infer_batch
         else:
             print(i18n("并行推理模式已关闭"))
+            # self.t2s_model.model.infer_panel = self.t2s_model.model.infer_panel_naive_batched
             self.t2s_model.model.infer_panel = self.t2s_model.model.infer_batch_static
 
         if return_fragment:
