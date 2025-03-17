@@ -2,12 +2,16 @@ from typing import List, Optional, Sequence
 
 import flash_attn
 import torch
+import torch.nested._internal.nested_tensor
 import torch.nn as nn
 from torch.nn import functional as F
 from tqdm import tqdm
 
 from GPT_SoVITS.AR.models.utils import sample
-from GPT_SoVITS.AR.modules.embedding import SinePositionalEmbedding, TokenEmbedding
+from GPT_SoVITS.AR.modules.embedding import (
+    SinePositionalEmbeddingNested as SinePositionalEmbedding,
+)
+from GPT_SoVITS.AR.modules.embedding import TokenEmbedding
 
 Tensor = torch.Tensor
 dtype = torch.dtype
@@ -16,7 +20,7 @@ dtype = torch.dtype
 class KVCache(nn.Module):
     def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim):
         super().__init__()
-        cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
+        cache_shape = (max_batch_size, max_seq_length, n_heads, head_dim)
         self.num_heads = n_heads
         self.head_dim = head_dim
         self.max_batch_size = max_batch_size
@@ -46,11 +50,11 @@ class KVCache(nn.Module):
         self.k_cache.zero_()
         self.v_cache.zero_()
 
-    def prefill_kv(self, bs: int, input_pos: int, k_val: Tensor, v_val: Tensor):
+    def prefill_kv(self, bs: int, k_val: Tensor, v_val: Tensor):
         # input_pos: int, k_val: [B, S, H, D]
 
-        self.k_cache[bs, :input_pos] = k_val
-        self.v_cache[bs, :input_pos] = v_val
+        self.k_cache[[bs], : k_val.shape[1]] = k_val
+        self.v_cache[[bs], : v_val.shape[1]] = v_val
 
 
 class Attention(nn.Module):
@@ -95,37 +99,37 @@ class Attention(nn.Module):
 
         return attn
 
-    def prefill(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
+    def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
 
-        bsz = x.shape[0]
+        bsz = x.size(0)
 
         outputs = []
 
         for bs in range(bsz):
 
-            pos = int(input_pos[bs].item())
+            x_b = x[bs].unsqueeze(0)
 
-            x_b = x[bs, pos]  # (embed_dim,)
+            q, k, v = self.in_proj.forward(x_b.unsqueeze(0)).chunk(3, dim=-1)
 
-            q, k, v = self.in_proj.forward(x_b).chunk(3, dim=-1)
+            q = q.contiguous().view(1, -1, self.num_heads, self.head_dim)
+            k = k.contiguous().view(1, -1, self.num_heads, self.head_dim)
+            v = v.contiguous().view(1, -1, self.num_heads, self.head_dim)
 
-            q = q.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
-            k = k.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
-            v = v.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
-
-            self.kv_cache.prefill_kv(bs, pos, k, v)
+            self.kv_cache.prefill_kv(bs, k, v)
 
             q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
-            attn_mask = mask[bs, :pos, :pos]
+            attn_mask = mask[bs].unsqueeze(0).unsqueeze(0).expand(1, self.num_heads, -1, -1)
 
-            attn_output = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+            attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
 
-            output = self.out_proj(attn_output)
+            attn = attn.transpose(1, 2).contiguous().view(1, -1, self.hidden_dim)
 
-            outputs.append(output)
+            output = self.out_proj.forward(attn)
 
-        return torch.cat(outputs, dim=0)
+            outputs.append(output.squeeze(0))
+
+        return torch.nested.nested_tensor(outputs)
 
 
 class FeedForward(nn.Module):
@@ -164,8 +168,8 @@ class TransformerBlock(nn.Module):
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
-    def prefill(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.attention.prefill(x, input_pos, mask))
+    def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
+        h = self.attention_norm.forward(x + self.attention.prefill(x, mask))
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
@@ -198,9 +202,9 @@ class TransformerDecoder(nn.Module):
         self.max_seq_length: int = max_seq_length
         self.max_batch_size: int = max_batch_size
 
-        self.register_buffer("input_pos", torch.zeros((5,)).to(torch.int32))
-        self.register_buffer("xy_pos", torch.zeros((self.max_batch_size, 1, self.hidden_dim)))
-        self.register_buffer("xy_dec", torch.zeros((self.max_batch_size, 1, self.hidden_dim)))
+        self.register_buffer("input_pos", torch.zeros((self.max_batch_size,)).to(torch.int64), persistent=False)
+        self.register_buffer("xy_pos", torch.zeros((self.max_batch_size, 1, self.hidden_dim)), persistent=False)
+        self.register_buffer("xy_dec", torch.zeros((self.max_batch_size, 1, self.hidden_dim)), persistent=False)
 
         self.input_pos: Tensor
         self.xy_pos: Tensor
@@ -220,9 +224,9 @@ class TransformerDecoder(nn.Module):
             x = layer.forward(x, input_pos)
         return x
 
-    def prefill(self, input_pos: Tensor, x: Tensor, mask: Tensor):
+    def prefill(self, x: Tensor, mask: Tensor):
         for layer in self.layers:
-            x = layer.prefill(x, input_pos, mask)
+            x = layer.prefill(x, mask)
         return x
 
 
@@ -265,9 +269,13 @@ class T2SDecoder(nn.Module):
 
         self.bert_proj = nn.Linear(1024, self.embedding_dim)
         self.ar_text_embedding = TokenEmbedding(self.embedding_dim, self.phoneme_vocab_size, self.p_dropout)
-        self.ar_text_position = SinePositionalEmbedding(self.embedding_dim, dropout=0.1, scale=False, alpha=True)
+        self.ar_text_position = SinePositionalEmbedding(
+            self.embedding_dim, dropout=0.1, scale=False, alpha=True, max_batch_size=max_batch_size, max_seq_len=max_seq_length
+        )
         self.ar_audio_embedding = TokenEmbedding(self.embedding_dim, self.vocab_size, self.p_dropout)
-        self.ar_audio_position = SinePositionalEmbedding(self.embedding_dim, dropout=0.1, scale=False, alpha=True)
+        self.ar_audio_position = SinePositionalEmbedding(
+            self.embedding_dim, dropout=0.1, scale=False, alpha=True, max_batch_size=max_batch_size, max_seq_len=max_seq_length
+        )
         self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h = TransformerDecoder(hidden_dim, n_layer, num_heads, ffn_dim, vocab_size, max_seq_length, max_batch_size)
 
@@ -292,23 +300,23 @@ class T2SDecoder(nn.Module):
     def embed(
         self,
         x: List[torch.LongTensor],
-        x_lens: torch.LongTensor,
         y: torch.LongTensor,
-        bert_feature: List[torch.LongTensor],
+        bert_features: List[torch.LongTensor],
     ):
-        y_lens = torch.LongTensor([y.shape[1]] * y.shape[0]).to(y.device)
-        max_x_len = max(x_lens.tolist())
-        y_emb = self.ar_audio_embedding.forward(y)
-        y_pos = self.ar_audio_position.forward(y_emb)
-        max_y_len = max(y_lens.tolist())
-        xy_pos = torch.zeros((len(x), max_x_len + max_y_len, self.embedding_dim), dtype=bert_feature[0].dtype, device=x[0].device)
+        x_nested = torch.nested.nested_tensor(x)
+        assert x_nested.size(0) == self.max_batch_size
+        bert_features_nested = torch.nested.nested_tensor(list(map(lambda x: x.transpose(0, 1), bert_features)))
 
-        for idx, (x_item, bert_item) in enumerate(zip(x, bert_feature)):
-            x_item = self.ar_text_embedding.forward(x_item.unsqueeze(0))  # 1, seq_len, embedding dim
-            x_item = x_item + self.bert_proj.forward(bert_item.transpose(0, 1).unsqueeze(0))
-            x_item = self.ar_text_position.forward(x_item).squeeze(0)
-            xy_pos[idx, : x_lens[idx]] = x_item
-            xy_pos[idx, x_lens[idx] : x_lens[idx] + max_y_len] = y_pos[idx]
+        x_emb = self.ar_text_embedding.forward(x_nested)
+        bert = self.bert_proj.forward(bert_features_nested)
+        x_emb = x_emb + bert
+        x_pos = self.ar_text_position.prefill(x_emb)
+
+        y_emb = self.ar_audio_embedding.forward(y)
+        y_emb = torch.nested.as_nested_tensor(y_emb)
+        y_pos = self.ar_audio_position.prefill(y_emb)
+
+        xy_pos = torch.nested.nested_tensor([torch.cat([x_pos[i], y_pos[i]]) for i in range(len(x))])
 
         return xy_pos
 
@@ -336,7 +344,7 @@ class T2SDecoder(nn.Module):
     def infer_batch(
         self,
         x: List[torch.LongTensor],  #####全部文本token
-        x_lens: torch.LongTensor,
+        x_lens: torch.Tensor,
         prompts: torch.LongTensor,  ####参考音频token
         bert_feature: List[torch.LongTensor],
         top_k: int = 5,
@@ -350,22 +358,20 @@ class T2SDecoder(nn.Module):
         self.empty_cache()
 
         bsz = len(x)
-        max_len = x_lens.max()
-
         y = prompts
-        xy_pos = self.embed(x, x_lens, y, bert_feature)
-
-        max_x_len = int(max_len)
-        y_len = y.shape[-2]
-
+        x_lens = x_lens.to(torch.int64)
+        y_len = y.shape[-1]
         prefill_len = x_lens + y_len
+        xy_pos = self.embed(x, y, bert_feature)
 
-        xy_attn_mask = torch.zeros((self.max_batch_size, max_x_len + y_len, max_x_len + y_len), dtype=torch.bool, device=xy_pos.device)
+        xy_attn_mask = []
         for bs in range(bsz):
             pos = int(x_lens[bs].item())
-            mask = xy_attn_mask[bs, : pos + y_len, : pos + y_len]
+            mask = torch.zeros(pos + y_len, pos + y_len)
             mask[:, :pos].fill_(True)
             mask[-y_len:, -y_len:] = ~torch.triu(torch.ones(y_len, y_len, dtype=torch.bool), diagonal=1)
+            xy_attn_mask.append(mask)
+        xy_attn_mask_nested = torch.nested.nested_tensor(xy_attn_mask)
 
         completed = [False] * bsz
         y_results = [None] * bsz
@@ -374,7 +380,8 @@ class T2SDecoder(nn.Module):
 
         for idx in tqdm(range(1500)):
             if idx == 0:
-                xy_dec = self.h.prefill(input_pos, xy_pos, xy_attn_mask)
+                xy_dec = self.h.prefill(xy_pos, xy_attn_mask_nested)
+                xy_dec = torch.stack([t[[-1]] for t in xy_dec.unbind()])
             else:
                 if torch.cuda.is_available() and use_cuda_graph:
                     self.capture(input_pos, xy_pos)
@@ -422,6 +429,4 @@ class T2SDecoder(nn.Module):
                 break
 
             y_emb = self.ar_audio_embedding(y[:, -1:])
-            xy_pos = y_emb * self.ar_audio_position.x_scale + self.ar_audio_position.alpha * self.ar_audio_position.pe[:, y_len + idx].to(  # type: ignore
-                dtype=y_emb.dtype, device=y_emb.device
-            )
+            xy_pos = self.ar_audio_position.forward(input_pos, y_emb)

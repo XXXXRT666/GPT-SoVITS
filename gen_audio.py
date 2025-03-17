@@ -84,8 +84,6 @@ def main(cuda_graph=False, compile=False):
 
     tts_pipeline = TTS(tts_config, BATCH_SIZE)
 
-    tts_pipeline.t2s_model.model = tts_pipeline.t2s_model.model.cuda().half()
-
     tts_pipeline.t2s_model.model = tts_pipeline.t2s_model.model.cuda().half().requires_grad_(False)
 
     if cuda_graph:
