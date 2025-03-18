@@ -210,10 +210,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, theta_resca
 def get_pos_embed_indices(start, length, max_pos, scale=1.0):
     # length = length if isinstance(length, int) else length.max()
     scale = scale * torch.ones_like(start, dtype=torch.float32)  # in case scale is a scalar
-    pos = (
-        start.unsqueeze(1)
-        + (torch.arange(length, device=start.device, dtype=torch.float32).unsqueeze(0) * scale.unsqueeze(1)).long()
-    )
+    pos = start.unsqueeze(1) + (torch.arange(length, device=start.device, dtype=torch.float32).unsqueeze(0) * scale.unsqueeze(1)).long()
     # avoid extra long error.
     pos = torch.where(pos < max_pos, pos, max_pos - 1)
     return pos
@@ -247,9 +244,7 @@ class ConvNeXtV2Block(nn.Module):
     ):
         super().__init__()
         padding = (dilation * (7 - 1)) // 2
-        self.dwconv = nn.Conv1d(
-            dim, dim, kernel_size=7, padding=padding, groups=dim, dilation=dilation
-        )  # depthwise conv
+        self.dwconv = nn.Conv1d(dim, dim, kernel_size=7, padding=padding, groups=dim, dilation=dilation)  # depthwise conv
         self.norm = nn.LayerNorm(dim, eps=1e-6)
         self.pwconv1 = nn.Linear(dim, intermediate_dim)  # pointwise/1x1 convs, implemented with linear layers
         self.act = nn.GELU()
@@ -390,6 +385,7 @@ class Attention(nn.Module):
 
 
 # Attention processor
+
 
 # from torch.nn.attention import SDPBackend
 # torch.backends.cuda.enable_flash_sdp(True)
@@ -544,6 +540,7 @@ class JointAttnProcessor:
 
 
 # DiT Block
+
 
 class DiTBlock(nn.Module):
     def __init__(self, dim, heads, dim_head, ff_mult=4, dropout=0.1):

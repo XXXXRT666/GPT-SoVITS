@@ -51,9 +51,9 @@ bert_path = os.environ.get("bert_path", None)
 version = os.environ.get("version", "v2")
 
 import gradio as gr
-from TTS_infer_pack.text_segmentation_method import get_method
-from TTS_infer_pack.TTS import TTS, TTS_Config
 
+from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import get_method
+from GPT_SoVITS.TTS_infer_pack.TTS import TTS, TTS_Config
 from tools.i18n.i18n import I18nAuto, scan_language_list
 
 language = os.environ.get("language", "Auto")
@@ -143,7 +143,6 @@ def inference(
     parallel_infer,
     repetition_penalty,
 ):
-
     seed = -1 if keep_random else seed
     actual_seed = seed if seed not in [-1, "", None] else random.randrange(1 << 32)
     inputs = {
@@ -292,7 +291,6 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
     with gr.Group():
         gr.Markdown(value=i18n("推理设置"))
         with gr.Row():
-
             with gr.Column():
                 batch_size = gr.Slider(minimum=1, maximum=200, step=1, label=i18n("batch_size"), value=5, interactive=False)
                 fragment_interval = gr.Slider(minimum=0.01, maximum=1, step=0.01, label=i18n("分段间隔(秒)"), value=0.3, interactive=True)

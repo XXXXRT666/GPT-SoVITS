@@ -1,12 +1,13 @@
 # reference: https://huggingface.co/spaces/Naozumi0512/Bert-VITS2-Cantonese-Yue/blob/main/text/chinese.py
 
-import sys
 import re
+import sys
+
 import cn2an
 import ToJyutping
 
-from text.symbols import punctuation
-from text.zh_normalization.text_normlization import TextNormalizer
+from GPT_SoVITS.text.symbols import punctuation
+from GPT_SoVITS.text.zh_normalization.text_normlization import TextNormalizer
 
 normalizer = lambda x: cn2an.transform(x, "an2cn")
 
@@ -99,9 +100,7 @@ def replace_punctuation(text):
 
     replaced_text = pattern.sub(lambda x: rep_map[x.group()], text)
 
-    replaced_text = re.sub(
-        r"[^\u4e00-\u9fa5" + "".join(punctuation) + r"]+", "", replaced_text
-    )
+    replaced_text = re.sub(r"[^\u4e00-\u9fa5" + "".join(punctuation) + r"]+", "", replaced_text)
 
     return replaced_text
 
@@ -115,7 +114,9 @@ def text_normalize(text):
     return dest_text
 
 
-punctuation_set=set(punctuation)
+punctuation_set = set(punctuation)
+
+
 def jyuping_to_initials_finals_tones(jyuping_syllables):
     initials_finals = []
     tones = []
@@ -160,12 +161,14 @@ def jyuping_to_initials_finals_tones(jyuping_syllables):
     assert len(initials_finals) == len(tones)
 
     ###魔改为辅音+带音调的元音
-    phones=[]
-    for a,b in zip(initials_finals,tones):
-        if(b not in [-1,0]):###防止粤语和普通话重合开头加Y，如果是标点，不加。
-            todo="%s%s"%(a,b)
-        else:todo=a
-        if(todo not in punctuation_set):todo="Y%s"%todo
+    phones = []
+    for a, b in zip(initials_finals, tones):
+        if b not in [-1, 0]:  ###防止粤语和普通话重合开头加Y，如果是标点，不加。
+            todo = "%s%s" % (a, b)
+        else:
+            todo = a
+        if todo not in punctuation_set:
+            todo = "Y%s" % todo
         phones.append(todo)
 
     # return initials_finals, tones, word2ph
@@ -194,7 +197,7 @@ def get_jyutping(text):
 
 
 def get_bert_feature(text, word2ph):
-    from text import chinese_bert
+    from GPT_SoVITS.text import chinese_bert
 
     return chinese_bert.get_bert_feature(text, word2ph)
 

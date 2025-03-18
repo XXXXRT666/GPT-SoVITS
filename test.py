@@ -84,7 +84,6 @@ all_bert_features_ = all_bert_features[I]
 # print(xy_attn_mask[1, 0, 0])
 
 with torch.no_grad():
-
     # xy_pos_A = A.infer_panel_batch_infer(all_phoneme_ids, all_phoneme_lens, prompt, all_bert_features)
 
     # xy_pos_B = B.infer_batch(all_phoneme_ids, all_phoneme_lens, prompt, all_bert_features)

@@ -93,7 +93,6 @@ class Attention(nn.Module):
             state_dict[new_key] = state_dict.pop(key)
 
     def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
-
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
@@ -113,13 +112,11 @@ class Attention(nn.Module):
         return attn
 
     def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
-
         bsz = x.size(0)
 
         outputs = []
 
         for bs in range(bsz):
-
             x_b = x[bs].unsqueeze(0)
 
             q, k, v = self.in_proj.forward(x_b.unsqueeze(0)).chunk(3, dim=-1)
@@ -188,7 +185,6 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerDecoder(nn.Module):
-
     def __init__(
         self,
         hidden_dim,
@@ -393,7 +389,6 @@ class T2SDecoder(nn.Module):
         #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA], record_shapes=True, with_stack=True
         # ) as prof:
         with contextlib.nullcontext():
-
             for idx in tqdm(range(1500)):
                 if idx == 0:
                     xy_dec = self.h.prefill(xy_pos, xy_attn_mask_nested)

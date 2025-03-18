@@ -4,7 +4,12 @@ import math
 from typing import List, Optional
 
 import torch
-from AR.models.utils import (
+from torch import nn
+from torch.nn import functional as F
+from torchmetrics.classification import MulticlassAccuracy
+from tqdm import tqdm
+
+from GPT_SoVITS.AR.models.utils import (
     dpo_loss,
     get_batch_logps,
     logits_to_probs,
@@ -14,16 +19,12 @@ from AR.models.utils import (
     sample,
     topk_sampling,
 )
-from AR.modules.embedding import SinePositionalEmbedding, TokenEmbedding
-from AR.modules.transformer import (
+from GPT_SoVITS.AR.modules.embedding import SinePositionalEmbedding, TokenEmbedding
+from GPT_SoVITS.AR.modules.transformer import (
     LayerNorm,
     TransformerEncoder,
     TransformerEncoderLayer,
 )
-from torch import nn
-from torch.nn import functional as F
-from torchmetrics.classification import MulticlassAccuracy
-from tqdm import tqdm
 
 default_config = {
     "embedding_dim": 512,
@@ -41,7 +42,11 @@ default_config = {
 # @torch.jit.script ## 使用的话首次推理会非常慢，而且推理速度不稳定
 # Efficient implementation equivalent to the following:
 def scaled_dot_product_attention(
-    query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attn_mask: Optional[torch.Tensor] = None, scale: Optional[torch.Tensor] = None
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_mask: Optional[torch.Tensor] = None,
+    scale: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     B, H, L, S = query.size(0), query.size(1), query.size(-2), key.size(-2)
     if scale is None:
@@ -128,8 +133,13 @@ class T2SBlock:
         else:
             return x * padding_mask
 
-    def process_prompt(self, x: torch.Tensor, attn_mask: torch.Tensor, padding_mask: Optional[torch.Tensor] = None, torch_sdpa: bool = True):
-
+    def process_prompt(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+        torch_sdpa: bool = True,
+    ):
         assert padding_mask is None
 
         q, k, v = F.linear(x, self.qkv_w, self.qkv_b).chunk(3, dim=-1)
@@ -169,7 +179,12 @@ class T2SBlock:
         return x, k_cache, v_cache
 
     def decode_next_token(
-        self, x: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor, attn_mask: Optional[torch.Tensor] = None, torch_sdpa: bool = True
+        self,
+        x: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+        torch_sdpa: bool = True,
     ):
         q, k, v = F.linear(x, self.qkv_w, self.qkv_b).chunk(3, dim=-1)
 
@@ -215,7 +230,13 @@ class T2STransformer:
         self.num_blocks: int = num_blocks
         self.blocks = blocks
 
-    def process_prompt(self, x: torch.Tensor, attn_mask: torch.Tensor, padding_mask: Optional[torch.Tensor] = None, torch_sdpa: bool = True):
+    def process_prompt(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+        torch_sdpa: bool = True,
+    ):
         k_cache: List[torch.Tensor] = []
         v_cache: List[torch.Tensor] = []
         for i in range(self.num_blocks):
@@ -287,7 +308,12 @@ class Text2SemanticDecoder(nn.Module):
 
         for i in range(self.num_layers):
             layer = self.h.layers[i]
-            t2smlp = T2SMLP(layer.linear1.weight, layer.linear1.bias, layer.linear2.weight, layer.linear2.bias)
+            t2smlp = T2SMLP(
+                layer.linear1.weight,
+                layer.linear1.bias,
+                layer.linear2.weight,
+                layer.linear2.bias,
+            )
 
             block = T2SBlock(
                 self.num_head,
@@ -551,7 +577,15 @@ class Text2SemanticDecoder(nn.Module):
         if prompts is None:
             print("Warning: Prompt free is not supported batch_infer! switch to naive_infer")
             return self.infer_panel_naive_batched(
-                x, x_lens, prompts, bert_feature, top_k=top_k, top_p=top_p, early_stop_num=early_stop_num, temperature=temperature, **kwargs
+                x,
+                x_lens,
+                prompts,
+                bert_feature,
+                top_k=top_k,
+                top_p=top_p,
+                early_stop_num=early_stop_num,
+                temperature=temperature,
+                **kwargs,
             )
 
         max_len = kwargs.get("max_len", x_lens.max())
@@ -663,7 +697,14 @@ class Text2SemanticDecoder(nn.Module):
             else:
                 attn_mask = F.pad(attn_mask, (0, 1), value=False)
 
-            samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
+            samples = sample(
+                logits,
+                y,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                temperature=temperature,
+            )[0]
 
             y = torch.concat([y, samples], dim=1)
 
@@ -841,7 +882,14 @@ class Text2SemanticDecoder(nn.Module):
             if idx < 11:  ###至少预测出10个token不然不给停止（0.4s）
                 logits = logits[:, :-1]
 
-            samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
+            samples = sample(
+                logits,
+                y,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                temperature=temperature,
+            )[0]
 
             y = torch.concat([y, samples], dim=1)
 
@@ -881,4 +929,15 @@ class Text2SemanticDecoder(nn.Module):
         repetition_penalty: float = 1.35,
         **kwargs,
     ):
-        return self.infer_panel_naive(x, x_lens, prompts, bert_feature, top_k, top_p, early_stop_num, temperature, repetition_penalty, **kwargs)
+        return self.infer_panel_naive(
+            x,
+            x_lens,
+            prompts,
+            bert_feature,
+            top_k,
+            top_p,
+            early_stop_num,
+            temperature,
+            repetition_penalty,
+            **kwargs,
+        )

@@ -6,7 +6,8 @@ import soundfile as sf
 import torch
 import torch._inductor.config
 from torch.nn.attention import SDPBackend, sdpa_kernel
-from TTS_infer_pack.TTS import TTS, TTS_Config
+
+from GPT_SoVITS.TTS_infer_pack.TTS import TTS, TTS_Config
 
 
 def with_sdpa_kernel_math(func):

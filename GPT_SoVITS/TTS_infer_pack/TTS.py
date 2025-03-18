@@ -20,14 +20,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import yaml
-from AR.models.t2s_lightning_module import Text2SemanticLightningModule
-from feature_extractor.cnhubert import CNHubert
-from module.mel_processing import spectrogram_torch
-from module.models import SynthesizerTrn
 from transformers import AutoModelForMaskedLM, AutoTokenizer
-from TTS_infer_pack.text_segmentation_method import splits
-from TTS_infer_pack.TextPreprocessor import TextPreprocessor
 
+from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
+from GPT_SoVITS.feature_extractor.cnhubert import CNHubert
+from GPT_SoVITS.module.mel_processing import spectrogram_torch
+from GPT_SoVITS.module.models import SynthesizerTrn
+from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import splits
+from GPT_SoVITS.TTS_infer_pack.TextPreprocessor import TextPreprocessor
 from tools.i18n.i18n import I18nAuto, scan_language_list
 from tools.my_utils import load_audio
 
@@ -110,7 +110,19 @@ class TTS_Config:
     }
     configs: dict = None
     v1_languages: list = ["auto", "en", "zh", "ja", "all_zh", "all_ja"]
-    v2_languages: list = ["auto", "auto_yue", "en", "zh", "ja", "yue", "ko", "all_zh", "all_ja", "all_yue", "all_ko"]
+    v2_languages: list = [
+        "auto",
+        "auto_yue",
+        "en",
+        "zh",
+        "ja",
+        "yue",
+        "ko",
+        "all_zh",
+        "all_ja",
+        "all_yue",
+        "all_ko",
+    ]
     languages: list = v2_languages
     # "all_zh",#全部按中文识别
     # "en",#全部按英文识别#######不变
@@ -125,7 +137,6 @@ class TTS_Config:
     # "auto_yue",#多语种启动切分识别语种
 
     def __init__(self, configs: Union[dict, str] = None):
-
         # 设置默认配置文件路径
         configs_base_path: str = "GPT_SoVITS/configs/"
         os.makedirs(configs_base_path, exist_ok=True)
@@ -327,7 +338,10 @@ class TTS:
         self.configs.semantic_frame_rate = "25hz"
         kwargs = hps["model"]
         vits_model = SynthesizerTrn(
-            self.configs.filter_length // 2 + 1, self.configs.segment_size // self.configs.hop_length, n_speakers=self.configs.n_speakers, **kwargs
+            self.configs.filter_length // 2 + 1,
+            self.configs.segment_size // self.configs.hop_length,
+            n_speakers=self.configs.n_speakers,
+            **kwargs,
         )
 
         if hasattr(vits_model, "enc_q"):
@@ -474,7 +488,13 @@ class TTS:
             prompt_semantic = codes[0, 0].to(self.configs.device)
             self.prompt_cache["prompt_semantic"] = prompt_semantic
 
-    def batch_sequences(self, sequences: List[torch.Tensor], axis: int = 0, pad_value: int = 0, max_length: int = None):
+    def batch_sequences(
+        self,
+        sequences: List[torch.Tensor],
+        axis: int = 0,
+        pad_value: int = 0,
+        max_length: int = None,
+    ):
         seq = sequences[0]
         ndim = seq.dim()
         if axis < 0:
@@ -778,7 +798,10 @@ class TTS:
             data = self.text_preprocessor.preprocess(text, text_lang, text_split_method, self.configs.version)
             res_len = len(data) % batch_size
             if len(data) == 0:
-                yield self.configs.sampling_rate, np.zeros(int(self.configs.sampling_rate), dtype=np.int16)
+                yield (
+                    self.configs.sampling_rate,
+                    np.zeros(int(self.configs.sampling_rate), dtype=np.int16),
+                )
                 return
 
             batch_index_list: list = None
@@ -792,7 +815,7 @@ class TTS:
                 precision=self.precision,
             )
         else:
-            print(f'############ {i18n("切分文本")} ############')
+            print(f"############ {i18n('切分文本')} ############")
             texts = self.text_preprocessor.pre_seg_text(text, text_lang, text_split_method)
             res_len = len(texts) % batch_size
             data = []
@@ -803,7 +826,7 @@ class TTS:
 
             def make_batch(batch_texts):
                 batch_data = []
-                print(f'############ {i18n("提取文本Bert特征")} ############')
+                print(f"############ {i18n('提取文本Bert特征')} ############")
                 for text in tqdm(batch_texts):
                     phones, bert_features, norm_text = self.text_preprocessor.segment_and_extract_feature_for_text(
                         text, text_lang, self.configs.version
@@ -911,9 +934,12 @@ class TTS:
                     audio_frag_end_idx = [sum(audio_frag_idx[: i + 1]) for i in range(0, len(audio_frag_idx))]
                     all_pred_semantic = torch.cat(pred_semantic_list).unsqueeze(0).unsqueeze(0).to(self.configs.device)
                     _batch_phones = torch.cat(batch_phones).unsqueeze(0).to(self.configs.device)
-                    _batch_audio_fragment = self.vits_model.decode(all_pred_semantic, _batch_phones, refer_audio_spec, speed=speed_factor).detach()[
-                        0, 0, :
-                    ]
+                    _batch_audio_fragment = self.vits_model.decode(
+                        all_pred_semantic,
+                        _batch_phones,
+                        refer_audio_spec,
+                        speed=speed_factor,
+                    ).detach()[0, 0, :]
                     audio_frag_end_idx.insert(0, 0)
                     batch_audio_fragment = [
                         _batch_audio_fragment[audio_frag_end_idx[i - 1] : audio_frag_end_idx[i]] for i in range(1, len(audio_frag_end_idx))
@@ -930,25 +956,48 @@ class TTS:
                 t_45 += t5 - t4
                 if return_fragment:
                     print("%.3f\t%.3f\t%.3f\t%.3f" % (t1 - t0, t2 - t1, t4 - t3, t5 - t4))
-                    yield self.audio_postprocess([batch_audio_fragment], self.configs.sampling_rate, None, speed_factor, False, fragment_interval)
+                    yield self.audio_postprocess(
+                        [batch_audio_fragment],
+                        self.configs.sampling_rate,
+                        None,
+                        speed_factor,
+                        False,
+                        fragment_interval,
+                    )
                 else:
                     audio.append(batch_audio_fragment)
 
                 if self.stop_flag:
-                    yield self.configs.sampling_rate, np.zeros(int(self.configs.sampling_rate), dtype=np.int16)
+                    yield (
+                        self.configs.sampling_rate,
+                        np.zeros(int(self.configs.sampling_rate), dtype=np.int16),
+                    )
                     return
 
             if not return_fragment:
                 print("%.3f\t%.3f\t%.3f\t%.3f" % (t1 - t0, t2 - t1, t_34, t_45))
                 if len(audio) == 0:
-                    yield self.configs.sampling_rate, np.zeros(int(self.configs.sampling_rate), dtype=np.int16)
+                    yield (
+                        self.configs.sampling_rate,
+                        np.zeros(int(self.configs.sampling_rate), dtype=np.int16),
+                    )
                     return
-                yield self.audio_postprocess(audio, self.configs.sampling_rate, batch_index_list, speed_factor, split_bucket, fragment_interval)
+                yield self.audio_postprocess(
+                    audio,
+                    self.configs.sampling_rate,
+                    batch_index_list,
+                    speed_factor,
+                    split_bucket,
+                    fragment_interval,
+                )
 
         except Exception as e:
             traceback.print_exc()
             # 必须返回一个空音频, 否则会导致显存不释放。
-            yield self.configs.sampling_rate, np.zeros(int(self.configs.sampling_rate), dtype=np.int16)
+            yield (
+                self.configs.sampling_rate,
+                np.zeros(int(self.configs.sampling_rate), dtype=np.int16),
+            )
             # 重置模型, 否则会导致显存释放不完全。
             del self.t2s_model
             del self.vits_model
@@ -979,7 +1028,11 @@ class TTS:
         split_bucket: bool = True,
         fragment_interval: float = 0.3,
     ) -> Tuple[int, np.ndarray]:
-        zero_wav = torch.zeros(int(self.configs.sampling_rate * fragment_interval), dtype=self.precision, device=self.configs.device)
+        zero_wav = torch.zeros(
+            int(self.configs.sampling_rate * fragment_interval),
+            dtype=self.precision,
+            device=self.configs.device,
+        )
 
         for i, batch in enumerate(audio):
             for j, audio_fragment in enumerate(batch):

@@ -75,7 +75,6 @@ class Attention(nn.Module):
             state_dict[new_key] = state_dict.pop(key)
 
     def forward(self, x: Tensor, mask: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
-
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
@@ -98,7 +97,6 @@ class Attention(nn.Module):
         return attn
 
     def forward_static(self, x: Tensor, mask: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
-
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
@@ -121,7 +119,6 @@ class Attention(nn.Module):
         return attn
 
     def forward_prefill(self, x: Tensor, mask: Tensor) -> Tensor:
-
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
@@ -165,7 +162,6 @@ class TransformerBlock(nn.Module):
         self._register_load_state_dict_pre_hook(self.load_hook)
 
     def load_hook(self, state_dict, prefix, *args):
-
         for key in list(state_dict.keys()):
             new_key = (
                 key.replace("self_attn", "attention")
@@ -192,7 +188,6 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerDecoder(nn.Module):
-
     def __init__(
         self,
         hidden_dim,
