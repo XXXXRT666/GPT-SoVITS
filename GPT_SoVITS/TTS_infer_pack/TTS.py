@@ -920,9 +920,9 @@ class TTS:
                     ]
                 else:
                     # ## vits串行推理
-                    for i in enumerate(pred_semantic_list):
-                        phones = batch_phones[i].unsqueeze(0).to(self.configs.device)
-                        _pred_semantic = i.unsqueeze(0).unsqueeze(0)  # .unsqueeze(0)#mq要多unsqueeze一次
+                    for semantic, batch_phone in zip(pred_semantic_list, batch_phones):
+                        phones = batch_phone.unsqueeze(0).to(self.configs.device)
+                        _pred_semantic = semantic.unsqueeze(0).unsqueeze(0)  # .unsqueeze(0)#mq要多unsqueeze一次
                         audio_fragment = self.vits_model.decode(_pred_semantic, phones, refer_audio_spec, speed=speed_factor).detach()[0, 0, :]
                         batch_audio_fragment.append(audio_fragment)  ###试试重建不带上prompt部分
 

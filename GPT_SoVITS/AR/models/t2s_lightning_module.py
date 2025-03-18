@@ -9,11 +9,12 @@ from typing import Dict
 
 import torch
 from AR.models.t2s_model import Text2SemanticDecoder
-from AR.models.t2s_model_compile import T2SDecoder as T2SDecoderCompile
 from AR.models.t2s_model_flash_attn import T2SDecoder
 from AR.modules.lr_schedulers import WarmupCosineLRSchedule
 from AR.modules.optim import ScaledAdam
 from pytorch_lightning import LightningModule
+
+# from AR.models.t2s_model_compile import T2SDecoder
 
 
 class Text2SemanticLightningModule(LightningModule):

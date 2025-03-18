@@ -1,3 +1,4 @@
+import contextlib
 from typing import List, Optional, Sequence
 
 import flash_attn
@@ -32,9 +33,21 @@ class KVCache(nn.Module):
         self.v_cache: Tensor
 
     def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor):
-        # input_pos: [B, 1], k_val: [B, 1, H, D]
+        # input_pos: [B, ], k_val: [B, 1, H, D]
 
-        index = (input_pos - 1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.num_heads, self.head_dim)  # (bs, 1, num_head, head_dim)
+        index = (
+            (input_pos - 1)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+            .expand(
+                -1,
+                -1,
+                self.num_heads,
+                self.head_dim,
+            )
+            .to(torch.int64)
+        )  # (bs, 1, num_head, head_dim)
 
         k_out = self.k_cache
         v_out = self.v_cache
@@ -85,9 +98,9 @@ class Attention(nn.Module):
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
 
-        q = q.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
-        k = k.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
-        v = v.contiguous().view(bsz, -1, self.num_heads, self.head_dim)
+        q = q.view(bsz, -1, self.num_heads, self.head_dim)
+        k = k.view(bsz, -1, self.num_heads, self.head_dim)
+        v = v.view(bsz, -1, self.num_heads, self.head_dim)
 
         k, v = self.kv_cache.update(input_pos, k, v)
 
@@ -202,7 +215,7 @@ class TransformerDecoder(nn.Module):
         self.max_seq_length: int = max_seq_length
         self.max_batch_size: int = max_batch_size
 
-        self.register_buffer("input_pos", torch.zeros((self.max_batch_size,)).to(torch.int64), persistent=False)
+        self.register_buffer("input_pos", torch.zeros((self.max_batch_size,)).to(torch.int32), persistent=False)
         self.register_buffer("xy_pos", torch.zeros((self.max_batch_size, 1, self.hidden_dim)), persistent=False)
         self.register_buffer("xy_dec", torch.zeros((self.max_batch_size, 1, self.hidden_dim)), persistent=False)
 
@@ -335,10 +348,8 @@ class T2SDecoder(nn.Module):
         torch.cuda.current_stream().wait_stream(s)
 
         self.__CUDAGraph = torch.cuda.CUDAGraph()
-
         with torch.cuda.graph(self.__CUDAGraph):
             self.h.xy_dec = self.h.forward(self.h.input_pos, self.h.xy_pos)
-
         torch.cuda.synchronize()
 
     def infer_batch(
@@ -367,66 +378,85 @@ class T2SDecoder(nn.Module):
         xy_attn_mask = []
         for bs in range(bsz):
             pos = int(x_lens[bs].item())
-            mask = torch.zeros(pos + y_len, pos + y_len)
+            mask = torch.zeros(pos + y_len, pos + y_len, device=xy_pos.device).bool()
             mask[:, :pos].fill_(True)
-            mask[-y_len:, -y_len:] = ~torch.triu(torch.ones(y_len, y_len, dtype=torch.bool), diagonal=1)
+            mask[-y_len:, -y_len:] = ~torch.triu(torch.ones(y_len, y_len, device=xy_pos.device, dtype=torch.bool), diagonal=1)
             xy_attn_mask.append(mask)
         xy_attn_mask_nested = torch.nested.nested_tensor(xy_attn_mask)
 
         completed = [False] * bsz
-        y_results = [None] * bsz
+        y_results: List[Optional[Tensor]] = [None] * bsz
         self.h.input_pos += prefill_len
         input_pos = self.h.input_pos
 
-        for idx in tqdm(range(1500)):
-            if idx == 0:
-                xy_dec = self.h.prefill(xy_pos, xy_attn_mask_nested)
-                xy_dec = torch.stack([t[[-1]] for t in xy_dec.unbind()])
-            else:
-                if torch.cuda.is_available() and use_cuda_graph:
-                    self.capture(input_pos, xy_pos)
-                if self.__CUDAGraph is not None:
-                    self.h.xy_pos.copy_(xy_pos)
-                    self.__CUDAGraph.replay()
-                    xy_dec = self.h.xy_dec.clone()
+        # with torch.profiler.profile(
+        #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA], record_shapes=True, with_stack=True
+        # ) as prof:
+        with contextlib.nullcontext():
+
+            for idx in tqdm(range(1500)):
+                if idx == 0:
+                    xy_dec = self.h.prefill(xy_pos, xy_attn_mask_nested)
+                    xy_dec = torch.stack([t[[-1]] for t in xy_dec.unbind()])
+                    input_pos = input_pos.to(torch.int32)
                 else:
-                    xy_dec = self.h.forward(input_pos, xy_pos)
+                    if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
+                        self.capture(input_pos, xy_pos)
+                    with torch.profiler.record_function("AR"):
+                        # with contextlib.nullcontext():
+                        if self.__CUDAGraph is not None:
+                            self.h.xy_pos.copy_(xy_pos)
+                            self.__CUDAGraph.replay()
+                            xy_dec = self.h.xy_dec.clone()
+                        else:
+                            xy_dec = self.h.forward(input_pos, xy_pos)
 
-            logits = self.ar_predict_layer(xy_dec[:, -1])
-            input_pos += 1
+                logits = self.ar_predict_layer(xy_dec[:, -1])
+                input_pos += 1
 
-            if idx == 0:
-                logits = logits[:, :-1]
+                if idx == 0:
+                    logits = logits[:, :-1]
 
-            samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
+                samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
 
-            y = torch.concat([y, samples], dim=1)
+                y = torch.concat([y, samples], dim=1)
 
-            tokens = torch.argmax(logits, dim=-1)
+                tokens = torch.argmax(logits, dim=-1)
 
-            EOS_mask = (samples[:, 0] == self.EOS) | (tokens == self.EOS)
-            EOS_indices: List[int] = torch.where(EOS_mask)[0].tolist()
+                EOS_mask = (samples[:, 0] == self.EOS) | (tokens == self.EOS)
+                EOS_indices: List[int] = torch.where(EOS_mask)[0].tolist()
 
-            for i in EOS_indices:
-                if not completed[i]:
-                    y_results[i] = y[i, y_len : input_pos[i]]  # type: ignore
-                    completed[i] = True
-
-            if (early_stop_num != -1 and (y.shape[1] - y_len) > early_stop_num) or idx == 1499:
-                tqdm.write(f"Reached early stop limit: {early_stop_num}")
-                for i in range(bsz):
+                for i in EOS_indices:
                     if not completed[i]:
-                        y_results[i] = y[i, y_len : input_pos[i]]  # type: ignore
+                        y_results[i] = y[i, y_len:-1]  # type: ignore
                         completed[i] = True
-                break
 
-            if all(completed):
-                if y.shape[1] == 0:
-                    y = torch.concat([y, torch.zeros_like(samples)], dim=1)
-                    tqdm.write("bad zero prediction")
-                else:
-                    tqdm.write(f"T2S Decoding EOS [{prefill_len} -> {y.shape[1]}]")
-                break
+                if (early_stop_num != -1 and (y.shape[1] - y_len) > early_stop_num) or idx == 1499:
+                    tqdm.write(f"Reached early stop limit: {early_stop_num}")
+                    for i in range(bsz):
+                        if not completed[i]:
+                            y_results[i] = y[i, y_len:]  # type: ignore
+                            completed[i] = True
+                    break
 
-            y_emb = self.ar_audio_embedding(y[:, -1:])
-            xy_pos = self.ar_audio_position.forward(input_pos, y_emb)
+                if all(completed):
+                    if y.shape[1] == 0:
+                        y = torch.concat([y, torch.zeros_like(samples)], dim=1)
+                        tqdm.write("bad zero prediction")
+                    else:
+                        tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {y.shape[1]}")
+                    break
+
+                y_emb = self.ar_audio_embedding(y[:, -1:])
+                xy_pos = self.ar_audio_position.forward(input_pos - x_lens, y_emb)
+
+                # if idx == 50:
+                #     break
+
+        # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
+
+        # print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=30))
+
+        # exit()
+
+        return y_results

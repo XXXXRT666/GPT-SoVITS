@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from GPT_SoVITS.AR.models.t2s_model import Text2SemanticDecoder
 from GPT_SoVITS.AR.models.t2s_model_compile import T2SDecoder
+from GPT_SoVITS.AR.models.t2s_model_flash_attn import T2SDecoder as T2SDecoder_flash
 from GPT_SoVITS.AR.models.utils import sample
 
 
@@ -35,7 +36,7 @@ def set_seed(seed: int):
     return seed
 
 
-path = "/Users/XXXXRT/Desktop/GPT-SoVITS Main/GPT_weights_v2/BXY_V2-e10.ckpt"
+path = "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt"
 config: dict = {
     "model": {
         "hidden_dim": 512,
@@ -49,19 +50,33 @@ config: dict = {
     },
 }
 
-# A = Text2SemanticDecoder(config=config)
-B = T2SDecoder(config=config)
+A = Text2SemanticDecoder(config=config)
+B = T2SDecoder_flash(config=config, max_batch_size=2)
 
 
-ckpt = torch.load(path, map_location="cpu")["weight"]
-# print(A.load_state_dict(ckpt))
+ckpt = torch.load(path, map_location="cuda")["weight"]
+print(A.load_state_dict(ckpt))
 print(B.load_state_dict(ckpt))
 
-# A.eval()
+A.eval()
 B.eval()
+
+A = A.cuda().half()
+B = B.cuda().half()
 
 with open("infer.pkl", mode="rb") as f:
     all_phoneme_ids, all_phoneme_lens, prompt, all_bert_features = pickle.load(f)
+
+all_phoneme_ids = [i.cuda() for i in all_phoneme_ids]
+all_phoneme_lens = all_phoneme_lens.cuda()
+prompt = prompt.cuda()
+all_bert_features = [i.cuda().half() for i in all_bert_features]
+
+I = 1
+
+all_phoneme_ids_ = all_phoneme_ids[I]
+prompt_ = prompt[I]
+all_bert_features_ = all_bert_features[I]
 
 # with open("prefill.pkl", mode="rb") as f:
 #     xy_pos, k_cache, v_cache, attn_mask, y, y_len = pickle.load(f)
@@ -100,13 +115,13 @@ with torch.no_grad():
 
     # a = A.infer_panel_batch_infer(all_phoneme_ids, all_phoneme_lens, prompt, all_bert_features, 5, 1)
 
-    a = B.infer_batch(all_phoneme_ids, all_phoneme_lens, prompt, all_bert_features)
+    a = A.infer_panel_naive(all_phoneme_ids_.unsqueeze(0), all_phoneme_lens, prompt_.unsqueeze(0), all_bert_features_.unsqueeze(0))
 
-    b = B.infer_batch(all_phoneme_ids, all_phoneme_lens, prompt, all_bert_features)
+    b = B.infer_batch(all_phoneme_ids[: I + 1], all_phoneme_lens[: I + 1], prompt[: I + 1], all_bert_features[: I + 1])
 
-    # print(a.shape)
+    print(a.shape)
 
-    # print(b.shape)
+    print(b.shape)
 
     # print([(x != y).sum() for x, y in zip(a, b)])
 
@@ -114,4 +129,4 @@ with torch.no_grad():
 
     # b = F.scaled_dot_product_attention(*b)
 
-    print(torch.mean((a.float() - b.cpu().float()) ** 2))
+    print(torch.mean((a.float() - b.float()) ** 2))

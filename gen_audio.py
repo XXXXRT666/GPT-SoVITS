@@ -99,8 +99,10 @@ def main(cuda_graph=False, compile=False):
 
         torch._inductor.config.triton.cudagraph_support_input_mutation = True
 
+        # with sdpa_kernel(SDPBackend.MATH):
+
         tts_pipeline.t2s_model.model.h.forward = torch.compile(
-            with_sdpa_kernel_math(tts_pipeline.t2s_model.model.h.forward),
+            tts_pipeline.t2s_model.model.h.forward,
             # mode="reduce-overhead",
             mode="max-autotune",
             # mode="max-autotune-no-cudagraphs",

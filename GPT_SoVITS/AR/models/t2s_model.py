@@ -767,8 +767,8 @@ class Text2SemanticDecoder(nn.Module):
         x_lens: torch.LongTensor,
         prompts: torch.LongTensor,  ####参考音频token
         bert_feature: torch.LongTensor,
-        top_k: int = -100,
-        top_p: int = 100,
+        top_k: int = 5,
+        top_p: int = 1,
         early_stop_num: int = -1,
         temperature: float = 1.0,
         repetition_penalty: float = 1.35,
@@ -830,6 +830,9 @@ class Text2SemanticDecoder(nn.Module):
                 xy_dec, k_cache, v_cache = self.t2s_transformer.process_prompt(xy_pos, xy_attn_mask, None)
             else:
                 xy_dec, k_cache, v_cache = self.t2s_transformer.decode_next_token(xy_pos, k_cache, v_cache)
+                print(k_cache[0].reshape(1, -1, 16, 32)[0, :, 0, 0])
+                if idx == 4:
+                    return xy_dec
 
             logits = self.ar_predict_layer(xy_dec[:, -1])
 
