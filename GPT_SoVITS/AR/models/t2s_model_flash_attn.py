@@ -397,8 +397,8 @@ class T2SDecoder(nn.Module):
                 else:
                     if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
                         self.capture(input_pos, xy_pos)
-                    with torch.profiler.record_function("AR"):
-                        # with contextlib.nullcontext():
+                    # with torch.profiler.record_function("AR"):
+                    with contextlib.nullcontext():
                         if self.__CUDAGraph is not None:
                             self.h.xy_pos.copy_(xy_pos)
                             self.__CUDAGraph.replay()
