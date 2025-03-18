@@ -5,17 +5,17 @@
 #   LICENSE is in incl_licenses directory.
 
 
-import torch
-import torch.nn.functional as F
-import torch.nn as nn
-from torch.nn import Conv2d
-from torch.nn.utils import weight_norm, spectral_norm
-from torchaudio.transforms import Spectrogram, Resample
-
-from env import AttrDict
-from utils import get_padding
 import typing
-from typing import Optional, List, Union, Dict, Tuple
+from typing import Dict, List, Optional, Tuple, Union
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from env import AttrDict
+from torch.nn import Conv2d
+from torch.nn.utils import spectral_norm, weight_norm
+from torchaudio.transforms import Resample, Spectrogram
+from utils import get_padding
 
 
 class DiscriminatorP(torch.nn.Module):

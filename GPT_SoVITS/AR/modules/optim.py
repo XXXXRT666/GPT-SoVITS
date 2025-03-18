@@ -16,8 +16,7 @@
 import contextlib
 import logging
 from collections import defaultdict
-from typing import List
-from typing import Tuple
+from typing import List, Tuple
 
 import torch
 from torch import Tensor

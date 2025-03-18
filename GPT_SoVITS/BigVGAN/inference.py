@@ -3,17 +3,17 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import os
 import argparse
 import json
-import torch
+import os
+
 import librosa
-from utils import load_checkpoint
-from meldataset import get_mel_spectrogram
-from scipy.io.wavfile import write
-from env import AttrDict
-from meldataset import MAX_WAV_VALUE
+import torch
 from bigvgan import BigVGAN as Generator
+from env import AttrDict
+from meldataset import MAX_WAV_VALUE, get_mel_spectrogram
+from scipy.io.wavfile import write
+from utils import load_checkpoint
 
 h = None
 device = None

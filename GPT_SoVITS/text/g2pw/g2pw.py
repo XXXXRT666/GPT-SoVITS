@@ -1,13 +1,14 @@
 # This code is modified from https://github.com/mozillazg/pypinyin-g2pW
 
-import pickle
 import os
+import pickle
 
 from pypinyin.constants import RE_HANS
+from pypinyin.contrib.tone_convert import to_tone
+from pypinyin.converter import UltimateConverter
 from pypinyin.core import Pinyin, Style
 from pypinyin.seg.simpleseg import simple_seg
-from pypinyin.converter import UltimateConverter
-from pypinyin.contrib.tone_convert import to_tone
+
 from .onnx_api import G2PWOnnxConverter
 
 current_file_path = os.path.dirname(__file__)

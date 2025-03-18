@@ -1,10 +1,10 @@
+import os
 import time
 
 import librosa
+import soundfile as sf
 import torch
 import torch.nn.functional as F
-import soundfile as sf
-import os
 from transformers import logging as tf_logging
 
 tf_logging.set_verbosity_error()
@@ -13,13 +13,12 @@ import logging
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 
-from transformers import (
-    Wav2Vec2FeatureExtractor,
-    HubertModel,
-)
-
-import utils
 import torch.nn as nn
+import utils
+from transformers import (
+    HubertModel,
+    Wav2Vec2FeatureExtractor,
+)
 
 cnhubert_base_path = None
 

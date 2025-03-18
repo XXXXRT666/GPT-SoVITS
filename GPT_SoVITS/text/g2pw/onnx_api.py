@@ -6,26 +6,21 @@ import warnings
 warnings.filterwarnings("ignore")
 import json
 import os
-import zipfile, requests
-from typing import Any
-from typing import Dict
-from typing import List
-from typing import Tuple
+import zipfile
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import onnxruntime
+import requests
 
 onnxruntime.set_default_logger_severity(3)
 from opencc import OpenCC
+from pypinyin import Style, pinyin
 from transformers import AutoTokenizer
-from pypinyin import pinyin
-from pypinyin import Style
 
-from .dataset import get_char_phoneme_labels
-from .dataset import get_phoneme_labels
-from .dataset import prepare_onnx_input
-from .utils import load_config
 from ..zh_normalization.char_convert import tranditional_to_simplified
+from .dataset import get_char_phoneme_labels, get_phoneme_labels, prepare_onnx_input
+from .utils import load_config
 
 model_version = "1.1"
 

@@ -8,17 +8,17 @@ import sys
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
-import torch
-import json
-from env import AttrDict
-from bigvgan import BigVGAN
-from time import time
-from tqdm import tqdm
-from meldataset import mel_spectrogram, MAX_WAV_VALUE
-from scipy.io.wavfile import write
-import numpy as np
-
 import argparse
+import json
+from time import time
+
+import numpy as np
+import torch
+from bigvgan import BigVGAN
+from env import AttrDict
+from meldataset import MAX_WAV_VALUE, mel_spectrogram
+from scipy.io.wavfile import write
+from tqdm import tqdm
 
 torch.backends.cudnn.benchmark = True
 

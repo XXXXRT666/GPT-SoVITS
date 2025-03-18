@@ -1,4 +1,4 @@
-import argparse, os
+import argparse
 import copy
 import json
 import os
@@ -11,8 +11,8 @@ try:
 except:
     ...
 
-import librosa
 import gradio as gr
+import librosa
 import numpy as np
 import soundfile
 

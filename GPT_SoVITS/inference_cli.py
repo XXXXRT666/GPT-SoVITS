@@ -1,9 +1,10 @@
 import argparse
 import os
+
 import soundfile as sf
 
-from tools.i18n.i18n import I18nAuto
 from GPT_SoVITS.inference_webui import change_gpt_weights, change_sovits_weights, get_tts_wav
+from tools.i18n.i18n import I18nAuto
 
 i18n = I18nAuto()
 

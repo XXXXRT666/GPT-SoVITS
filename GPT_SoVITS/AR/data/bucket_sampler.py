@@ -4,14 +4,11 @@ import itertools
 import math
 import random
 from random import shuffle
-from typing import Iterator
-from typing import Optional
-from typing import TypeVar
+from typing import Iterator, Optional, TypeVar
 
 import torch
 import torch.distributed as dist
-from torch.utils.data import Dataset
-from torch.utils.data import Sampler
+from torch.utils.data import Dataset, Sampler
 
 __all__ = [
     "DistributedBucketSampler",

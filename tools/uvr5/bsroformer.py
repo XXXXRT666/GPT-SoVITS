@@ -1,13 +1,14 @@
 # This code is modified from https://github.com/ZFTurbo/
-import librosa
-from tqdm import tqdm
 import os
-import torch
+import warnings
+
+import librosa
 import numpy as np
 import soundfile as sf
+import torch
 import torch.nn as nn
 import yaml
-import warnings
+from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
 

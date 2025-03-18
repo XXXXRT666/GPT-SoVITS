@@ -1,7 +1,7 @@
-from packaging import version
 import torch
-from torch import nn, einsum
 import torch.nn.functional as F
+from packaging import version
+from torch import einsum, nn
 
 
 def exists(val):

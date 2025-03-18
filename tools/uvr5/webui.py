@@ -1,19 +1,24 @@
-import os
-import traceback, gradio as gr
 import logging
+import os
+import traceback
+
+import gradio as gr
+
 from tools.i18n.i18n import I18nAuto
 from tools.my_utils import clean_path
 
 i18n = I18nAuto()
 
 logger = logging.getLogger(__name__)
-import librosa, ffmpeg
+import sys
+
+import ffmpeg
+import librosa
 import soundfile as sf
 import torch
-import sys
+from bsroformer import Roformer_Loader
 from mdxnet import MDXNetDereverb
 from vr import AudioPre, AudioPreDeEcho
-from bsroformer import Roformer_Loader
 
 try:
     import gradio.analytics as analytics

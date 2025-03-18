@@ -1,24 +1,20 @@
 from functools import partial
+from typing import Callable, List, Optional, Tuple
 
 import torch
-from torch import nn, einsum, Tensor
-from torch.nn import Module, ModuleList
 import torch.nn.functional as F
-
-from bs_roformer.attend import Attend
-from torch.utils.checkpoint import checkpoint
-
-from typing import Tuple, Optional, List, Callable
-# from beartype.typing import Tuple, Optional, List, Callable
-# from beartype import beartype
-
-from rotary_embedding_torch import RotaryEmbedding
-
-from einops import rearrange, pack, unpack, reduce, repeat
+from einops import pack, rearrange, reduce, repeat, unpack
 from einops.layers.torch import Rearrange
-
 from librosa import filters
 
+# from beartype.typing import Tuple, Optional, List, Callable
+# from beartype import beartype
+from rotary_embedding_torch import RotaryEmbedding
+from torch import Tensor, einsum, nn
+from torch.nn import Module, ModuleList
+from torch.utils.checkpoint import checkpoint
+
+from bs_roformer.attend import Attend
 
 # helper functions
 

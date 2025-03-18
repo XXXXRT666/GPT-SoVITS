@@ -1,17 +1,16 @@
-import os
-import glob
-import sys
 import argparse
-import logging
+import glob
 import json
+import logging
+import os
 import subprocess
+import sys
 import traceback
 
 import librosa
 import numpy as np
-from scipy.io.wavfile import read
 import torch
-import logging
+from scipy.io.wavfile import read
 
 logging.getLogger("numba").setLevel(logging.ERROR)
 logging.getLogger("matplotlib").setLevel(logging.ERROR)
@@ -57,8 +56,8 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, skip_optimizer=False
     return model, optimizer, learning_rate, iteration
 
 
-from time import time as ttime
 import shutil
+from time import time as ttime
 
 
 def my_save(fea, path):  #####fix issue: torch.save doesn't support chinese path

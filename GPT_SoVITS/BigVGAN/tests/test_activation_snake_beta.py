@@ -9,8 +9,8 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
 import torch
-from alias_free_activation.cuda import activation1d
 from activations import SnakeBeta
+from alias_free_activation.cuda import activation1d
 
 
 def test_load_fused_kernels():

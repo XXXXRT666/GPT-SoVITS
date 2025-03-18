@@ -1,9 +1,9 @@
 from torch.nn.functional import *
 from torch.nn.functional import (
-    _mha_shape_check,
     _canonical_mask,
-    _none_or_dtype,
     _in_projection_packed,
+    _mha_shape_check,
+    _none_or_dtype,
 )
 
 

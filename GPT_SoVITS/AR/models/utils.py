@@ -1,8 +1,9 @@
 # modified from https://github.com/yangdongchao/SoundStorm/blob/master/soundstorm/s1/AR/models/utils.py
 # reference: https://github.com/lifeiteng/vall-e
+from typing import Tuple
+
 import torch
 import torch.nn.functional as F
-from typing import Tuple
 
 
 def sequence_mask(length, max_length=None):

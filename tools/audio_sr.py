@@ -1,24 +1,27 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import sys, os
+
+import os
+import sys
 import traceback
 
 AP_BWE_main_dir_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "AP_BWE_main")
 sys.path.append(AP_BWE_main_dir_path)
-import glob
 import argparse
+import glob
 import json
-from re import S
-import torch
-import numpy as np
-import torchaudio
 import time
-import torchaudio.functional as aF
-# from attrdict import AttrDict####will be bug in py3.10
+from re import S
 
-from datasets1.dataset import amp_pha_stft, amp_pha_istft
-from models.model import APNet_BWE_Model
-import soundfile as sf
 import matplotlib.pyplot as plt
+import numpy as np
+import soundfile as sf
+import torch
+import torchaudio
+import torchaudio.functional as aF
+
+# from attrdict import AttrDict####will be bug in py3.10
+from datasets1.dataset import amp_pha_istft, amp_pha_stft
+from models.model import APNet_BWE_Model
 from rich.progress import track
 
 

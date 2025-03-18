@@ -8,47 +8,46 @@
 import warnings
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
+import argparse
 import itertools
+import json
 import os
 import time
-import argparse
-import json
-import torch
-import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DistributedSampler, DataLoader
-import torch.multiprocessing as mp
-from torch.distributed import init_process_group
-from torch.nn.parallel import DistributedDataParallel
-from env import AttrDict, build_env
-from meldataset import MelDataset, mel_spectrogram, get_dataset_filelist, MAX_WAV_VALUE
 
+import auraloss
+import torch
+import torch.multiprocessing as mp
+import torch.nn.functional as F
+import torchaudio as ta
 from bigvgan import BigVGAN
 from discriminators import (
+    MultiBandDiscriminator,
     MultiPeriodDiscriminator,
     MultiResolutionDiscriminator,
-    MultiBandDiscriminator,
     MultiScaleSubbandCQTDiscriminator,
 )
+from env import AttrDict, build_env
 from loss import (
+    MultiScaleMelSpectrogramLoss,
+    discriminator_loss,
     feature_loss,
     generator_loss,
-    discriminator_loss,
-    MultiScaleMelSpectrogramLoss,
 )
-
+from meldataset import MAX_WAV_VALUE, MelDataset, get_dataset_filelist, mel_spectrogram
+from pesq import pesq
+from torch.distributed import init_process_group
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 from utils import (
+    load_checkpoint,
     plot_spectrogram,
     plot_spectrogram_clipped,
-    scan_checkpoint,
-    load_checkpoint,
-    save_checkpoint,
     save_audio,
+    save_checkpoint,
+    scan_checkpoint,
 )
-import torchaudio as ta
-from pesq import pesq
-from tqdm import tqdm
-import auraloss
 
 torch.backends.cudnn.benchmark = False
 

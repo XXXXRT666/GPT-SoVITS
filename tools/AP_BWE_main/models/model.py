@@ -1,7 +1,7 @@
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
-from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
+import torch.nn.functional as F
+from torch.nn.utils import remove_weight_norm, spectral_norm, weight_norm
 
 
 # from utils import init_weights, get_padding
@@ -15,8 +15,9 @@ def init_weights(m, mean=0.0, std=0.01):
         m.weight.data.normal_(mean, std)
 
 
+from typing import List, Tuple
+
 import numpy as np
-from typing import Tuple, List
 
 LRELU_SLOPE = 0.1
 

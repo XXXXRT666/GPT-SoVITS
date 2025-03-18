@@ -3,8 +3,9 @@
 from __future__ import print_function
 
 import re
-import inflect
 import unicodedata
+
+import inflect
 
 # 后缀计量单位替换表
 measurement_map = {

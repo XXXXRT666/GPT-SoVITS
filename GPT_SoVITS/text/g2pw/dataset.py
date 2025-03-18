@@ -16,9 +16,7 @@ Credits
     This code is modified from https://github.com/GitYCC/g2pW
 """
 
-from typing import Dict
-from typing import List
-from typing import Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 

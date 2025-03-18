@@ -13,10 +13,7 @@
 # limitations under the License.
 import re
 
-from .num import DIGITS
-from .num import num2str
-from .num import verbalize_cardinal
-from .num import verbalize_digit
+from .num import DIGITS, num2str, verbalize_cardinal, verbalize_digit
 
 
 def _time_num2str(num_string: str) -> str:

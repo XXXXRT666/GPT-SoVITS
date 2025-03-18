@@ -5,17 +5,17 @@
 #   LICENSE is in incl_licenses directory.
 
 
+import functools
+import math
+import typing
+from collections import namedtuple
+from typing import Dict, List, Optional, Tuple, Union
+
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
+import torch.nn.functional as F
 from librosa.filters import mel as librosa_mel_fn
 from scipy import signal
-
-import typing
-from typing import Optional, List, Union, Dict, Tuple
-from collections import namedtuple
-import math
-import functools
 
 
 # Adapted from https://github.com/descriptinc/descript-audio-codec/blob/main/dac/nn/loss.py under the MIT license.
