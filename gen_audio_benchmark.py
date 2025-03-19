@@ -26,6 +26,11 @@ def run_gen_audio_no_cuda_graph(bs: int):
             if match:
                 captured_values.append(float(match.group()))
 
+    if len(captured_values) == 1:
+        print(f"No match found for BS {bs} in No CUDA Graph mode.")
+        print("STDOUT:", result.stdout)
+        print("STDERR:", result.stderr)
+
     return captured_values
 
 
@@ -41,6 +46,11 @@ def run_gen_audio(bs: int):
             match = re.search(r"[-+]?[0-9]*\.?[0-9]+", lines[i + 1])
             if match:
                 captured_values.append(float(match.group()))
+
+    if len(captured_values) == 1:
+        print(f"No match found for BS {bs} in CUDA Graph mode.")
+        print("STDOUT:", result.stdout)
+        print("STDERR:", result.stderr)
 
     return captured_values
 
