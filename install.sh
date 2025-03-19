@@ -2,7 +2,7 @@
 
 # 安装构建工具
 # Install build tools
-conda install -c conda-forge gcc=14 -y
+conda install -c conda-forge gcc -y
 conda install -c conda-forge gxx -y
 conda install ffmpeg cmake -y
 
@@ -12,7 +12,7 @@ export CMAKE_MAKE_PROGRAM="$CONDA_PREFIX/bin/cmake"
 export CC="$CONDA_PREFIX/bin/gcc"
 export CXX="$CONDA_PREFIX/bin/g++"
 
-pip install torch==2.5.1 torchaudio==2.5.1
+pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 
 # 刷新环境
 # Refresh environment

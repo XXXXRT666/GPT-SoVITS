@@ -1,4 +1,5 @@
 import contextlib
+import time
 from typing import List, Optional, Sequence
 
 import flash_attn
@@ -397,6 +398,7 @@ class T2SDecoder(nn.Module):
                 else:
                     if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
                         self.capture(input_pos, xy_pos)
+
                     # with torch.profiler.record_function("AR"):
                     with contextlib.nullcontext():
                         if self.__CUDAGraph is not None:
@@ -410,6 +412,7 @@ class T2SDecoder(nn.Module):
                 input_pos += 1
 
                 if idx == 0:
+                    t1 = time.perf_counter()
                     logits = logits[:, :-1]
 
                 samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
@@ -440,6 +443,7 @@ class T2SDecoder(nn.Module):
                         tqdm.write("bad zero prediction")
                     else:
                         tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {y.shape[1]}")
+                        tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")
                     break
 
                 y_emb = self.ar_audio_embedding(y[:, -1:])
