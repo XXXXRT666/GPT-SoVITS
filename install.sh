@@ -4,8 +4,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 cd "$SCRIPT_DIR" || exit 1
 
-sudo apt install git-lfs
-
 if command -v conda >/dev/null 2>&1; then
     echo "conda installed"
 else
@@ -43,6 +41,8 @@ if conda env list | awk '{print $1}' | grep -Fxq "GPT-SoVITS"; then
 else
     conda create -n GPT-SoVITS python=3.10 -y
 fi
+
+sudo apt install git-lfs
 
 conda activate GPT-SoVITS
 
