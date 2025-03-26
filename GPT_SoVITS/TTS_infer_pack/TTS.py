@@ -6,17 +6,15 @@ import sys
 import traceback
 from copy import deepcopy
 from time import time as ttime
-from typing import Generator, List, Tuple, Union
+from typing import List, Tuple, Union
 
 import ffmpeg
 import librosa
 import numpy as np
 import torch
-import torch.nn.functional as F
 import torchaudio
 import yaml
-from peft.mapping import get_peft_model
-from peft.tuners import LoraConfig  # type: ignore
+from peft import LoraConfig, get_peft_model
 from tqdm import tqdm
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 from transformers.models.bert.modeling_bert import BertForMaskedLM
@@ -357,13 +355,14 @@ class TTS_Config:
 
 
 class TTS:
-    def __init__(self, configs: Union[dict, str, TTS_Config], batch_size: int):
+    def __init__(self, configs: Union[dict, str, TTS_Config], batch_size: int, implement: str):
         if isinstance(configs, TTS_Config):
             self.configs = configs
         else:
             self.configs: TTS_Config = TTS_Config(configs)
 
         self.batch_size = batch_size
+        self.implement = implement
         self.t2s_model: Text2SemanticLightningModule = None
         self.vits_model: Union[SynthesizerTrn, SynthesizerTrnV3] = None
         self.bert_tokenizer: AutoTokenizer = None
@@ -462,7 +461,8 @@ class TTS:
                 **kwargs,
             )
             if hasattr(vits_model, "enc_q"):
-                del vits_model.enc_q
+                if "pretrained" not in weights_path:
+                    del vits_model.enc_q
             self.configs.is_v3_synthesizer = False
         else:
             vits_model = SynthesizerTrnV3(
@@ -507,7 +507,7 @@ class TTS:
         dict_s1 = torch.load(weights_path, map_location=self.configs.device)
         config = dict_s1["config"]
         self.configs.max_sec = config["data"]["max_sec"]
-        t2s_model = Text2SemanticLightningModule(config, "****", is_train=False, batch_size=self.batch_size)
+        t2s_model = Text2SemanticLightningModule(config, "****", is_train=False, batch_size=self.batch_size, implement=self.implement)
         t2s_model.load_state_dict(dict_s1["weight"])
         t2s_model = t2s_model.to(self.configs.device)
         t2s_model = t2s_model.eval()
@@ -907,11 +907,11 @@ class TTS:
         if parallel_infer:
             print(i18n("并行推理模式已开启"))
             # self.t2s_model.model.infer_panel = self.t2s_model.model.infer_panel_batch_infer
-            self.t2s_model.model.infer_panel = self.t2s_model.model.infer_batch
+            self.t2s_model.model.infer_panel = self.t2s_model.model.forward
         else:
             print(i18n("并行推理模式已关闭"))
             # self.t2s_model.model.infer_panel = self.t2s_model.model.infer_panel_naive_batched
-            self.t2s_model.model.infer_panel = self.t2s_model.model.infer_batch
+            self.t2s_model.model.infer_panel = self.t2s_model.model.forward
 
         if return_fragment:
             print(i18n("分段返回模式已开启"))

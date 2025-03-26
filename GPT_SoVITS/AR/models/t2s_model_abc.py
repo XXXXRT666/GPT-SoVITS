@@ -31,17 +31,16 @@ class T2SDecoderABC(ABC, nn.Module):
     ) -> List[Tensor]: ...
 
     def compile(self, *args, **kwargs):
-        torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
+        # torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
         torch._inductor.config.coordinate_descent_tuning = True
         torch._inductor.config.triton.unique_kernel_names = True
         # Experimental features to reduce compilation times, will be on by default in future
         torch._inductor.config.fx_graph_cache = True
-        torch._inductor.config.triton.cudagraph_trees = True
-        torch._inductor.config.triton.cudagraph_support_input_mutation = True
+        # torch._inductor.config.triton.cudagraph_trees = True
+        # torch._inductor.config.triton.cudagraph_support_input_mutation = True
 
-        self.forward = torch.compile(
-            self.forward,
+        self.h.forward = torch.compile(
+            self.h.forward,
             fullgraph=True,
-            dynamic=True,
             mode="reduce-overhead",
         )

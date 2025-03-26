@@ -17,7 +17,7 @@ import torch.utils.data
 from librosa.filters import mel as librosa_mel_fn
 from tqdm import tqdm
 
-from .env import AttrDict
+from GPT_SoVITS.BigVGAN.env import AttrDict
 
 MAX_WAV_VALUE = 32767.0  # NOTE: 32768.0 -1 to prevent int16 overflow (results in popping sound in corner cases)
 

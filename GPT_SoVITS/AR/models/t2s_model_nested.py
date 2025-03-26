@@ -1,7 +1,7 @@
 import contextlib
 import time
 from functools import wraps
-from typing import List, Sequence
+from typing import List, MutableSequence
 
 import torch
 import torch.nested._internal.nested_tensor
@@ -33,7 +33,7 @@ def with_sdpa_kernel_math(func):
 class KVCache(nn.Module):
     def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim):
         super().__init__()
-        cache_shape = (max_batch_size, max_seq_length, n_heads, head_dim)
+        cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
         self.num_heads = n_heads
         self.head_dim = head_dim
         self.max_batch_size = max_batch_size
@@ -119,15 +119,15 @@ class Attention(nn.Module):
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
 
-        q = q.view(bsz, -1, self.num_heads, self.head_dim)
-        k = k.view(bsz, -1, self.num_heads, self.head_dim)
-        v = v.view(bsz, -1, self.num_heads, self.head_dim)
+        q = q.view(bsz, seqlen, self.num_heads, self.head_dim)
+        k = k.view(bsz, seqlen, self.num_heads, self.head_dim)
+        v = v.view(bsz, seqlen, self.num_heads, self.head_dim)
 
         k, v = self.kv_cache.update(input_pos, k, v)
 
         attn: Tensor = F.scaled_dot_product_attention(q, k, v)
 
-        attn = attn.view(bsz, seqlen, self.hidden_dim)
+        attn = attn.transpose(1, 2).contiguous().view(bsz, seqlen, self.hidden_dim)
 
         attn = self.out_proj.forward(attn)
 
@@ -143,9 +143,9 @@ class Attention(nn.Module):
 
             q, k, v = self.in_proj.forward(x_b.unsqueeze(0)).chunk(3, dim=-1)
 
-            q = q.contiguous().view(1, -1, self.num_heads, self.head_dim)
-            k = k.contiguous().view(1, -1, self.num_heads, self.head_dim)
-            v = v.contiguous().view(1, -1, self.num_heads, self.head_dim)
+            q = q.view(1, -1, self.num_heads, self.head_dim)
+            k = k.view(1, -1, self.num_heads, self.head_dim)
+            v = v.view(1, -1, self.num_heads, self.head_dim)
 
             self.kv_cache.prefill_kv(bs, k, v)
 
@@ -228,7 +228,7 @@ class TransformerDecoder(nn.Module):
 
         self.n_layer = n_layer
 
-        self.layers: Sequence[TransformerBlock] = nn.ModuleList(TransformerBlock(num_heads, ffn_dim, hidden_dim) for _ in range(n_layer))  # type: ignore
+        self.layers: MutableSequence[TransformerBlock] = nn.ModuleList(TransformerBlock(num_heads, ffn_dim, hidden_dim) for _ in range(n_layer))  # type: ignore
 
         self.max_seq_length: int = max_seq_length
         self.max_batch_size: int = max_batch_size
@@ -432,7 +432,7 @@ class T2SDecoder(T2SDecoderABC):
                         y = torch.concat([y, torch.zeros_like(samples)], dim=1)
                         tqdm.write("bad zero prediction")
                     else:
-                        tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {y.shape[1]}")
+                        tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {[i.shape[0] for i in y_results]}")
                         tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")  # type: ignore
                     break
 

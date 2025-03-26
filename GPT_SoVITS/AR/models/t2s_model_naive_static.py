@@ -1,6 +1,6 @@
 import contextlib
 import time
-from typing import List, Sequence
+from typing import List, MutableSequence
 
 import torch
 import torch.nested._internal.nested_tensor
@@ -34,7 +34,7 @@ class KVCache(nn.Module):
         self.v_cache: Tensor
 
     def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor):
-        # input_pos: [B, ], k_val: [B, 1, H, D]
+        # input_pos: [B, ], k_val: [B, H, 1, D]
 
         index = (
             (input_pos - 1)
@@ -43,17 +43,17 @@ class KVCache(nn.Module):
             .unsqueeze(-1)
             .expand(
                 -1,
-                -1,
                 self.num_heads,
+                -1,
                 self.head_dim,
             )
             .to(torch.int64)
-        )  # (bs, 1, num_head, head_dim)
+        )  # (bs, num_head, 1, head_dim)
 
         k_out = self.k_cache
         v_out = self.v_cache
-        k_out.scatter_(1, index, k_val)
-        v_out.scatter_(1, index, v_val)
+        k_out.scatter_(2, index, k_val)
+        v_out.scatter_(2, index, v_val)
 
         return k_out, v_out
 
@@ -65,10 +65,10 @@ class KVCache(nn.Module):
         self.v_cache.zero_()
 
     def prefill_kv(self, k_val: Tensor, v_val: Tensor):
-        # input_pos: int, k_val: [B, S, H, D]
+        # input_pos: int, k_val: [B, H, S, D]
 
-        self.k_cache[:, :, : k_val.shape[1]] = k_val
-        self.v_cache[:, :, : v_val.shape[1]] = v_val
+        self.k_cache[:, :, : k_val.shape[2]] = k_val
+        self.v_cache[:, :, : v_val.shape[2]] = v_val
 
 
 class Attention(nn.Module):
@@ -98,9 +98,9 @@ class Attention(nn.Module):
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
 
-        q = q.view(bsz, -1, self.num_heads, self.head_dim)
-        k = k.view(bsz, -1, self.num_heads, self.head_dim)
-        v = v.view(bsz, -1, self.num_heads, self.head_dim)
+        q = q.view(bsz, seqlen, self.num_heads, self.head_dim)
+        k = k.view(bsz, seqlen, self.num_heads, self.head_dim)
+        v = v.view(bsz, seqlen, self.num_heads, self.head_dim)
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
@@ -108,26 +108,28 @@ class Attention(nn.Module):
 
         attn: Tensor = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
-        attn = attn.view(bsz, seqlen, self.hidden_dim)
+        attn = attn.transpose(1, 2).contiguous().view(bsz, seqlen, self.hidden_dim)
 
         attn = self.out_proj.forward(attn)
 
         return attn
 
     def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
+        bsz, seq_len, _ = x.shape
+
         q, k, v = self.in_proj.forward(x.unsqueeze(0)).chunk(3, dim=-1)
 
-        q = q.contiguous().view(1, -1, self.num_heads, self.head_dim)
-        k = k.contiguous().view(1, -1, self.num_heads, self.head_dim)
-        v = v.contiguous().view(1, -1, self.num_heads, self.head_dim)
-
-        self.kv_cache.prefill_kv(k, v)
+        q = q.view(bsz, seq_len, self.num_heads, self.head_dim)
+        k = k.view(bsz, seq_len, self.num_heads, self.head_dim)
+        v = v.view(bsz, seq_len, self.num_heads, self.head_dim)
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
+        self.kv_cache.prefill_kv(k, v)
+
         attn = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
-        attn = attn.transpose(1, 2).view(1, -1, self.hidden_dim)
+        attn = attn.transpose(1, 2).contiguous().view(bsz, seq_len, self.hidden_dim)
 
         attn = self.out_proj.forward(attn)
 
@@ -198,7 +200,7 @@ class TransformerDecoder(nn.Module):
 
         self.n_layer = n_layer
 
-        self.layers: Sequence[TransformerBlock] = nn.ModuleList(TransformerBlock(num_heads, ffn_dim, hidden_dim) for _ in range(n_layer))  # type: ignore
+        self.layers: MutableSequence[TransformerBlock] = nn.ModuleList(TransformerBlock(num_heads, ffn_dim, hidden_dim) for _ in range(n_layer))  # type: ignore
 
         self.max_seq_length: int = max_seq_length
         self.max_batch_size: int = max_batch_size
@@ -339,17 +341,16 @@ class T2SDecoder(T2SDecoderABC):
         y = prompts
         x_lens = x_lens.to(torch.int64)
         y_len = y.shape[-1]
-        prefill_len = x_lens + y_len
         xy_pos = self.embed(x, y, bert_feature)
+        prefill_len = xy_pos.size(1)
 
-        xy_attn_mask = []
+        xy_attn_mask = torch.zeros(bsz, prefill_len, prefill_len, device=xy_pos.device).bool()
         for bs in range(bsz):
             pos = int(x_lens[bs].item())
-            mask = torch.zeros(pos + y_len, pos + y_len, device=xy_pos.device).bool()
+            mask = xy_attn_mask[bs]
             mask[:, :pos].fill_(True)
             mask[-y_len:, -y_len:] = ~torch.triu(torch.ones(y_len, y_len, device=xy_pos.device, dtype=torch.bool), diagonal=1)
-            xy_attn_mask.append(mask)
-        xy_attn_mask_nested = torch.nested.nested_tensor(xy_attn_mask)
+        xy_attn_mask = xy_attn_mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
 
         completed = [False] * bsz
         y_results: List[Tensor] = [None] * bsz  # type: ignore
@@ -362,7 +363,7 @@ class T2SDecoder(T2SDecoderABC):
         with contextlib.nullcontext():
             for idx in tqdm(range(1500)):
                 if idx == 0:
-                    xy_dec = self.h.prefill(xy_pos, xy_attn_mask_nested)
+                    xy_dec = self.h.prefill(xy_pos, xy_attn_mask)
                     xy_dec = torch.stack([t[[-1]] for t in xy_dec.unbind()])
                 else:
                     # with torch.profiler.record_function("AR"):
@@ -374,8 +375,11 @@ class T2SDecoder(T2SDecoderABC):
 
                 if idx == 0:
                     t1 = time.perf_counter()
-                    attn_mask = xy_attn_mask_nested[:, :, -1]
+                    attn_mask = torch.zeros(bsz, self.num_heads, 1, self.max_seq_length, device=xy_pos.device).bool()
+                    attn_mask[:, :, :, :prefill_len] = xy_attn_mask[:, :, [-1]]
                     logits = logits[:, :-1]
+
+                attn_mask[:, :, :, input_pos] = True  # type: ignore
 
                 samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
 
@@ -385,8 +389,6 @@ class T2SDecoder(T2SDecoderABC):
 
                 EOS_mask = (samples[:, 0] == self.EOS) | (tokens == self.EOS)
                 EOS_indices: List[int] = torch.where(EOS_mask)[0].tolist()
-
-                attn_mask[torch.arange(bsz), :, input_pos] = True  # type: ignore
 
                 for i in EOS_indices:
                     if not completed[i]:
@@ -406,7 +408,7 @@ class T2SDecoder(T2SDecoderABC):
                         y = torch.concat([y, torch.zeros_like(samples)], dim=1)
                         tqdm.write("bad zero prediction")
                     else:
-                        tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {y.shape[1]}")
+                        tqdm.write(f"T2S Decoding EOS {[prefill_len]} -> {[i.shape[0] for i in y_results]}")
                         tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")  # type: ignore
                     break
 

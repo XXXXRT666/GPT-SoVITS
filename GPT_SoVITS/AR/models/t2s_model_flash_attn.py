@@ -1,6 +1,6 @@
 import contextlib
 import time
-from typing import List, Optional, Sequence
+from typing import List, MutableSequence, Optional
 
 import flash_attn  # type: ignore
 import torch
@@ -99,9 +99,9 @@ class Attention(nn.Module):
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
 
-        q = q.view(bsz, -1, self.num_heads, self.head_dim)
-        k = k.view(bsz, -1, self.num_heads, self.head_dim)
-        v = v.view(bsz, -1, self.num_heads, self.head_dim)
+        q = q.view(bsz, seqlen, self.num_heads, self.head_dim)
+        k = k.view(bsz, seqlen, self.num_heads, self.head_dim)
+        v = v.view(bsz, seqlen, self.num_heads, self.head_dim)
 
         k, v = self.kv_cache.update(input_pos, k, v)
 
@@ -208,7 +208,7 @@ class TransformerDecoder(nn.Module):
 
         self.n_layer = n_layer
 
-        self.layers: Sequence[TransformerBlock] = nn.ModuleList(TransformerBlock(num_heads, ffn_dim, hidden_dim) for _ in range(n_layer))  # type: ignore
+        self.layers: MutableSequence[TransformerBlock] = nn.ModuleList(TransformerBlock(num_heads, ffn_dim, hidden_dim) for _ in range(n_layer))  # type: ignore
 
         self.max_seq_length: int = max_seq_length
         self.max_batch_size: int = max_batch_size
@@ -441,7 +441,7 @@ class T2SDecoder(T2SDecoderABC):
                         y = torch.concat([y, torch.zeros_like(samples)], dim=1)
                         tqdm.write("bad zero prediction")
                     else:
-                        tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {y.shape[1]}")
+                        tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {[i.shape[0] for i in y_results]}")
                         tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")  # type: ignore
                     break
 

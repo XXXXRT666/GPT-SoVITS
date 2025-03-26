@@ -5,13 +5,14 @@ import glob
 import os
 
 import matplotlib
+import matplotlib.pylab as plt
 import torch
+from scipy.io.wavfile import write
 from torch.nn.utils import weight_norm
 
+from GPT_SoVITS.BigVGAN.meldataset import MAX_WAV_VALUE
+
 matplotlib.use("Agg")
-import matplotlib.pylab as plt
-from .meldataset import MAX_WAV_VALUE
-from scipy.io.wavfile import write
 
 
 def plot_spectrogram(spectrogram):

@@ -61,8 +61,8 @@ def with_sdpa_kernel_flash(func):
 @click.option("--cuda-graph", is_flag=True, help="Enable CUDA Graph.")
 @click.option("--compile", is_flag=True, help="Enable compilation mode.")
 @click.option("--bs", type=int, default=20, help="Batch Size")
-# @click.option("--static", is_flag=True, help="Enable static mode.")
-def main(cuda_graph=False, compile=False, bs=20):
+@click.option("--implement", type=str, default="naive_static", help="T2S Decoder Implement")
+def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
     if cuda_graph and compile:
         raise click.UsageError("Options --cuda-graph and --compile cannot be used together.")
 
@@ -95,7 +95,7 @@ def main(cuda_graph=False, compile=False, bs=20):
 
     BATCH_SIZE = bs
 
-    tts_pipeline = TTS(tts_config, BATCH_SIZE)
+    tts_pipeline = TTS(tts_config, BATCH_SIZE, implement)
 
     tts_pipeline.t2s_model.model = tts_pipeline.t2s_model.model.cuda().half().requires_grad_(False)
 

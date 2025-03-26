@@ -11,11 +11,12 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from env import AttrDict
 from torch.nn import Conv2d
 from torch.nn.utils import spectral_norm, weight_norm
 from torchaudio.transforms import Resample, Spectrogram
-from utils import get_padding
+
+from GPT_SoVITS.BigVGAN.env import AttrDict
+from GPT_SoVITS.BigVGAN.utils import get_padding
 
 
 class DiscriminatorP(torch.nn.Module):

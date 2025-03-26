@@ -7,14 +7,18 @@ from pytorch_lightning import LightningModule
 
 # from GPT_SoVITS.AR.models.t2s_model import Text2SemanticDecoder
 from GPT_SoVITS.AR.models.t2s_model_abc import T2SDecoderABC
-from GPT_SoVITS.AR.models.t2s_model_flash_attn import T2SDecoder as T2SDecoder_flash_attn
-from GPT_SoVITS.AR.models.t2s_model_naive_static import T2SDecoder as T2SDecoder_naive_static
-from GPT_SoVITS.AR.models.t2s_model_nested import T2SDecoder as T2SDecoder_nested
-from GPT_SoVITS.AR.models.t2s_model_xformers import T2SDecoder as T2SDecoder_xformers
 from GPT_SoVITS.AR.modules.lr_schedulers import WarmupCosineLRSchedule
 from GPT_SoVITS.AR.modules.optim import ScaledAdam
 
 # from GPT_SoVITS.AR.models.t2s_model_compile import T2SDecoder
+
+
+def load_t2s_decoder(implement: str) -> T2SDecoderABC:
+    module_path = f"GPT_SoVITS.AR.models.t2s_model_{implement.lower()}"
+    class_name = "T2SDecoder"
+    mod = __import__(module_path, fromlist=[class_name])
+    cls = getattr(mod, class_name)
+    return cls
 
 
 class Text2SemanticLightningModule(LightningModule):
@@ -23,19 +27,8 @@ class Text2SemanticLightningModule(LightningModule):
         self.config = config
         self.top_k = 3
         self.model: T2SDecoderABC
-        match implement:
-            # case "naive":
-            #     self.model = Text2SemanticDecoder(config=config, top_k=3)
-            case "naive_static":
-                self.model = T2SDecoder_naive_static(config=config, max_batch_size=batch_size)
-            case "flash_attn":
-                self.model = T2SDecoder_flash_attn(config=config, max_batch_size=batch_size)
-            case "xformers":
-                self.model = T2SDecoder_xformers(config=config, max_batch_size=batch_size)
-            case "Nested":
-                self.model = T2SDecoder_nested(config=config, max_batch_size=batch_size)
-            case _:
-                raise NotImplementedError(implement)
+        T2SDecoder = load_t2s_decoder(implement=implement)
+        self.model = T2SDecoder(config=config, max_batch_size=batch_size)
         pretrained_s1 = config.get("pretrained_s1")
         if pretrained_s1 and is_train:
             # print(self.load_state_dict(torch.load(pretrained_s1,map_location="cpu")["state_dict"]))
@@ -56,7 +49,7 @@ class Text2SemanticLightningModule(LightningModule):
             batch["semantic_ids"],
             batch["semantic_ids_len"],
             batch["bert_feature"],
-        )
+        )  # type: ignore
         self.manual_backward(loss)
         if batch_idx > 0 and batch_idx % 4 == 0:
             opt.step()

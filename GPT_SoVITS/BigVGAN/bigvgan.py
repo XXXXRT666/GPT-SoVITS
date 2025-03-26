@@ -9,15 +9,15 @@ import os
 from pathlib import Path
 from typing import Dict, Optional, Union
 
+import torch.nn as nn
 from huggingface_hub import PyTorchModelHubMixin, hf_hub_download
 from torch.nn import Conv1d, ConvTranspose1d
 from torch.nn.utils import remove_weight_norm, weight_norm
-from utils0 import get_padding, init_weights
 
-from . import activations
-from .alias_free_activation.torch.act import Activation1d as TorchActivation1d
-from .env import AttrDict
-from .utils0 import get_padding, init_weights
+from GPT_SoVITS.BigVGAN import activations
+from GPT_SoVITS.BigVGAN.alias_free_activation.torch.act import Activation1d as TorchActivation1d
+from GPT_SoVITS.BigVGAN.env import AttrDict
+from GPT_SoVITS.BigVGAN.utils import get_padding, init_weights
 
 
 def load_hparams_from_json(path) -> AttrDict:
@@ -26,7 +26,7 @@ def load_hparams_from_json(path) -> AttrDict:
     return AttrDict(json.loads(data))
 
 
-class AMPBlock1(torch.nn.Module):
+class AMPBlock1(nn.Module):
     """
     AMPBlock applies Snake / SnakeBeta activation functions with trainable parameters that control periodicity, defined for each layer.
     AMPBlock1 has additional self.convs2 that contains additional Conv1d layers with a fixed dilation=1 followed by each layer in self.convs1
@@ -127,7 +127,7 @@ class AMPBlock1(torch.nn.Module):
             remove_weight_norm(l)
 
 
-class AMPBlock2(torch.nn.Module):
+class AMPBlock2(nn.Module):
     """
     AMPBlock applies Snake / SnakeBeta activation functions with trainable parameters that control periodicity, defined for each layer.
     Unlike AMPBlock1, AMPBlock2 does not contain extra Conv1d layers with fixed dilation=1
@@ -206,7 +206,7 @@ class AMPBlock2(torch.nn.Module):
 
 
 class BigVGAN(
-    torch.nn.Module,
+    nn.Module,
     PyTorchModelHubMixin,
     # library_name="bigvgan",
     # repo_url="https://github.com/NVIDIA/BigVGAN",

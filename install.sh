@@ -4,6 +4,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 cd "$SCRIPT_DIR" || exit 1
 
+trap 'echo "Error Occured at \"$BASH_COMMAND\" with exit code $?"; exit 1' ERR
+
 if command -v conda >/dev/null 2>&1; then
     echo "conda installed"
 else
@@ -14,9 +16,9 @@ else
 
     if [ "$os_type" = "Darwin" ] && [[ "$architecture" == "arm64" ]]; then
         xcode-select --install
-        wget -O anaconda.sh "https://repo.anaconda.com/archive/Anaconda3-2024.10-1-MacOSX-arm64.sh"
+        wget --tries=25 --wait=3 --read-timeout=40 -O anaconda.sh "https://repo.anaconda.com/archive/Anaconda3-2024.10-1-MacOSX-arm64.sh"
     elif [ "$os_type" = "Linux" ] && [[ "$architecture" == "x86_64" ]]; then
-        wget -O anaconda.sh "https://repo.anaconda.com/archive/Anaconda3-2024.10-1-Linux-x86_64.sh"
+        wget --tries=25 --wait=3 --read-timeout=40 -O anaconda.sh "https://repo.anaconda.com/archive/Anaconda3-2024.10-1-Linux-x86_64.sh"
     else
         echo "Unsupported System for install.sh：$os_type with $architecture"
         exit 1
@@ -26,15 +28,17 @@ else
 
     rm -rf "anaconda.sh"
 
-    if [ "$os_type" = "Darwin" ]; then
-        "$HOME/anaconda3/condabin/conda" init zsh
-        source "$HOME/.zshrc"
-    elif [ "$os_type" = "Linux" ]; then
-        "$HOME/anaconda3/condabin/conda" init bash
-        source "$HOME/.bashrc"
-    fi
-
 fi
+
+if [ "$os_type" = "Darwin" ]; then
+    "$HOME/anaconda3/condabin/conda" init zsh
+    source "$HOME/.zshrc"
+elif [ "$os_type" = "Linux" ]; then
+    "$HOME/anaconda3/condabin/conda" init bash
+    source "$HOME/.bashrc"
+fi
+
+source "$HOME/anaconda3/etc/profile.d/conda.sh"
 
 if conda env list | awk '{print $1}' | grep -Fxq "GPT-SoVITS"; then
     :
@@ -42,25 +46,32 @@ else
     conda create -n GPT-SoVITS python=3.10 -y
 fi
 
-sudo apt install git-lfs
+sudo apt install -y git-lfs
+sudo apt install -y zip
 
 conda activate GPT-SoVITS
 
-conda install git
-
 git-lfs install
 
-git clone "https://huggingface.co/lj1995/GPT-SoVITS" 111
+if find "GPT_SoVITS/pretrained_models" -mindepth 1 ! -name '.gitignore' | grep -q .; then
+    echo "Pretrained Model Exists"
+else
+    echo "Download Pretrained Models"
+    git clone "https://huggingface.co/lj1995/GPT-SoVITS" 111
+    mv 111/* GPT_SoVITS/pretrained_models
+    rm -rf 111
+fi
 
-mv 111/* GPT_SoVITS/pretrained_models
+if [ ! -d "GPT_SoVITS/text/G2PWModel" ]; then
+    echo "Download G2PWModel"
+    wget --tries=25 --wait=5 --read-timeout=40 --retry-on-http-error=404 "https://paddlespeech.cdn.bcebos.com/Parakeet/released_models/g2p/G2PWModel_1.1.zip"
 
-wget "https://paddlespeech.bj.bcebos.com/Parakeet/released_models/g2p/G2PWModel_1.1.zip"
-
-unzip G2PWModel_1.1.zip
-
-rm -rf G2PWModel_1.1.zip
-
-mv G2PWModel_1.1 GPT_SoVITS/text/G2PWModel
+    unzip G2PWModel_1.1.zip
+    rm -rf G2PWModel_1.1.zip
+    mv G2PWModel_1.1 GPT_SoVITS/text/G2PWModel
+else
+    echo "G2PWModel Exists"
+fi
 
 # Install build tools
 echo "Installing GCC..."
@@ -81,9 +92,11 @@ export CXX="$CONDA_PREFIX/bin/g++"
 echo "Checking for CUDA installation..."
 if command -v nvidia-smi &>/dev/null; then
     USE_CUDA=true
+
     echo "CUDA found."
 else
     echo "CUDA not found."
+
     USE_CUDA=false
 fi
 
@@ -106,7 +119,13 @@ fi
 
 echo "Installing PyTorch"
 
-pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124 --extra-index-url https://download.pytorch.org/whl/rocm6.2.4 --extra-index-url https://download.pytorch.org/whl/cpu
+if [ "$USE_CUDA" = true ]; then
+    pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+elif [ "$USE_ROCM" = true ]; then
+    pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/rocm6.2
+else
+    pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+fi
 
 if [ "$USE_ROCM" = true ] && [ "$IS_WSL" = true ]; then
     echo "Update to WSL compatible runtime lib..."
