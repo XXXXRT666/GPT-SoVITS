@@ -1,12 +1,13 @@
 import contextlib
 import time
+from functools import wraps
 from typing import List, Optional, Sequence
 
-import flash_attn  # type: ignore
 import torch
 import torch.nested._internal.nested_tensor
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from tqdm import tqdm
 
 from GPT_SoVITS.AR.models.utils import sample
@@ -17,6 +18,15 @@ from GPT_SoVITS.AR.modules.embedding import TokenEmbedding
 
 Tensor = torch.Tensor
 dtype = torch.dtype
+
+
+def with_sdpa_kernel_math(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        with sdpa_kernel(SDPBackend.MATH):
+            return func(*args, **kwargs)
+
+    return wrapper
 
 
 class KVCache(nn.Module):
@@ -55,7 +65,17 @@ class KVCache(nn.Module):
         k_out.scatter_(1, index, k_val)
         v_out.scatter_(1, index, v_val)
 
-        return k_out, v_out
+        k_list = []
+        v_list = []
+
+        for pos, k_, v_ in map(lambda x: x.unbind(0), (input_pos, k_out, v_out)):
+            k_list.append(k_[:pos])
+            v_list.append(v_[:pos])
+
+        k = torch.nested.nested_tensor(k_list, layout=torch.jagged)
+        v = torch.nested.nested_tensor(v_list, layout=torch.jagged)
+
+        return k, v
 
     def forward(self):
         pass
@@ -104,7 +124,7 @@ class Attention(nn.Module):
 
         k, v = self.kv_cache.update(input_pos, k, v)
 
-        attn: Tensor = flash_attn.flash_attn_with_kvcache(q, k, v, cache_seqlens=input_pos)
+        attn: Tensor = F.scaled_dot_product_attention(q, k, v)
 
         attn = attn.view(bsz, seqlen, self.hidden_dim)
 
@@ -330,22 +350,21 @@ class T2SDecoder(nn.Module):
 
         return xy_pos
 
-    def capture(self, input_pos: Tensor, x: Tensor):
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
+    def compile(self):
+        torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
+        torch._inductor.config.coordinate_descent_tuning = True
+        torch._inductor.config.triton.unique_kernel_names = True
+        # Experimental features to reduce compilation times, will be on by default in future
+        torch._inductor.config.fx_graph_cache = True
+        torch._inductor.config.triton.cudagraph_trees = True
+        torch._inductor.config.triton.cudagraph_support_input_mutation = True
 
-        self.h.xy_pos.copy_(x)
-        self.h.input_pos.copy_(input_pos)
-
-        with torch.cuda.stream(s):  # type: ignore
-            for _ in range(5):
-                self.h.forward(self.h.input_pos, self.h.xy_pos)
-        torch.cuda.current_stream().wait_stream(s)
-
-        self.__CUDAGraph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.__CUDAGraph):
-            self.h.xy_dec = self.h.forward(self.h.input_pos, self.h.xy_pos)
-        torch.cuda.synchronize()
+        self.forward = torch.compile(
+            with_sdpa_kernel_math(self.forward),
+            fullgraph=True,
+            dynamic=True,
+            mode="reduce-overhead",
+        )
 
     def forward(
         self,
@@ -358,7 +377,6 @@ class T2SDecoder(nn.Module):
         early_stop_num: int = -1,
         temperature: float = 1.0,
         repetition_penalty: float = 1.35,
-        use_cuda_graph=False,
         **kwargs,
     ):
         self.empty_cache()
@@ -394,19 +412,11 @@ class T2SDecoder(nn.Module):
                     xy_dec = torch.stack([t[[-1]] for t in xy_dec.unbind()])
                     input_pos = input_pos.to(torch.int32)
                 else:
-                    if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
-                        self.capture(input_pos, xy_pos)
-
                     # with torch.profiler.record_function("AR"):
                     with contextlib.nullcontext():
-                        if self.__CUDAGraph is not None:
-                            self.h.xy_pos.copy_(xy_pos)
-                            self.__CUDAGraph.replay()
-                            xy_dec = self.h.xy_dec.clone()
-                        else:
-                            xy_dec = self.h.forward(input_pos, xy_pos)
+                        xy_dec = self.h.forward(input_pos, torch.nested.as_nested_tensor(xy_pos, layout=torch.jagged))
 
-                logits = self.ar_predict_layer(xy_dec[:, -1])
+                logits = torch.nested.to_padded_tensor(self.ar_predict_layer(xy_dec), 0)
                 input_pos += 1
 
                 if idx == 0:

@@ -2,10 +2,10 @@ import contextlib
 import time
 from typing import List, Optional, Sequence
 
-import flash_attn  # type: ignore
 import torch
 import torch.nested._internal.nested_tensor
 import torch.nn as nn
+import xformers.ops as xops
 from torch.nn import functional as F
 from tqdm import tqdm
 
@@ -54,8 +54,14 @@ class KVCache(nn.Module):
         v_out = self.v_cache
         k_out.scatter_(1, index, k_val)
         v_out.scatter_(1, index, v_val)
+        k = []
+        v = []
 
-        return k_out, v_out
+        for pos, k_, v_ in map(lambda x: x.unbind(0), (input_pos, k_out, v_out)):
+            k.append(k_[:pos])
+            v.append(v_[:pos])
+
+        return k, v
 
     def forward(self):
         pass
@@ -102,9 +108,13 @@ class Attention(nn.Module):
         k = k.view(bsz, -1, self.num_heads, self.head_dim)
         v = v.view(bsz, -1, self.num_heads, self.head_dim)
 
-        k, v = self.kv_cache.update(input_pos, k, v)
+        list_k, list_v = self.kv_cache.update(input_pos, k, v)
 
-        attn: Tensor = flash_attn.flash_attn_with_kvcache(q, k, v, cache_seqlens=input_pos)
+        attn_bias, q, k, v = xops.fmha.BlockDiagonalMask.from_tensor_lists_qkv(q.unbind(), list_k, list_v)
+
+        attn = xops.memory_efficient_attention(q, k, v, attn_bias)
+
+        print(attn.shape)
 
         attn = attn.view(bsz, seqlen, self.hidden_dim)
 
@@ -289,8 +299,6 @@ class T2SDecoder(nn.Module):
         self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h = TransformerDecoder(hidden_dim, n_layer, num_heads, ffn_dim, vocab_size, max_seq_length, max_batch_size)
 
-        self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
-
         # self._register_load_state_dict_pre_hook(self.load_hook)
 
     def load_hook(self, state_dict, prefix, *args):
@@ -305,7 +313,22 @@ class T2SDecoder(nn.Module):
         self.h.input_pos.zero_()
         self.h.xy_pos.zero_()
         self.h.xy_dec.zero_()
-        self.__CUDAGraph = None
+
+    def compile(self, *args, **kwargs):
+        torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
+        torch._inductor.config.coordinate_descent_tuning = True
+        torch._inductor.config.triton.unique_kernel_names = True
+        # Experimental features to reduce compilation times, will be on by default in future
+        torch._inductor.config.fx_graph_cache = True
+        torch._inductor.config.triton.cudagraph_trees = True
+        torch._inductor.config.triton.cudagraph_support_input_mutation = True
+
+        self.forward = torch.compile(
+            self.forward,
+            fullgraph=True,
+            dynamic=True,
+            mode="reduce-overhead",
+        )
 
     def embed(
         self,
@@ -330,23 +353,6 @@ class T2SDecoder(nn.Module):
 
         return xy_pos
 
-    def capture(self, input_pos: Tensor, x: Tensor):
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-
-        self.h.xy_pos.copy_(x)
-        self.h.input_pos.copy_(input_pos)
-
-        with torch.cuda.stream(s):  # type: ignore
-            for _ in range(5):
-                self.h.forward(self.h.input_pos, self.h.xy_pos)
-        torch.cuda.current_stream().wait_stream(s)
-
-        self.__CUDAGraph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.__CUDAGraph):
-            self.h.xy_dec = self.h.forward(self.h.input_pos, self.h.xy_pos)
-        torch.cuda.synchronize()
-
     def forward(
         self,
         x: List[torch.LongTensor],  #####全部文本token
@@ -358,7 +364,6 @@ class T2SDecoder(nn.Module):
         early_stop_num: int = -1,
         temperature: float = 1.0,
         repetition_penalty: float = 1.35,
-        use_cuda_graph=False,
         **kwargs,
     ):
         self.empty_cache()
@@ -394,17 +399,9 @@ class T2SDecoder(nn.Module):
                     xy_dec = torch.stack([t[[-1]] for t in xy_dec.unbind()])
                     input_pos = input_pos.to(torch.int32)
                 else:
-                    if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
-                        self.capture(input_pos, xy_pos)
-
                     # with torch.profiler.record_function("AR"):
                     with contextlib.nullcontext():
-                        if self.__CUDAGraph is not None:
-                            self.h.xy_pos.copy_(xy_pos)
-                            self.__CUDAGraph.replay()
-                            xy_dec = self.h.xy_dec.clone()
-                        else:
-                            xy_dec = self.h.forward(input_pos, xy_pos)
+                        xy_dec = self.h.forward(input_pos, xy_pos)
 
                 logits = self.ar_predict_layer(xy_dec[:, -1])
                 input_pos += 1

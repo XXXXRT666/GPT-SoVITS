@@ -24,3 +24,4 @@ ffprobe*
 output*.wav
 
 *.pkl
+.ruff_cache

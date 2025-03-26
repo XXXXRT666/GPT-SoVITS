@@ -2,7 +2,6 @@ import contextlib
 import time
 from typing import List, Optional, Sequence
 
-import flash_attn  # type: ignore
 import torch
 import torch.nested._internal.nested_tensor
 import torch.nn as nn
@@ -22,7 +21,7 @@ dtype = torch.dtype
 class KVCache(nn.Module):
     def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim):
         super().__init__()
-        cache_shape = (max_batch_size, max_seq_length, n_heads, head_dim)
+        cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
         self.num_heads = n_heads
         self.head_dim = head_dim
         self.max_batch_size = max_batch_size
@@ -64,11 +63,11 @@ class KVCache(nn.Module):
         self.k_cache.zero_()
         self.v_cache.zero_()
 
-    def prefill_kv(self, bs: int, k_val: Tensor, v_val: Tensor):
+    def prefill_kv(self, k_val: Tensor, v_val: Tensor):
         # input_pos: int, k_val: [B, S, H, D]
 
-        self.k_cache[[bs], : k_val.shape[1]] = k_val
-        self.v_cache[[bs], : v_val.shape[1]] = v_val
+        self.k_cache[:, :, : k_val.shape[1]] = k_val
+        self.v_cache[:, :, : v_val.shape[1]] = v_val
 
 
 class Attention(nn.Module):
@@ -93,7 +92,7 @@ class Attention(nn.Module):
             new_key = key.replace("in_proj_", "in_proj.")  # in_proj_ -> in_proj.
             state_dict[new_key] = state_dict.pop(key)
 
-    def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
+    def forward(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
@@ -102,9 +101,11 @@ class Attention(nn.Module):
         k = k.view(bsz, -1, self.num_heads, self.head_dim)
         v = v.view(bsz, -1, self.num_heads, self.head_dim)
 
+        q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
+
         k, v = self.kv_cache.update(input_pos, k, v)
 
-        attn: Tensor = flash_attn.flash_attn_with_kvcache(q, k, v, cache_seqlens=input_pos)
+        attn: Tensor = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
         attn = attn.view(bsz, seqlen, self.hidden_dim)
 
@@ -113,34 +114,23 @@ class Attention(nn.Module):
         return attn
 
     def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
-        bsz = x.size(0)
+        q, k, v = self.in_proj.forward(x.unsqueeze(0)).chunk(3, dim=-1)
 
-        outputs = []
+        q = q.contiguous().view(1, -1, self.num_heads, self.head_dim)
+        k = k.contiguous().view(1, -1, self.num_heads, self.head_dim)
+        v = v.contiguous().view(1, -1, self.num_heads, self.head_dim)
 
-        for bs in range(bsz):
-            x_b = x[bs].unsqueeze(0)
+        self.kv_cache.prefill_kv(k, v)
 
-            q, k, v = self.in_proj.forward(x_b.unsqueeze(0)).chunk(3, dim=-1)
+        q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
-            q = q.contiguous().view(1, -1, self.num_heads, self.head_dim)
-            k = k.contiguous().view(1, -1, self.num_heads, self.head_dim)
-            v = v.contiguous().view(1, -1, self.num_heads, self.head_dim)
+        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
-            self.kv_cache.prefill_kv(bs, k, v)
+        attn = attn.transpose(1, 2).view(1, -1, self.hidden_dim)
 
-            q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
+        attn = self.out_proj.forward(attn)
 
-            attn_mask = mask[bs].unsqueeze(0).unsqueeze(0).expand(1, self.num_heads, -1, -1)
-
-            attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-
-            attn = attn.transpose(1, 2).contiguous().view(1, -1, self.hidden_dim)
-
-            output = self.out_proj.forward(attn)
-
-            outputs.append(output.squeeze(0))
-
-        return torch.nested.nested_tensor(outputs)
+        return attn
 
 
 class FeedForward(nn.Module):
@@ -174,8 +164,8 @@ class TransformerBlock(nn.Module):
             )
             state_dict[new_key] = state_dict.pop(key)
 
-    def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.attention.forward(x, input_pos))
+    def forward(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
+        h = self.attention_norm.forward(x + self.attention.forward(x, input_pos, mask))
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
@@ -229,9 +219,9 @@ class TransformerDecoder(nn.Module):
         for b in self.layers:
             b.attention.kv_cache = KVCache(self.max_batch_size, self.max_seq_length, self.num_heads, self.head_dim)
 
-    def forward(self, input_pos: Tensor, x: Tensor):
+    def forward(self, input_pos: Tensor, x: Tensor, mask: Tensor):
         for layer in self.layers:
-            x = layer.forward(x, input_pos)
+            x = layer.forward(x, input_pos, mask)
         return x
 
     def prefill(self, x: Tensor, mask: Tensor):
@@ -289,8 +279,6 @@ class T2SDecoder(nn.Module):
         self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h = TransformerDecoder(hidden_dim, n_layer, num_heads, ffn_dim, vocab_size, max_seq_length, max_batch_size)
 
-        self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
-
         # self._register_load_state_dict_pre_hook(self.load_hook)
 
     def load_hook(self, state_dict, prefix, *args):
@@ -305,7 +293,6 @@ class T2SDecoder(nn.Module):
         self.h.input_pos.zero_()
         self.h.xy_pos.zero_()
         self.h.xy_dec.zero_()
-        self.__CUDAGraph = None
 
     def embed(
         self,
@@ -321,31 +308,16 @@ class T2SDecoder(nn.Module):
         bert = self.bert_proj.forward(bert_features_nested)
         x_emb = x_emb + bert
         x_pos = self.ar_text_position.prefill(x_emb)
+        x_pos = torch.nested.to_padded_tensor(x_pos, 0)
 
         y_emb = self.ar_audio_embedding.forward(y)
         y_emb = torch.nested.as_nested_tensor(y_emb)
         y_pos = self.ar_audio_position.prefill(y_emb)
+        y_pos = torch.nested.to_padded_tensor(y_pos, 0)
 
-        xy_pos = torch.nested.nested_tensor([torch.cat([x_pos[i], y_pos[i]]) for i in range(len(x))])
+        xy_pos = torch.cat([x_pos, y_pos], dim=1)
 
         return xy_pos
-
-    def capture(self, input_pos: Tensor, x: Tensor):
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-
-        self.h.xy_pos.copy_(x)
-        self.h.input_pos.copy_(input_pos)
-
-        with torch.cuda.stream(s):  # type: ignore
-            for _ in range(5):
-                self.h.forward(self.h.input_pos, self.h.xy_pos)
-        torch.cuda.current_stream().wait_stream(s)
-
-        self.__CUDAGraph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.__CUDAGraph):
-            self.h.xy_dec = self.h.forward(self.h.input_pos, self.h.xy_pos)
-        torch.cuda.synchronize()
 
     def forward(
         self,
@@ -358,7 +330,6 @@ class T2SDecoder(nn.Module):
         early_stop_num: int = -1,
         temperature: float = 1.0,
         repetition_penalty: float = 1.35,
-        use_cuda_graph=False,
         **kwargs,
     ):
         self.empty_cache()
@@ -392,25 +363,17 @@ class T2SDecoder(nn.Module):
                 if idx == 0:
                     xy_dec = self.h.prefill(xy_pos, xy_attn_mask_nested)
                     xy_dec = torch.stack([t[[-1]] for t in xy_dec.unbind()])
-                    input_pos = input_pos.to(torch.int32)
                 else:
-                    if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
-                        self.capture(input_pos, xy_pos)
-
                     # with torch.profiler.record_function("AR"):
                     with contextlib.nullcontext():
-                        if self.__CUDAGraph is not None:
-                            self.h.xy_pos.copy_(xy_pos)
-                            self.__CUDAGraph.replay()
-                            xy_dec = self.h.xy_dec.clone()
-                        else:
-                            xy_dec = self.h.forward(input_pos, xy_pos)
+                        xy_dec = self.h.forward(input_pos, xy_pos, mask)
 
                 logits = self.ar_predict_layer(xy_dec[:, -1])
                 input_pos += 1
 
                 if idx == 0:
                     t1 = time.perf_counter()
+                    attn_mask = xy_attn_mask_nested[:, :, -1]
                     logits = logits[:, :-1]
 
                 samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
@@ -421,6 +384,8 @@ class T2SDecoder(nn.Module):
 
                 EOS_mask = (samples[:, 0] == self.EOS) | (tokens == self.EOS)
                 EOS_indices: List[int] = torch.where(EOS_mask)[0].tolist()
+
+                attn_mask[torch.arange(bsz), :, input_pos] = True  # type: ignore
 
                 for i in EOS_indices:
                     if not completed[i]:
@@ -441,7 +406,7 @@ class T2SDecoder(nn.Module):
                         tqdm.write("bad zero prediction")
                     else:
                         tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {y.shape[1]}")
-                        tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")
+                        tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")  # type: ignore
                     break
 
                 y_emb = self.ar_audio_embedding(y[:, -1:])

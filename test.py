@@ -4,11 +4,11 @@ import random
 
 import numpy as np
 import torch
+from AR.models.t2s_model_xformers import T2SDecoder
 from torch.nn import functional as F
 from tqdm import tqdm
 
 from GPT_SoVITS.AR.models.t2s_model import Text2SemanticDecoder
-from GPT_SoVITS.AR.models.t2s_model_compile import T2SDecoder
 from GPT_SoVITS.AR.models.t2s_model_flash_attn import T2SDecoder as T2SDecoder_flash
 from GPT_SoVITS.AR.models.utils import sample
 
