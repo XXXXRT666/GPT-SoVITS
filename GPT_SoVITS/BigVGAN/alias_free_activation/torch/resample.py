@@ -6,6 +6,8 @@ from alias_free_activation.torch.filter import LowPassFilter1d, kaiser_sinc_filt
 import torch.nn as nn
 from torch.nn import functional as F
 
+from .filter import LowPassFilter1d, kaiser_sinc_filter1d
+
 
 class UpSample1d(nn.Module):
     def __init__(self, ratio=2, kernel_size=None):

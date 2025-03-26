@@ -2,7 +2,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
-cd "$SCRIPT_DIR" || exit
+cd "$SCRIPT_DIR" || exit 1
 
 if command -v conda >/dev/null 2>&1; then
     echo "conda installed"
@@ -59,8 +59,13 @@ rm -rf G2PWModel_1.1.zip
 mv G2PWModel_1.1 GPT_SoVITS/text/G2PWModel
 
 # Install build tools
+echo "Installing GCC..."
 conda install -c conda-forge gcc -y
+
+echo "Installing G++..."
 conda install -c conda-forge gxx -y
+
+echo "Installing ffmpeg and cmake..."
 conda install ffmpeg cmake -y
 
 # 设置编译环境
@@ -69,10 +74,50 @@ export CMAKE_MAKE_PROGRAM="$CONDA_PREFIX/bin/cmake"
 export CC="$CONDA_PREFIX/bin/gcc"
 export CXX="$CONDA_PREFIX/bin/g++"
 
+echo "Checking for CUDA installation..."
+if command -v nvidia-smi &>/dev/null; then
+    USE_CUDA=true
+    echo "CUDA found."
+else
+    echo "CUDA not found."
+    USE_CUDA=false
+fi
+
+if [ "$USE_CUDA" = false ]; then
+    echo "Checking for ROCm installation..."
+    if [ -d "/opt/rocm" ]; then
+        USE_ROCM=true
+        echo "ROCm found."
+        if grep -qi "microsoft" /proc/version; then
+            echo "WSL found"
+            IS_WSL=true
+        else
+            IS_WSL=false
+        fi
+    else
+        echo "ROCm not found."
+        USE_ROCM=false
+    fi
+fi
+
+echo "Installing PyTorch"
+
 pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124 --extra-index-url https://download.pytorch.org/whl/rocm6.2.4 --extra-index-url https://download.pytorch.org/whl/cpu
+
+if [ "$USE_ROCM" = true ] && [ "$IS_WSL" = true ]; then
+    echo "Update to WSL compatible runtime lib..."
+    location=$(pip show torch | grep Location | awk -F ": " '{print $2}')
+    cd "${location}/torch/lib/" || exit 1
+    rm libhsa-runtime64.so*
+    cp /opt/rocm/lib/libhsa-runtime64.so.1.2 libhsa-runtime64.so
+fi
 
 # 刷新环境
 # Refresh environment
 hash -r
 
+echo "Installing Python dependencies from requirements.txt..."
+
 pip install -r requirements.txt
+
+echo "Installation completed successfully!"

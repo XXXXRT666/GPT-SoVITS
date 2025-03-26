@@ -5,6 +5,8 @@ from alias_free_activation.torch.resample import DownSample1d, UpSample1d
 
 import torch.nn as nn
 
+from .resample import DownSample1d, UpSample1d
+
 
 class Activation1d(nn.Module):
     def __init__(

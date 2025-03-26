@@ -7,16 +7,16 @@ from typing import Optional
 import soundfile
 import torch
 import torchaudio
-from inference_webui import get_phones_and_bert
-from my_utils import load_audio
 from torch import IntTensor, LongTensor, Tensor, nn
 from torch.nn import functional as F
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from GPT_SoVITS.feature_extractor import cnhubert
+from GPT_SoVITS.inference_webui import get_phones_and_bert
 from GPT_SoVITS.module.models_onnx import SynthesizerTrn
 from GPT_SoVITS.text import cleaned_text_to_sequence
+from tools.my_utils import load_audio
 
 default_config = {
     "embedding_dim": 512,
@@ -446,12 +446,7 @@ class T2SModel(nn.Module):
         self.early_stop_num = torch.LongTensor([self.hz * self.max_sec])
 
     def forward(
-        self,
-        prompts: LongTensor,
-        ref_seq: LongTensor,
-        text_seq: LongTensor,
-        ref_bert: torch.Tensor,
-        text_bert: torch.Tensor,
+        self, prompts: LongTensor, ref_seq: LongTensor, text_seq: LongTensor, ref_bert: torch.Tensor, text_bert: torch.Tensor, top_k: LongTensor
     ):
         bert = torch.cat([ref_bert.T, text_bert.T], 1)
         all_phoneme_ids = torch.cat([ref_seq, text_seq], 1)
@@ -498,19 +493,13 @@ class T2SModel(nn.Module):
         )
 
         idx = 0
+        top_k = int(top_k)
 
         xy_dec, k_cache, v_cache = self.t2s_transformer.process_prompt(xy_pos, xy_attn_mask, None)
 
         logits = self.ar_predict_layer(xy_dec[:, -1])
         logits = logits[:, :-1]
-        samples = sample(
-            logits,
-            y,
-            top_k=self.top_k,
-            top_p=1,
-            repetition_penalty=1.35,
-            temperature=1.0,
-        )[0]
+        samples = sample(logits, y, top_k=top_k, top_p=1, repetition_penalty=1.35, temperature=1.0)[0]
         y = torch.concat([y, samples], dim=1)
         y_emb = self.ar_audio_embedding(y[:, -1:])
         xy_pos = y_emb * self.ar_audio_position.x_scale + self.ar_audio_position.alpha * self.ar_audio_position.pe[:, y_len + idx].to(
@@ -528,14 +517,7 @@ class T2SModel(nn.Module):
             if idx < 11:  ###至少预测出10个token不然不给停止（0.4s）
                 logits = logits[:, :-1]
 
-            samples = sample(
-                logits,
-                y,
-                top_k=self.top_k,
-                top_p=1,
-                repetition_penalty=1.35,
-                temperature=1.0,
-            )[0]
+            samples = sample(logits, y, top_k=top_k, top_p=1, repetition_penalty=1.35, temperature=1.0)[0]
 
             y = torch.concat([y, samples], dim=1)
 
@@ -719,18 +701,10 @@ def export(
     torch._dynamo.mark_dynamic(ref_bert, 0)
     torch._dynamo.mark_dynamic(text_bert, 0)
 
+    top_k = torch.LongTensor([5]).to(device)
+
     with torch.no_grad():
-        gpt_sovits_export = torch.jit.trace(
-            gpt_sovits,
-            example_inputs=(
-                ssl_content,
-                ref_audio_sr,
-                ref_seq,
-                text_seq,
-                ref_bert,
-                text_bert,
-            ),
-        )
+        gpt_sovits_export = torch.jit.trace(gpt_sovits, example_inputs=(ssl_content, ref_audio_sr, ref_seq, text_seq, ref_bert, text_bert, top_k))
 
         gpt_sovits_path = os.path.join(output_path, "gpt_sovits_model.pt")
         gpt_sovits_export.save(gpt_sovits_path)
@@ -763,13 +737,14 @@ class GPT_SoVITS(nn.Module):
         text_seq: Tensor,
         ref_bert: Tensor,
         text_bert: Tensor,
+        top_k: LongTensor,
         speed=1.0,
     ):
         codes = self.vits.vq_model.extract_latent(ssl_content)
         prompt_semantic = codes[0, 0]
         prompts = prompt_semantic.unsqueeze(0)
 
-        pred_semantic = self.t2s(prompts, ref_seq, text_seq, ref_bert, text_bert)
+        pred_semantic = self.t2s(prompts, ref_seq, text_seq, ref_bert, text_bert, top_k)
         audio = self.vits(text_seq, pred_semantic, ref_audio_sr, speed)
         return audio
 
@@ -864,8 +839,10 @@ def test():
     print("text_bert:", text_bert.shape)
     text_bert = text_bert.to("cuda")
 
+    top_k = torch.LongTensor([5]).to("cuda")
+
     with torch.no_grad():
-        audio = gpt_sovits(ssl_content, ref_audio_sr, ref_seq, text_seq, ref_bert, test_bert)
+        audio = gpt_sovits(ssl_content, ref_audio_sr, ref_seq, text_seq, ref_bert, test_bert, top_k)
     print("start write wav")
     soundfile.write("out.wav", audio.detach().cpu().numpy(), 32000)
 

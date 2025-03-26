@@ -14,9 +14,10 @@ import librosa
 import numpy as np
 import torch
 import torch.utils.data
-from env import AttrDict
 from librosa.filters import mel as librosa_mel_fn
 from tqdm import tqdm
+
+from .env import AttrDict
 
 MAX_WAV_VALUE = 32767.0  # NOTE: 32768.0 -1 to prevent int16 overflow (results in popping sound in corner cases)
 

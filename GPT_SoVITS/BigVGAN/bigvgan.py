@@ -9,15 +9,15 @@ import os
 from pathlib import Path
 from typing import Dict, Optional, Union
 
-import activations
-import torch
-import torch.nn as nn
-from alias_free_activation.torch.act import Activation1d as TorchActivation1d
-from env import AttrDict
 from huggingface_hub import PyTorchModelHubMixin, hf_hub_download
 from torch.nn import Conv1d, ConvTranspose1d
 from torch.nn.utils import remove_weight_norm, weight_norm
 from utils0 import get_padding, init_weights
+
+from . import activations
+from .alias_free_activation.torch.act import Activation1d as TorchActivation1d
+from .env import AttrDict
+from .utils0 import get_padding, init_weights
 
 
 def load_hparams_from_json(path) -> AttrDict:
@@ -89,7 +89,7 @@ class AMPBlock1(torch.nn.Module):
 
         # Select which Activation1d, lazy-load cuda version to ensure backward compatibility
         if self.h.get("use_cuda_kernel", False):
-            from alias_free_activation.cuda.activation1d import (
+            from .alias_free_activation.cuda.activation1d import (
                 Activation1d as CudaActivation1d,
             )
 
@@ -173,7 +173,7 @@ class AMPBlock2(torch.nn.Module):
 
         # Select which Activation1d, lazy-load cuda version to ensure backward compatibility
         if self.h.get("use_cuda_kernel", False):
-            from alias_free_activation.cuda.activation1d import (
+            from .alias_free_activation.cuda.activation1d import (
                 Activation1d as CudaActivation1d,
             )
 
@@ -235,7 +235,7 @@ class BigVGAN(
 
         # Select which Activation1d, lazy-load cuda version to ensure backward compatibility
         if self.h.get("use_cuda_kernel", False):
-            from alias_free_activation.cuda.activation1d import (
+            from .alias_free_activation.cuda.activation1d import (
                 Activation1d as CudaActivation1d,
             )
 

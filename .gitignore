@@ -20,8 +20,9 @@ ffmpeg*
 ffprobe*
 
 .mypy_cache
-
 output*.wav
-
 *.pkl
 .ruff_cache
+
+tools/AP_BWE_main/24kto48k/*
+!tools/AP_BWE_main/24kto48k/readme.txt

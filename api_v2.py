@@ -39,6 +39,8 @@ POST:
     "seed": -1,                   # int. random seed for reproducibility.
     "parallel_infer": True,       # bool. whether to use parallel inference.
     "repetition_penalty": 1.35    # float. repetition penalty for T2S model.
+    "sample_steps": 32,           # int. number of sampling steps for VITS model V3.
+    "super_sampling": False,       # bool. whether to use super-sampling for audio when using VITS model V3.
 }
 ```
 
@@ -168,6 +170,8 @@ class TTS_Request(BaseModel):
     streaming_mode: bool = False
     parallel_infer: bool = True
     repetition_penalty: float = 1.35
+    sample_steps: int = 32
+    super_sampling: bool = False
 
 
 ### modify from https://github.com/RVC-Boss/GPT-SoVITS/pull/894/files
@@ -314,6 +318,8 @@ async def tts_handle(req: dict):
                 "streaming_mode": False,      # bool. whether to return a streaming response.
                 "parallel_infer": True,       # bool.(optional) whether to use parallel inference.
                 "repetition_penalty": 1.35    # float.(optional) repetition penalty for T2S model.
+                "sample_steps": 32,           # int. number of sampling steps for VITS model V3.
+                "super_sampling": False,       # bool. whether to use super-sampling for audio when using VITS model V3.
             }
     returns:
         StreamingResponse: audio stream response.
@@ -336,10 +342,12 @@ async def tts_handle(req: dict):
         if streaming_mode:
 
             def streaming_generator(tts_generator: Generator, media_type: str):
-                if media_type == "wav":
-                    yield wave_header_chunk()
-                    media_type = "raw"
+                if_frist_chunk = True
                 for sr, chunk in tts_generator:
+                    if if_frist_chunk and media_type == "wav":
+                        yield wave_header_chunk(sample_rate=sr)
+                        media_type = "raw"
+                        if_frist_chunk = False
                     yield pack_audio(BytesIO(), chunk, sr, media_type).getvalue()
 
             # _media_type = f"audio/{media_type}" if not (streaming_mode and media_type in ["wav", "raw"]) else f"audio/x-{media_type}"
@@ -388,6 +396,8 @@ async def tts_get_endpoint(
     streaming_mode: bool = False,
     parallel_infer: bool = True,
     repetition_penalty: float = 1.35,
+    sample_steps: int = 32,
+    super_sampling: bool = False,
 ):
     req = {
         "text": text,
@@ -410,6 +420,8 @@ async def tts_get_endpoint(
         "streaming_mode": streaming_mode,
         "parallel_infer": parallel_infer,
         "repetition_penalty": float(repetition_penalty),
+        "sample_steps": int(sample_steps),
+        "super_sampling": super_sampling,
     }
     return await tts_handle(req)
 
