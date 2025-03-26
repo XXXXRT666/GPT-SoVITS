@@ -1,6 +1,6 @@
 import contextlib
 import time
-from typing import List, Optional, Sequence
+from typing import List, Sequence
 
 import torch
 import torch.nested._internal.nested_tensor
@@ -9,6 +9,7 @@ import xformers.ops as xops
 from torch.nn import functional as F
 from tqdm import tqdm
 
+from GPT_SoVITS.AR.models.t2s_model_abc import T2SDecoderABC
 from GPT_SoVITS.AR.models.utils import sample
 from GPT_SoVITS.AR.modules.embedding import (
     SinePositionalEmbeddingNested as SinePositionalEmbedding,
@@ -250,7 +251,7 @@ class TransformerDecoder(nn.Module):
         return x
 
 
-class T2SDecoder(nn.Module):
+class T2SDecoder(T2SDecoderABC):
     def __init__(
         self,
         config,
@@ -314,22 +315,6 @@ class T2SDecoder(nn.Module):
         self.h.xy_pos.zero_()
         self.h.xy_dec.zero_()
 
-    def compile(self, *args, **kwargs):
-        torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
-        torch._inductor.config.coordinate_descent_tuning = True
-        torch._inductor.config.triton.unique_kernel_names = True
-        # Experimental features to reduce compilation times, will be on by default in future
-        torch._inductor.config.fx_graph_cache = True
-        torch._inductor.config.triton.cudagraph_trees = True
-        torch._inductor.config.triton.cudagraph_support_input_mutation = True
-
-        self.forward = torch.compile(
-            self.forward,
-            fullgraph=True,
-            dynamic=True,
-            mode="reduce-overhead",
-        )
-
     def embed(
         self,
         x: List[torch.LongTensor],
@@ -385,7 +370,7 @@ class T2SDecoder(nn.Module):
         xy_attn_mask_nested = torch.nested.nested_tensor(xy_attn_mask)
 
         completed = [False] * bsz
-        y_results: List[Optional[Tensor]] = [None] * bsz
+        y_results: List[Tensor] = [None] * bsz  # type: ignore
         self.h.input_pos += prefill_len
         input_pos = self.h.input_pos
 
@@ -438,7 +423,7 @@ class T2SDecoder(nn.Module):
                         tqdm.write("bad zero prediction")
                     else:
                         tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {y.shape[1]}")
-                        tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")
+                        tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")  # type: ignore
                     break
 
                 y_emb = self.ar_audio_embedding(y[:, -1:])

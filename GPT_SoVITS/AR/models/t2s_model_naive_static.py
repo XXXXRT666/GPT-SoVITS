@@ -1,6 +1,6 @@
 import contextlib
 import time
-from typing import List, Optional, Sequence
+from typing import List, Sequence
 
 import torch
 import torch.nested._internal.nested_tensor
@@ -8,6 +8,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from tqdm import tqdm
 
+from GPT_SoVITS.AR.models.t2s_model_abc import T2SDecoderABC
 from GPT_SoVITS.AR.models.utils import sample
 from GPT_SoVITS.AR.modules.embedding import (
     SinePositionalEmbeddingNested as SinePositionalEmbedding,
@@ -230,7 +231,7 @@ class TransformerDecoder(nn.Module):
         return x
 
 
-class T2SDecoder(nn.Module):
+class T2SDecoder(T2SDecoderABC):
     def __init__(
         self,
         config,
@@ -351,7 +352,7 @@ class T2SDecoder(nn.Module):
         xy_attn_mask_nested = torch.nested.nested_tensor(xy_attn_mask)
 
         completed = [False] * bsz
-        y_results: List[Optional[Tensor]] = [None] * bsz
+        y_results: List[Tensor] = [None] * bsz  # type: ignore
         self.h.input_pos += prefill_len
         input_pos = self.h.input_pos
 
@@ -366,7 +367,7 @@ class T2SDecoder(nn.Module):
                 else:
                     # with torch.profiler.record_function("AR"):
                     with contextlib.nullcontext():
-                        xy_dec = self.h.forward(input_pos, xy_pos, mask)
+                        xy_dec = self.h.forward(input_pos, xy_pos, attn_mask)  # type: ignore # noqa: F821
 
                 logits = self.ar_predict_layer(xy_dec[:, -1])
                 input_pos += 1

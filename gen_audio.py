@@ -5,8 +5,6 @@ from functools import partial, wraps
 
 import click
 import soundfile as sf
-import torch
-import torch._inductor.config
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from GPT_SoVITS.TTS_infer_pack.TTS import TTS, TTS_Config
@@ -102,28 +100,10 @@ def main(cuda_graph=False, compile=False, bs=20):
     tts_pipeline.t2s_model.model = tts_pipeline.t2s_model.model.cuda().half().requires_grad_(False)
 
     if cuda_graph:
-        tts_pipeline.t2s_model.model.infer_batch = partial(tts_pipeline.t2s_model.model.infer_batch, use_cuda_graph=True)
+        tts_pipeline.t2s_model.model.forward = partial(tts_pipeline.t2s_model.model.forward, use_cuda_graph=True)
 
     if compile:
-        torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
-        torch._inductor.config.coordinate_descent_tuning = True
-        torch._inductor.config.triton.unique_kernel_names = True
-        # Experimental features to reduce compilation times, will be on by default in future
-        torch._inductor.config.fx_graph_cache = True
-        torch._inductor.config.triton.cudagraph_trees = True
-
-        torch._inductor.config.triton.cudagraph_support_input_mutation = True
-
-        # with sdpa_kernel(SDPBackend.MATH):
-
-        tts_pipeline.t2s_model.model.h.forward = torch.compile(
-            tts_pipeline.t2s_model.model.h.forward,
-            # mode="reduce-overhead",
-            mode="max-autotune",
-            # mode="max-autotune-no-cudagraphs",
-            fullgraph=True,
-            # dynamic=True,
-        )
+        tts_pipeline.t2s_model.model.compile()
 
     tts_req = {
         "text": "我在我青春韶华的时候遇到了你",
@@ -138,14 +118,24 @@ def main(cuda_graph=False, compile=False, bs=20):
         "parallel_infer": True,
     }
 
-    t1 = time.time()
+    t_compile = 0
+    if compile:
+        tts_pipeline.run = with_sdpa_kernel_math(tts_pipeline.run)
 
-    # tts_pipeline.run = with_sdpa_kernel_cudnn(tts_pipeline.run)
+    t1 = time.time()
 
     with suppress_stdout():
         sr, audio = next(tts_pipeline.run(tts_req))
 
     t1 = time.time() - t1
+
+    if compile:
+        t_compile = time.time()
+
+        with suppress_stdout():
+            sr, audio = next(tts_pipeline.run(tts_req))
+
+        t_compile = time.time() - t1
 
     sf.write("output.wav", audio, sr)
 
@@ -160,6 +150,9 @@ def main(cuda_graph=False, compile=False, bs=20):
     sf.write("output1.wav", audio, sr)
 
     print(t1, t2)
+
+    if compile:
+        print(f"Compile Time: {t1 - t_compile:.2f}")
 
 
 if __name__ == "__main__":

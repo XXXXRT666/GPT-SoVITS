@@ -1,17 +1,16 @@
 # modified from https://github.com/yangdongchao/SoundStorm/blob/master/soundstorm/s1/AR/models/t2s_lightning_module.py
 # reference: https://github.com/lifeiteng/vall-e
-import os
-import sys
-
-now_dir = os.getcwd()
-sys.path.append(now_dir)
 from typing import Dict
 
 import torch
 from pytorch_lightning import LightningModule
 
-from GPT_SoVITS.AR.models.t2s_model import Text2SemanticDecoder
-from GPT_SoVITS.AR.models.t2s_model_flash_attn import T2SDecoder
+# from GPT_SoVITS.AR.models.t2s_model import Text2SemanticDecoder
+from GPT_SoVITS.AR.models.t2s_model_abc import T2SDecoderABC
+from GPT_SoVITS.AR.models.t2s_model_flash_attn import T2SDecoder as T2SDecoder_flash_attn
+from GPT_SoVITS.AR.models.t2s_model_naive_static import T2SDecoder as T2SDecoder_naive_static
+from GPT_SoVITS.AR.models.t2s_model_nested import T2SDecoder as T2SDecoder_nested
+from GPT_SoVITS.AR.models.t2s_model_xformers import T2SDecoder as T2SDecoder_xformers
 from GPT_SoVITS.AR.modules.lr_schedulers import WarmupCosineLRSchedule
 from GPT_SoVITS.AR.modules.optim import ScaledAdam
 
@@ -19,12 +18,24 @@ from GPT_SoVITS.AR.modules.optim import ScaledAdam
 
 
 class Text2SemanticLightningModule(LightningModule):
-    def __init__(self, config, output_dir, is_train=True, batch_size=10):
+    def __init__(self, config, output_dir, is_train=True, batch_size=10, implement: str = "naive_static"):
         super().__init__()
         self.config = config
         self.top_k = 3
-        # self.model = Text2SemanticDecoder(config=config, top_k=3)
-        self.model = T2SDecoder(config=config, max_batch_size=batch_size)
+        self.model: T2SDecoderABC
+        match implement:
+            # case "naive":
+            #     self.model = Text2SemanticDecoder(config=config, top_k=3)
+            case "naive_static":
+                self.model = T2SDecoder_naive_static(config=config, max_batch_size=batch_size)
+            case "flash_attn":
+                self.model = T2SDecoder_flash_attn(config=config, max_batch_size=batch_size)
+            case "xformers":
+                self.model = T2SDecoder_xformers(config=config, max_batch_size=batch_size)
+            case "Nested":
+                self.model = T2SDecoder_nested(config=config, max_batch_size=batch_size)
+            case _:
+                raise NotImplementedError(implement)
         pretrained_s1 = config.get("pretrained_s1")
         if pretrained_s1 and is_train:
             # print(self.load_state_dict(torch.load(pretrained_s1,map_location="cpu")["state_dict"]))
