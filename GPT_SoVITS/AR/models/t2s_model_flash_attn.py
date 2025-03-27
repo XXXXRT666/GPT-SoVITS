@@ -398,8 +398,8 @@ class T2SDecoder(T2SDecoderABC):
                     if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
                         self.capture(input_pos, xy_pos)
 
-                    # with torch.profiler.record_function("AR"):
-                    with contextlib.nullcontext():
+                    with torch.profiler.record_function("AR"):
+                        # with contextlib.nullcontext():
                         if self.__CUDAGraph is not None:
                             self.h.xy_pos.copy_(xy_pos)
                             self.__CUDAGraph.replay()
@@ -407,34 +407,40 @@ class T2SDecoder(T2SDecoderABC):
                         else:
                             xy_dec = self.h.forward(input_pos, xy_pos)
 
-                logits = self.ar_predict_layer(xy_dec[:, -1])
-                input_pos += 1
+                with torch.profiler.record_function("Logits"):
+                    # with contextlib.nullcontext():
+                    logits = self.ar_predict_layer(xy_dec[:, -1])
+                    input_pos += 1
 
                 if idx == 0:
                     t1 = time.perf_counter()
                     logits = logits[:, :-1]
 
-                samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
+                with torch.profiler.record_function("Sampling"):
+                    # with contextlib.nullcontext():
+                    samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
 
-                y = torch.concat([y, samples], dim=1)
+                    y = torch.concat([y, samples], dim=1)
 
-                tokens = torch.argmax(logits, dim=-1)
+                with torch.profiler.record_function("EOS"):
+                    # with contextlib.nullcontext():
+                    tokens = torch.argmax(logits, dim=-1)
 
-                EOS_mask = (samples[:, 0] == self.EOS) | (tokens == self.EOS)
-                EOS_indices: List[int] = torch.where(EOS_mask)[0].tolist()
+                    EOS_mask = (samples[:, 0] == self.EOS) | (tokens == self.EOS)
+                    EOS_indices: List[int] = torch.where(EOS_mask)[0].tolist()
 
-                for i in EOS_indices:
-                    if not completed[i]:
-                        y_results[i] = y[i, y_len:-1]  # type: ignore
-                        completed[i] = True
-
-                if (early_stop_num != -1 and (y.shape[1] - y_len) > early_stop_num) or idx == 1499:
-                    tqdm.write(f"Reached early stop limit: {early_stop_num}")
-                    for i in range(bsz):
+                    for i in EOS_indices:
                         if not completed[i]:
-                            y_results[i] = y[i, y_len:]  # type: ignore
+                            y_results[i] = y[i, y_len:-1]  # type: ignore
                             completed[i] = True
-                    break
+
+                    if (early_stop_num != -1 and (y.shape[1] - y_len) > early_stop_num) or idx == 1499:
+                        tqdm.write(f"Reached early stop limit: {early_stop_num}")
+                        for i in range(bsz):
+                            if not completed[i]:
+                                y_results[i] = y[i, y_len:]  # type: ignore
+                                completed[i] = True
+                        break
 
                 if all(completed):
                     if y.shape[1] == 0:
@@ -445,11 +451,14 @@ class T2SDecoder(T2SDecoderABC):
                         tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")  # type: ignore
                     break
 
-                y_emb = self.ar_audio_embedding(y[:, -1:])
-                xy_pos = self.ar_audio_position.forward(input_pos - x_lens, y_emb)
+                with torch.profiler.record_function("Next xy_pos"):
+                    # with contextlib.nullcontext():
 
-                # if idx == 50:
-                #     break
+                    y_emb = self.ar_audio_embedding(y[:, -1:])
+                    xy_pos = self.ar_audio_position.forward(input_pos - x_lens, y_emb)
+
+        #         if idx == 50:
+        #             break
 
         # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
 

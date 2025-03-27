@@ -61,7 +61,7 @@ def with_sdpa_kernel_flash(func):
 @click.option("--cuda-graph", is_flag=True, help="Enable CUDA Graph.")
 @click.option("--compile", is_flag=True, help="Enable compilation mode.")
 @click.option("--bs", type=int, default=20, help="Batch Size")
-@click.option("--implement", type=str, default="naive_static", help="T2S Decoder Implement")
+@click.option("--implement", type=str, default="flash_attn", help="T2S Decoder Implement")
 def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
     if cuda_graph and compile:
         raise click.UsageError("Options --cuda-graph and --compile cannot be used together.")
@@ -99,14 +99,12 @@ def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
 
     tts_pipeline.t2s_model.model = tts_pipeline.t2s_model.model.cuda().half().requires_grad_(False)
 
-    if cuda_graph:
-        tts_pipeline.t2s_model.model.forward = partial(tts_pipeline.t2s_model.model.forward, use_cuda_graph=True)
-
     if compile:
         tts_pipeline.t2s_model.model.compile()
 
     tts_req = {
         "text": "我在我青春韶华的时候遇到了你",
+        # "text": text,
         "text_lang": "all_zh",
         "ref_audio_path": Prompt_Audio,
         "prompt_lang": Prompt_Lang,
@@ -116,6 +114,7 @@ def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
         "seed": 6666666,
         "split_bucket": False,
         "parallel_infer": True,
+        "use_cuda_graph": cuda_graph,
     }
 
     t_compile = 0
@@ -124,18 +123,18 @@ def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
 
     t1 = time.time()
 
-    with suppress_stdout():
-        sr, audio = next(tts_pipeline.run(tts_req))
+    # with suppress_stdout():
+    sr, audio = next(tts_pipeline.run(tts_req))
 
     t1 = time.time() - t1
 
     if compile:
         t_compile = time.time()
 
-        with suppress_stdout():
-            sr, audio = next(tts_pipeline.run(tts_req))
+        # with suppress_stdout():
+        sr, audio = next(tts_pipeline.run(tts_req))
 
-        t_compile = time.time() - t1
+        t_compile = t1 - (time.time() - t_compile)
 
     sf.write("output.wav", audio, sr)
 

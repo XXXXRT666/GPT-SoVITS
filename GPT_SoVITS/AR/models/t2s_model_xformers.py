@@ -58,7 +58,7 @@ class KVCache(nn.Module):
         k = []
         v = []
 
-        for pos, k_, v_ in map(lambda x: x.unbind(0), (input_pos, k_out, v_out)):
+        for pos, k_, v_ in zip(*map(lambda x: x.unbind(0), (input_pos, k_out, v_out))):
             k.append(k_[:pos])
             v.append(v_[:pos])
 
@@ -116,6 +116,8 @@ class Attention(nn.Module):
         attn = xops.memory_efficient_attention(q, k, v, attn_bias)
 
         print(attn.shape)
+
+        exit()
 
         attn = attn.view(bsz, seqlen, self.hidden_dim)
 

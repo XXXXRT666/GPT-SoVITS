@@ -40,5 +40,5 @@ x_transformers
 torchmetrics<=1.5
 matplotlib
 flash_attn; sys_platform == 'linux'
-x_formers; sys_platform == 'linux'
+xformers; sys_platform == 'linux'
 py-cpuinfo

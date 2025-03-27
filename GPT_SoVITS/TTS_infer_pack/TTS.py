@@ -519,7 +519,7 @@ class TTS:
         if self.bigvgan_model is not None:
             return
         self.bigvgan_model = BigVGAN.from_pretrained(
-            "%s/GPT_SoVITS/pretrained_models/models--nvidia--bigvgan_v2_24khz_100band_256x" % (now_dir,), use_cuda_kernel=False
+            "%s/GPT_SoVITS/pretrained_models/models--nvidia--bigvgan_v2_24khz_100band_256x" % (os.getcwd(),), use_cuda_kernel=False
         )  # if True, RuntimeError: Ninja is required to load C++ extensions
         # remove weight norm in the model and set to eval mode
         self.bigvgan_model.remove_weight_norm()
@@ -1090,7 +1090,7 @@ class TTS:
                 t4 = ttime()
                 t_34 += t4 - t3
 
-                refer_audio_spec: torch.Tensor = [
+                refer_audio_spec: List[torch.Tensor] = [
                     item.to(dtype=self.precision, device=self.configs.device) for item in self.prompt_cache["refer_spec"]
                 ]
 
@@ -1132,8 +1132,8 @@ class TTS:
                             audio_fragment = self.vits_model.decode(_pred_semantic, phones, refer_audio_spec, speed=speed_factor).detach()[0, 0, :]
                             batch_audio_fragment.append(audio_fragment)  ###试试重建不带上prompt部分
                 else:
-                    for i, idx in enumerate(tqdm(pred_semantic_list)):
-                        phones = batch_phones[i].unsqueeze(0).to(self.configs.device)
+                    for idx, pred_semantic in enumerate(tqdm(pred_semantic_list)):
+                        phones = batch_phones[idx].unsqueeze(0).to(self.configs.device)
                         _pred_semantic = pred_semantic.unsqueeze(0).unsqueeze(0)  # .unsqueeze(0)#mq要多unsqueeze一次
                         audio_fragment = self.v3_synthesis(_pred_semantic, phones, speed=speed_factor, sample_steps=sample_steps)
                         batch_audio_fragment.append(audio_fragment)

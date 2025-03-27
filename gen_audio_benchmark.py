@@ -1,7 +1,7 @@
-import datetime
 import os
 import re
 import subprocess
+import time
 
 import click
 import cpuinfo
@@ -15,8 +15,10 @@ print(gpu_info)
 
 
 def run_gen_audio(bs: int):
+    exec_time = time.time()
     cmd = ["python", "gen_audio.py", "--bs", str(bs)]
     result = subprocess.run(cmd, capture_output=True, text=True)
+    exec_time = time.time() - exec_time
 
     captured_values = [0.0]
     lines = result.stdout.splitlines()
@@ -26,18 +28,21 @@ def run_gen_audio(bs: int):
             match = re.search(r"[-+]?[0-9]*\.?[0-9]+", lines[i + 1])
             if match:
                 captured_values.append(float(match.group()))
+    print(f"BS: {bs}, Naive: {captured_values[-1]} it/s, Exec Time: {exec_time}s")
 
     if len(captured_values) == 1:
         print(f"No match found for BS {bs} in No CUDA Graph mode.")
         print("STDOUT:", result.stdout)
         print("STDERR:", result.stderr)
 
-    return captured_values
+    return captured_values, exec_time
 
 
 def run_gen_audio_cuda_graph(bs: int, implement: str):
+    exec_time = time.time()
     cmd = ["python", "gen_audio.py", "--cuda-graph", "--bs", str(bs), "--implement", implement]
     result = subprocess.run(cmd, capture_output=True, text=True)
+    exec_time = time.time() - exec_time
 
     captured_values = [0.0]
     lines = result.stdout.splitlines()
@@ -47,46 +52,50 @@ def run_gen_audio_cuda_graph(bs: int, implement: str):
             match = re.search(r"[-+]?[0-9]*\.?[0-9]+", lines[i + 1])
             if match:
                 captured_values.append(float(match.group()))
+    print(f"BS: {bs}, CUDA Grpah: {captured_values[-1]} it/s, Exec Time: {exec_time}s")
 
     if len(captured_values) == 1:
         print(f"No match found for BS {bs} in CUDA Graph mode.")
         print("STDOUT:", result.stdout)
         print("STDERR:", result.stderr)
 
-    return captured_values
+    return captured_values, exec_time
 
 
 def run_gen_audio_compile(bs: int, implement: str):
+    exec_time = time.time()
     cmd = ["python", "gen_audio.py", "--compile", "--bs", str(bs), "--implement", implement]
     result = subprocess.run(cmd, capture_output=True, text=True)
+    exec_time = time.time() - exec_time
 
     captured_values = [0.0]
     lines = result.stdout.splitlines()
     compile_time = 0.0
 
-    for i in range(len(lines) - 1):
+    for i in range(len(lines)):
         if "T2S Decoding EOS" in lines[i]:
             match = re.search(r"[-+]?[0-9]*\.?[0-9]+", lines[i + 1])
             if match:
                 captured_values.append(float(match.group()))
         if "Compile Time" in lines[i]:
-            match = re.search(r"Compile Time:\s*([0-9]+\.[0-9]{2})", lines[i])
+            match = re.search(r"Compile Time:\s*([0-9.]+)", lines[i])
             if match:
                 compile_time = float(match.group(1))
+    print(f"BS: {bs}, Compile: {captured_values[-1]} it/s, Compile Time: {compile_time}s, Exec Time: {exec_time}s")
 
     if len(captured_values) == 1:
         print(f"No match found for BS {bs} in CUDA Graph mode.")
         print("STDOUT:", result.stdout)
         print("STDERR:", result.stderr)
 
-    return captured_values, compile_time
+    return captured_values, compile_time, exec_time
 
 
 @click.command()
 @click.argument("n", type=int)
 @click.option("--cuda-graph", is_flag=True, help="Run with CUDA Graph.")
 @click.option("--compile", "compile_", is_flag=True, help="Run with Torch Compile.")
-@click.option("--implement", type=str, default="Flash_Attn", help="T2S Decoder Implement For Benchmark")
+@click.option("--implement", type=str, default="flash_attn", help="T2S Decoder Implement For Benchmark")
 def main(n=0, cuda_graph=False, compile_=False, implement="Flash_Attn"):
     filename = f"speed_test_{cpu_info['brand_raw']}_{gpu_info}_implement.csv"
     df = None
@@ -102,33 +111,42 @@ def main(n=0, cuda_graph=False, compile_=False, implement="Flash_Attn"):
 
     if "Naive Max It/s" not in df.columns:
         results_naive = []
+        results_naive_et = []
         for bs in range(1, n + 1):
-            val = max(run_gen_audio(bs))
-            results_naive.append(val)
+            val, et = run_gen_audio(bs)
+            results_naive.append(max(val))
+            results_naive_et.append(round(et,2))
         df["Naive Max It/s"] = results_naive
+        df["Naive Exec Time"] = results_naive_et
 
     if cuda_graph:
         results_cuda_graph = []
+        results_cuda_graph_et = []
         for bs in range(1, n + 1):
-            val = max(run_gen_audio_cuda_graph(bs, implement))
-            results_cuda_graph.append(val)
-        df["CUDA Graph Max It/s"] = results_cuda_graph
+            val, et = run_gen_audio_cuda_graph(bs, implement)
+            results_cuda_graph.append(max(val))
+            results_cuda_graph_et.append(round(et,2))
+        df[f"{implement} CUDA Graph Max It/s"] = results_cuda_graph
+        df[f"{implement} CUDA Graph Exec Time"] = results_cuda_graph_et
 
     if compile_:
         results_compile = []
         compile_times = []
+        results_compile_et = []
         for bs in range(1, n + 1):
-            val, ct = run_gen_audio_compile(bs, implement)
+            val, ct, et = run_gen_audio_compile(bs, implement)
             results_compile.append(max(val))
             compile_times.append(ct)
-        df["Compile Max It/s"] = results_compile
-        df["Compile Times"] = compile_times
+            results_compile_et.append(round(et,2))
+        df[f"{implement} Compile  Max It/s"] = results_compile
+        df[f"{implement} Compile Times"] = compile_times
+        df[f"{implement} Compile Exec Times"] = compile_times
 
     # 更新加速比
-    if "CUDA Graph Max It/s" in df.columns:
-        df["Speedup (CUDA Graph / Naive)"] = df["CUDA Graph Max It/s"] / df["Naive Max It/s"]
+    if f"{implement} CUDA Graph Max It/s" in df.columns:
+        df[f"Speedup ({implement} CUDA Graph / Naive)"] = df[f"{implement} CUDA Graph Max It/s"] / df["Naive Max It/s"]
     if "Compile Max It/s" in df.columns:
-        df["Speedup (Compile / Naive)"] = df["Compile Max It/s"] / df["Naive Max It/s"]
+        df[f"Speedup ({implement} Compile / Naive)"] = df[f"{implement} Compile Max It/s"] / df["Naive Max It/s"]
 
     df.to_csv(filename, index=False)
     print(f"CPU: {cpu_info['brand_raw']} GPU: {gpu_info}")
