@@ -903,15 +903,16 @@ class TTS:
         repetition_penalty = inputs.get("repetition_penalty", 1.35)
         sample_steps = inputs.get("sample_steps", 32)
         super_sampling = inputs.get("super_sampling", False)
+        use_cuda_graph = inputs.get("use_cuda_graph", True)
 
-        if parallel_infer:
-            print(i18n("并行推理模式已开启"))
-            # self.t2s_model.model.infer_panel = self.t2s_model.model.infer_panel_batch_infer
-            self.t2s_model.model.infer_panel = self.t2s_model.model.forward
-        else:
-            print(i18n("并行推理模式已关闭"))
-            # self.t2s_model.model.infer_panel = self.t2s_model.model.infer_panel_naive_batched
-            self.t2s_model.model.infer_panel = self.t2s_model.model.forward
+        # if parallel_infer:
+        #     print(i18n("并行推理模式已开启"))
+        #     # self.t2s_model.model.infer_panel = self.t2s_model.model.infer_panel_batch_infer
+        #     self.t2s_model.model.infer_panel = self.t2s_model.model.forward
+        # else:
+        #     print(i18n("并行推理模式已关闭"))
+        #     # self.t2s_model.model.infer_panel = self.t2s_model.model.infer_panel_naive_batched
+        #     self.t2s_model.model.infer_panel = self.t2s_model.model.forward
 
         if return_fragment:
             print(i18n("分段返回模式已开启"))
@@ -1081,6 +1082,7 @@ class TTS:
                     early_stop_num=self.configs.hz * self.configs.max_sec,
                     max_len=max_len,
                     repetition_penalty=repetition_penalty,
+                    use_cuda_graph=use_cuda_graph,
                 )
 
                 if idx == len(data) - 1 and res_len:

@@ -120,7 +120,7 @@ if bert_path is not None:
     tts_config.bert_base_path = bert_path
 
 print(tts_config)
-tts_pipeline = TTS(tts_config)
+tts_pipeline = TTS(tts_config, 20, "flash_attn")
 gpt_path = tts_config.t2s_weights_path
 sovits_path = tts_config.vits_weights_path
 version = tts_config.version
@@ -148,6 +148,7 @@ def inference(
     repetition_penalty,
     sample_steps,
     super_sampling,
+    use_cuda_graph=True,
 ):
     seed = -1 if keep_random else seed
     actual_seed = seed if seed not in [-1, "", None] else random.randint(0, 2**32 - 1)
@@ -357,8 +358,8 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
         with gr.Row():
             with gr.Column():
                 with gr.Row():
-                    batch_size = gr.Slider(minimum=1, maximum=200, step=1, label=i18n("batch_size"), value=20, interactive=True)
-                    sample_steps = gr.Radio(label=i18n("采样步数(仅对V3生效)"), value=32, choices=[4, 8, 16, 32], visible=True)
+                    batch_size = gr.Slider(minimum=1, maximum=200, step=1, label=i18n("batch_size"), value=20, interactive=False)
+                    sample_steps = gr.Radio(label=i18n("采样步数(仅对V3生效)"), value=32, choices=[4, 8, 16, 32, 64, 128], visible=True)
                 with gr.Row():
                     fragment_interval = gr.Slider(minimum=0.01, maximum=1, step=0.01, label=i18n("分段间隔(秒)"), value=0.3, interactive=True)
                     speed_factor = gr.Slider(minimum=0.6, maximum=1.65, step=0.05, label="语速", value=1.0, interactive=True)
