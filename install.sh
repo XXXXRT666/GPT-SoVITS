@@ -6,21 +6,21 @@ cd "$SCRIPT_DIR" || exit 1
 
 trap 'echo "Error Occured at \"$BASH_COMMAND\" with exit code $?"; exit 1' ERR
 
+OS_TYPE=$(uname)
+ARCHITECTURE=$(uname -m)
+
 if command -v conda >/dev/null 2>&1; then
     echo "conda installed"
 else
     echo "installing conda"
 
-    os_type=$(uname)
-    architecture=$(uname -m)
-
-    if [ "$os_type" = "Darwin" ] && [[ "$architecture" == "arm64" ]]; then
+    if [ "$OS_TYPE" = "Darwin" ] && [[ "$ARCHITECTURE" == "arm64" ]]; then
         xcode-select --install
         wget --tries=25 --wait=3 --read-timeout=40 -O anaconda.sh "https://repo.anaconda.com/archive/Anaconda3-2024.10-1-MacOSX-arm64.sh"
-    elif [ "$os_type" = "Linux" ] && [[ "$architecture" == "x86_64" ]]; then
+    elif [ "$OS_TYPE" = "Linux" ] && [[ "$ARCHITECTURE" == "x86_64" ]]; then
         wget --tries=25 --wait=3 --read-timeout=40 -O anaconda.sh "https://repo.anaconda.com/archive/Anaconda3-2024.10-1-Linux-x86_64.sh"
     else
-        echo "Unsupported System for install.sh：$os_type with $architecture"
+        echo "Unsupported System for install.sh：$OS_TYPE with $ARCHITECTURE"
         exit 1
     fi
 
@@ -28,17 +28,23 @@ else
 
     rm -rf "anaconda.sh"
 
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        "$HOME/anaconda3/condabin/conda" init zsh
+        source "$HOME/.zshrc"
+    elif [ "$OS_TYPE" = "Linux" ]; then
+        "$HOME/anaconda3/condabin/conda" init bash
+        source "$HOME/.bashrc"
+    fi
+
 fi
 
-if [ "$os_type" = "Darwin" ]; then
-    "$HOME/anaconda3/condabin/conda" init zsh
-    source "$HOME/.zshrc"
-elif [ "$os_type" = "Linux" ]; then
-    "$HOME/anaconda3/condabin/conda" init bash
-    source "$HOME/.bashrc"
+CONDA_PATH=$(conda info --base 2>/dev/null)
+
+if [ -z "$CONDA_PATH" ]; then
+    CONDA_PATH="$HOME/anaconda3"
 fi
 
-source "$HOME/anaconda3/etc/profile.d/conda.sh"
+source "$CONDA_PATH/etc/profile.d/conda.sh"
 
 if conda env list | awk '{print $1}' | grep -Fxq "GPT-SoVITS"; then
     :
@@ -140,6 +146,32 @@ fi
 hash -r
 
 echo "Installing Python dependencies from requirements.txt..."
+
+PACKAGE_NAME="pyopenjtalk"
+
+VERSION=0.4.0
+
+wget "https://files.pythonhosted.org/packages/source/${PACKAGE_NAME:0:1}/$PACKAGE_NAME/$PACKAGE_NAME-$VERSION.tar.gz"
+
+TAR_FILE=$(ls ${PACKAGE_NAME}-*.tar.gz)
+DIR_NAME="${TAR_FILE%.tar.gz}"
+
+tar -xzf "$TAR_FILE"
+rm "$TAR_FILE"
+
+CMAKE_FILE="$DIR_NAME/lib/open_jtalk/src/CMakeLists.txt"
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' -E 's/cmake_minimum_required\(VERSION[^\)]*\)/cmake_minimum_required(VERSION 2.8.12...3.31)/' "$CMAKE_FILE"
+else
+    sed -i -E 's/cmake_minimum_required\(VERSION[^\)]*\)/cmake_minimum_required(VERSION 2.8.12...3.31)/' "$CMAKE_FILE"
+fi
+
+tar -czf "$TAR_FILE" "$DIR_NAME"
+
+pip install "$TAR_FILE"
+
+rm -rf "$TAR_FILE" "$DIR_NAME"
 
 pip install -r requirements.txt
 
