@@ -40,11 +40,7 @@ else
 
 fi
 
-CONDA_PATH=$(conda info --base 2>/dev/null)
-
-if [ -z "$CONDA_PATH" ]; then
-    CONDA_PATH="$HOME/anaconda3"
-fi
+CONDA_PATH=$(conda info --base 2>/dev/null || echo "$HOME/anaconda3")
 
 source "$CONDA_PATH/etc/profile.d/conda.sh"
 
