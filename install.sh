@@ -4,6 +4,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 cd "$SCRIPT_DIR" || exit 1
 
+set -e
+
 trap 'echo "Error Occured at \"$BASH_COMMAND\" with exit code $?"; exit 1' ERR
 
 OS_TYPE=$(uname)
@@ -89,6 +91,8 @@ conda install -c conda-forge gxx -y
 echo "Installing ffmpeg and cmake..."
 conda install ffmpeg cmake -y
 
+conda install jq -y
+
 # 设置编译环境
 # Set up build environment
 export CMAKE_MAKE_PROGRAM="$CONDA_PREFIX/bin/cmake"
@@ -149,7 +153,7 @@ echo "Installing Python dependencies from requirements.txt..."
 
 PACKAGE_NAME="pyopenjtalk"
 
-VERSION=0.4.0
+VERSION=$(curl -s https://pypi.org/pypi/$PACKAGE_NAME/json | jq -r .info.version)
 
 wget "https://files.pythonhosted.org/packages/source/${PACKAGE_NAME:0:1}/$PACKAGE_NAME/$PACKAGE_NAME-$VERSION.tar.gz"
 
@@ -174,5 +178,10 @@ pip install "$TAR_FILE"
 rm -rf "$TAR_FILE" "$DIR_NAME"
 
 pip install -r requirements.txt
+
+if [ "$USE_CUDA" = true ]; then
+    pip uninstall onnxruntime -y
+    pip install onnxruntime-gpu
+fi
 
 echo "Installation completed successfully!"
