@@ -117,7 +117,6 @@ def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
         "use_cuda_graph": cuda_graph,
     }
 
-    t_compile = 0
     if compile:
         tts_pipeline.run = with_sdpa_kernel_math(tts_pipeline.run)
 
@@ -129,12 +128,8 @@ def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
     t1 = time.time() - t1
 
     if compile:
-        t_compile = time.time()
-
         # with suppress_stdout():
         sr, audio = next(tts_pipeline.run(tts_req))
-
-        t_compile = t1 - (time.time() - t_compile)
 
     sf.write("output.wav", audio, sr)
 
@@ -150,8 +145,7 @@ def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
 
     print(t1, t2)
 
-    if compile:
-        print(f"Compile Time: {t1 - t_compile:.2f}")
+    print(f"Exec Time: {t2:.2f}")
 
 
 if __name__ == "__main__":
