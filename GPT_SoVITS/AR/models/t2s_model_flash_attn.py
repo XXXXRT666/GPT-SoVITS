@@ -306,7 +306,7 @@ class T2SDecoder(T2SDecoderABC):
         self.h.input_pos.zero_()
         self.h.xy_pos.zero_()
         self.h.xy_dec.zero_()
-        self.__CUDAGraph = None
+        # self.__CUDAGraph = None
 
     def embed(
         self,

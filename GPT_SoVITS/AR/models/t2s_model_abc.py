@@ -42,6 +42,6 @@ class T2SDecoderABC(ABC, nn.Module):
         self.h.forward = torch.compile(
             self.h.forward,
             fullgraph=True,
-            # mode="reduce-overhead",
-            mode="max-autotune",
+            mode="reduce-overhead",
+            # mode="max-autotune",
         )

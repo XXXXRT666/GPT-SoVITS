@@ -69,10 +69,8 @@ def run_gen_audio_cuda_graph(bs: int, implement: str):
 
 
 def run_gen_audio_compile(bs: int, implement: str):
-    exec_time = time.time()
     cmd = ["python", "gen_audio.py", "--compile", "--bs", str(bs), "--implement", implement]
     result = subprocess.run(cmd, capture_output=True, text=True)
-    exec_time = time.time() - exec_time
 
     captured_values = [0.0]
     exec_time = 0.0
@@ -93,7 +91,7 @@ def run_gen_audio_compile(bs: int, implement: str):
             if match:
                 exec_time = float(match.group(1))
     compile_times += [0.0, 0.0]
-    compile_time = round(compile_times[0] - compile_times[1],2)
+    compile_time = round(compile_times[0] - compile_times[1], 2)
     print(f"BS: {bs}, Compile: {captured_values[-1]} it/s, Compile Time: {compile_time}s, Exec Time: {exec_time}s")
 
     if len(captured_values) == 1:
@@ -157,7 +155,7 @@ def main(n=0, cuda_graph=False, compile_=False, implement="Flash_Attn"):
 
     if f"{implement} CUDA Graph Max It/s" in df.columns:
         df[f"Speedup ({implement} CUDA Graph / Naive)"] = [round(i, 2) for i in df[f"{implement} CUDA Graph Max It/s"] / df["Naive Max It/s"]]
-    if "Compile Max It/s" in df.columns:
+    if f"{implement} Compile Max It/s" in df.columns:
         df[f"Speedup ({implement} Compile / Naive)"] = [round(i, 2) for i in df[f"{implement} Compile Max It/s"] / df["Naive Max It/s"]]
 
     df.to_csv(filename, index=False)
