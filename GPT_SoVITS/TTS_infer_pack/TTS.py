@@ -1141,6 +1141,7 @@ class TTS:
                 t5 = ttime()
                 t_45 += t5 - t4
                 if return_fragment:
+                    print(f"T2S Time: {t4 - t3:.2f}")
                     print("%.3f\t%.3f\t%.3f\t%.3f" % (t1 - t0, t2 - t1, t4 - t3, t5 - t4))
                     yield self.audio_postprocess(
                         [batch_audio_fragment],
@@ -1159,6 +1160,7 @@ class TTS:
                     return
 
             if not return_fragment:
+                print(f"T2S Time: {t_34:.2f}")
                 print("%.3f\t%.3f\t%.3f\t%.3f" % (t1 - t0, t2 - t1, t_34, t_45))
                 if len(audio) == 0:
                     yield 16000, np.zeros(int(16000), dtype=np.int16)
