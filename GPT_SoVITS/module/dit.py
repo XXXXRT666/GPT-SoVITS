@@ -7,172 +7,110 @@ nw - raw wave length
 d - dimension
 """
 
+from collections.abc import MutableSequence
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from x_transformers.x_transformers import RotaryEmbedding, apply_rotary_pos_emb
+from x_transformers.x_transformers import RotaryEmbedding
 
 from GPT_SoVITS.f5_tts.model.modules import (
     AdaLayerNormZero,
     AdaLayerNormZero_Final,
     TimestepEmbedding,
 )
-from GPT_SoVITS.module.dit_modules import InputEmbedding, TextEmbedding
+from GPT_SoVITS.module.dit_modules import Attention, FeedForward, InputEmbedding, TextEmbedding
 
 Tensor = torch.Tensor
 
 
-class Attention1(nn.Module):
-    def __init__(
-        self,
-        dim: int,
-        heads: int = 8,
-        dim_head: int = 64,
-        dropout: float = 0.0,
-    ):
+class DiTBlock(nn.Module):
+    def __init__(self, dim, heads, dim_head, ff_mult=4, dropout=0.1) -> None:
         super().__init__()
 
-        self.dim = dim
-        self.heads = heads
-        self.inner_dim = dim_head * heads
-        self.dropout = dropout
-
-        self.in_proj = nn.Linear(dim, self.inner_dim * 3, bias=True)
-        self.out_proj = nn.Linear(self.inner_dim, dim)
+        self.attn = Attention(dim, heads, dim_head, dropout)
+        self.feed_forward = FeedForward(dim=dim, mult=ff_mult, dropout=dropout, approximate="tanh")
+        self.attn_norm = AdaLayerNormZero(dim)
+        self.ffn_norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
 
         self._register_load_state_dict_pre_hook(self.load_hook)
 
-    def load_hook(self, state_dict, prefix, *args):
-        if prefix + "to_q.weight" in state_dict:
-            wq = state_dict.pop(prefix + "to_q.weight")
-            wk = state_dict.pop(prefix + "to_k.weight")
-            wv = state_dict.pop(prefix + "to_v.weight")
-            bq = state_dict.pop(prefix + "to_q.bias")
-            bk = state_dict.pop(prefix + "to_k.bias")
-            bv = state_dict.pop(prefix + "to_v.bias")
-            state_dict[prefix + "in_proj.weight"] = torch.cat([wq, wk, wv])
-            state_dict[prefix + "in_proj.bias"] = torch.cat([bq, bk, bv])
-        state_dict[prefix + "out_proj.bias"] = state_dict.pop(prefix + "to_out.0.bias")
-        state_dict[prefix + "out_proj.bias"] = state_dict.pop(prefix + "to_out.0.bias")
+    def load_hook(self, state_dict: dict[str, Tensor], prefix: str, *args):
+        for key in list(state_dict.keys()):
+            new_key = key.replace("ff_norm", "ffn_nrom")
+            if new_key == "ff":
+                new_key = "feed_forward"
+            state_dict[new_key] = state_dict.pop(key)
 
     def forward(
         self,
-        x: Tensor[float["b n d"]],  # noised input x  # noqa: F722 # type: ignore
-        mask: Tensor[bool["b n"]],  # noqa: F722 # type: ignore
-        rope: tuple[Tensor, float] | tuple[Tensor, Tensor],  # rotary position embedding for x
-    ) -> torch.Tensor:
-        bs = x.shape[0]
+        x: Tensor,  # Noised Input
+        t: Tensor,  # Time Embedding
+        mask: Tensor[bool["b n"]],  # type: ignore  # noqa: F722
+        rope: tuple[Tensor, float] | tuple[Tensor, Tensor],
+    ):
+        # Pre-Norm & Modulation for Attention Input
+        norm, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.attn_norm.forward(x, emb=t)
 
-        q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
+        attn_output = self.attn.forward(x=norm, mask=mask, rope=rope)
 
-        freqs, xpos_scale = rope
-
-        q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale**-1.0)
-
-        q = apply_rotary_pos_emb(q, freqs, q_xpos_scale)  # type: ignore
-
-        k = apply_rotary_pos_emb(k, freqs, k_xpos_scale)  # type: ignore
-
-
-# Attention processor
-
-
-class AttnProcessor:
-    def __init__(self):
-        pass
-
-    def __call__(
-        self,
-        attn: Attention,
-        x: float["b n d"],  # noised input x  # noqa: F722
-        mask: bool["b n"] | None = None,  # noqa: F722
-        rope=None,  # rotary position embedding
-    ) -> torch.FloatTensor:
-        batch_size = x.shape[0]
-
-        # `sample` projections.
-        query = attn.to_q(x)
-        key = attn.to_k(x)
-        value = attn.to_v(x)
-
-        # apply rotary position embedding
-        if rope is not None:
-            freqs, xpos_scale = rope
-            q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale**-1.0) if xpos_scale is not None else (1.0, 1.0)
-
-            query = apply_rotary_pos_emb(query, freqs, q_xpos_scale)
-            key = apply_rotary_pos_emb(key, freqs, k_xpos_scale)
-
-        # attention
-        inner_dim = key.shape[-1]
-        head_dim = inner_dim // attn.heads
-        query = query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-        key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-        value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-
-        # mask. e.g. inference got a batch with different target durations, mask out the padding
-        if mask is not None:
-            attn_mask = mask
-            attn_mask = attn_mask.unsqueeze(1).unsqueeze(1)  # 'b n -> b 1 1 n'
-            # print(3433333333,attn_mask.shape)
-            attn_mask = attn_mask.expand(batch_size, attn.heads, query.shape[-2], key.shape[-2])
-        else:
-            attn_mask = None
-        x = F.scaled_dot_product_attention(query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
-        x = x.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
-        x = x.to(query.dtype)
-
-        # linear proj
-        x = attn.to_out[0](x)
-        # dropout
-        x = attn.to_out[1](x)
-
-        if mask is not None:
-            mask = mask.unsqueeze(-1)
-            x = x.masked_fill(~mask, 0.0)
-
-        return x
-
-
-# Joint Attention processor for MM-DiT
-# modified from diffusers/src/diffusers/models/attention_processor.py
-
-
-class DiTBlock(nn.Module):
-    def __init__(self, dim, heads, dim_head, ff_mult=4, dropout=0.1):
-        super().__init__()
-
-        self.attn_norm = AdaLayerNormZero(dim)
-        self.attn = Attention(
-            processor=AttnProcessor(),
-            dim=dim,
-            heads=heads,
-            dim_head=dim_head,
-            dropout=dropout,
-        )
-
-        self.ff_norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
-        self.ff = FeedForward(dim=dim, mult=ff_mult, dropout=dropout, approximate="tanh")
-
-    def forward(self, x, t, mask=None, rope=None):  # x: noised input, t: time embedding
-        # pre-norm & modulation for attention input
-        norm, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.attn_norm(x, emb=t)
-
-        # attention
-        attn_output = self.attn(x=norm, mask=mask, rope=rope)
-
-        # process attention output for input x
         x = x + gate_msa.unsqueeze(1) * attn_output
 
-        norm = self.ff_norm(x) * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
-        ff_output = self.ff(norm)
+        norm = self.ffn_norm(x) * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+        ff_output = self.feed_forward.forward(norm)
         x = x + gate_mlp.unsqueeze(1) * ff_output
 
         return x
 
 
 class DiT(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim,
+        n_layer=8,
+        n_head=8,
+        head_dim=64,
+        dropout=0.1,
+        ff_mult=4,
+        mel_dim=100,
+        text_dim: int = None,  # type: ignore
+        n_conv_layer=0,
+        **kwds,
+    ) -> None:
+        super().__init__()
+
+        self.dim = dim
+        self.n_layer = n_layer
+        if text_dim is None:
+            text_dim = mel_dim
+
+        self.time_embedding = TimestepEmbedding(dim)
+        self.d_embedding = TimestepEmbedding(dim)
+        self.text_embedding = TextEmbedding(text_dim, conv_layers=n_conv_layer)
+        self.input_embedding = InputEmbedding(mel_dim, text_dim, dim)
+
+        self.rotary_embedding = RotaryEmbedding(head_dim)
+
+        self.layers: MutableSequence[DiTBlock] = nn.ModuleList(
+            [DiTBlock(dim=dim, heads=n_head, dim_head=head_dim, ff_mult=ff_mult, dropout=dropout) for _ in range(n_layer)]
+        )  # type: ignore
+
+        self.norm = AdaLayerNormZero_Final(dim)  # final modulation
+        self.out_proj = nn.Linear(dim, mel_dim)
+
+        self._register_load_state_dict_pre_hook(self.load_hook)
+
+    def load_hook(self, state_dict: dict[str, Tensor], prefix: str, *args):
+        for key in list(state_dict.keys()):
+            new_key = (
+                key.replace("proj_out", "out_proj").replace("transformer_blocks", "layers").replace("embed", "embedding").replace("norm_out", "norm")
+            )
+            state_dict[new_key] = state_dict.pop(key)
+
+
+class DiT1(nn.Module):
     def __init__(
         self,
         *,

@@ -162,9 +162,9 @@ rm "$TAR_FILE"
 CMAKE_FILE="$DIR_NAME/lib/open_jtalk/src/CMakeLists.txt"
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' -E 's/cmake_minimum_required\(VERSION[^\)]*\)/cmake_minimum_required(VERSION 2.8.12...3.31)/' "$CMAKE_FILE"
+    sed -i '' -E 's/cmake_minimum_required\(VERSION[^\)]*\)/cmake_minimum_required(VERSION 3.5...3.31)/' "$CMAKE_FILE"
 else
-    sed -i -E 's/cmake_minimum_required\(VERSION[^\)]*\)/cmake_minimum_required(VERSION 2.8.12...3.31)/' "$CMAKE_FILE"
+    sed -i -E 's/cmake_minimum_required\(VERSION[^\)]*\)/cmake_minimum_required(VERSION 3.5...3.31)/' "$CMAKE_FILE"
 fi
 
 tar -czf "$TAR_FILE" "$DIR_NAME"

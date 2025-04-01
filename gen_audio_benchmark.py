@@ -108,7 +108,7 @@ def run_gen_audio_compile(bs: int, implement: str):
 @click.option("--compile", "compile_", is_flag=True, help="Run with Torch Compile.")
 @click.option("--implement", type=str, default="flash_attn", help="T2S Decoder Implement For Benchmark")
 def main(n=0, cuda_graph=False, compile_=False, implement="Flash_Attn"):
-    filename = f"speed_test_{cpu_info['brand_raw']}_{gpu_info}_implement.csv"
+    filename = f"speed_test {cpu_info['brand_raw']} {gpu_info}.csv"
     df = None
 
     if os.path.exists(filename):

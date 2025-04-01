@@ -24,7 +24,7 @@ class KVCache(nn.Module):
     def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim):
         super().__init__()
         cache_shape = (max_batch_size, max_seq_length, n_heads, head_dim)
-        self.num_heads = n_heads
+        self.n_head = n_heads
         self.head_dim = head_dim
         self.max_batch_size = max_batch_size
         self.max_seq_length = max_seq_length
@@ -45,7 +45,7 @@ class KVCache(nn.Module):
             .expand(
                 -1,
                 -1,
-                self.num_heads,
+                self.n_head,
                 self.head_dim,
             )
             .to(torch.int64)
@@ -73,16 +73,18 @@ class KVCache(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, num_heads: int, hidden_dim: int):
+    def __init__(self, n_head: int, hidden_dim: int):
         super().__init__()
-        self.num_heads = num_heads
+        self.n_head = n_head
         self.hidden_dim = hidden_dim
-        assert hidden_dim % num_heads == 0
-        self.head_dim = hidden_dim // num_heads
+        assert hidden_dim % n_head == 0
+        self.head_dim = hidden_dim // n_head
 
         # key, query, value projections for all heads, but in a batch
         self.in_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=True)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
+
+        self.dropout = nn.Dropout(0.1)
 
         self.kv_cache: KVCache
 
@@ -99,13 +101,15 @@ class Attention(nn.Module):
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
 
-        q = q.view(bsz, seqlen, self.num_heads, self.head_dim)
-        k = k.view(bsz, seqlen, self.num_heads, self.head_dim)
-        v = v.view(bsz, seqlen, self.num_heads, self.head_dim)
+        q = q.view(bsz, seqlen, self.n_head, self.head_dim)
+        k = k.view(bsz, seqlen, self.n_head, self.head_dim)
+        v = v.view(bsz, seqlen, self.n_head, self.head_dim)
 
         k, v = self.kv_cache.update(input_pos, k, v)
 
         attn: Tensor = flash_attn.flash_attn_with_kvcache(q, k, v, cache_seqlens=input_pos)
+
+        attn = self.dropout.forward(attn)
 
         attn = attn.view(bsz, seqlen, self.hidden_dim)
 
@@ -123,17 +127,19 @@ class Attention(nn.Module):
 
             q, k, v = self.in_proj.forward(x_b.unsqueeze(0)).chunk(3, dim=-1)
 
-            q = q.contiguous().view(1, -1, self.num_heads, self.head_dim)
-            k = k.contiguous().view(1, -1, self.num_heads, self.head_dim)
-            v = v.contiguous().view(1, -1, self.num_heads, self.head_dim)
+            q = q.contiguous().view(1, -1, self.n_head, self.head_dim)
+            k = k.contiguous().view(1, -1, self.n_head, self.head_dim)
+            v = v.contiguous().view(1, -1, self.n_head, self.head_dim)
 
             self.kv_cache.prefill_kv(bs, k, v)
 
             q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
-            attn_mask = mask[bs].unsqueeze(0).unsqueeze(0).expand(1, self.num_heads, -1, -1)
+            attn_mask = mask[bs].unsqueeze(0).unsqueeze(0).expand(1, self.n_head, -1, -1)
 
             attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+
+            attn = self.dropout.forward(attn)
 
             attn = attn.transpose(1, 2).contiguous().view(1, -1, self.hidden_dim)
 
@@ -149,19 +155,21 @@ class FeedForward(nn.Module):
         super().__init__()
         self.linear1 = nn.Linear(dim, hidden_dim, bias=True)
         self.linear2 = nn.Linear(hidden_dim, dim, bias=True)
+        self.dropout = nn.Dropout(0.1)
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.linear2(F.relu(self.linear1(x)))
+        return self.dropout.forward(self.linear2(self.dropout.forward(F.relu(self.linear1(x)))))
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, num_heads, ffn_dim, hidden_dim) -> None:
+    def __init__(self, n_head, ffn_dim, hidden_dim) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.attention = Attention(num_heads, hidden_dim)
+        self.attention = Attention(n_head, hidden_dim)
         self.feed_forward = FeedForward(hidden_dim, ffn_dim)
         self.attention_norm = nn.LayerNorm([self.hidden_dim])
         self.ffn_norm = nn.LayerNorm([self.hidden_dim])
+        self.dropout = nn.Dropout(0.1)
 
         self._register_load_state_dict_pre_hook(self.load_hook)
 
@@ -176,12 +184,12 @@ class TransformerBlock(nn.Module):
             state_dict[new_key] = state_dict.pop(key)
 
     def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.attention.forward(x, input_pos))
+        h = self.attention_norm.forward(x + self.dropout.forward(self.attention.forward(x, input_pos)))
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
     def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.attention.prefill(x, mask))
+        h = self.attention_norm.forward(x + self.dropout.forward(self.attention.prefill(x, mask)))
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
@@ -191,7 +199,7 @@ class TransformerDecoder(nn.Module):
         self,
         hidden_dim,
         n_layer,
-        num_heads,
+        n_head,
         ffn_dim,
         vocab_size,
         max_seq_length,
@@ -200,15 +208,15 @@ class TransformerDecoder(nn.Module):
         super().__init__()
 
         self.hidden_dim = hidden_dim
-        self.num_heads = num_heads
-        assert hidden_dim % num_heads == 0
+        self.n_head = n_head
+        assert hidden_dim % n_head == 0
 
-        self.head_dim = hidden_dim // num_heads
+        self.head_dim = hidden_dim // n_head
         self.vocab_size = vocab_size
 
         self.n_layer = n_layer
 
-        self.layers: MutableSequence[TransformerBlock] = nn.ModuleList(TransformerBlock(num_heads, ffn_dim, hidden_dim) for _ in range(n_layer))  # type: ignore
+        self.layers: MutableSequence[TransformerBlock] = nn.ModuleList(TransformerBlock(n_head, ffn_dim, hidden_dim) for _ in range(n_layer))  # type: ignore
 
         self.max_seq_length: int = max_seq_length
         self.max_batch_size: int = max_batch_size
@@ -228,7 +236,7 @@ class TransformerDecoder(nn.Module):
         self.max_batch_size = max_batch_size
 
         for b in self.layers:
-            b.attention.kv_cache = KVCache(self.max_batch_size, self.max_seq_length, self.num_heads, self.head_dim)
+            b.attention.kv_cache = KVCache(self.max_batch_size, self.max_seq_length, self.n_head, self.head_dim)
 
     def forward(self, input_pos: Tensor, x: Tensor):
         for layer in self.layers:
@@ -255,7 +263,7 @@ class T2SDecoder(T2SDecoderABC):
 
         hidden_dim = config["model"]["hidden_dim"]
         embedding_dim = config["model"]["embedding_dim"]
-        num_heads = config["model"]["head"]
+        n_head = config["model"]["head"]
         n_layer = config["model"]["n_layer"]
         vocab_size = config["model"]["vocab_size"]
         phoneme_vocab_size = config["model"]["phoneme_vocab_size"]
@@ -265,10 +273,10 @@ class T2SDecoder(T2SDecoderABC):
         self.norm_first = norm_first
 
         self.hidden_dim = hidden_dim
-        self.num_heads = num_heads
-        assert hidden_dim % num_heads == 0
+        self.n_head = n_head
+        assert hidden_dim % n_head == 0
 
-        self.head_dim = hidden_dim // num_heads
+        self.head_dim = hidden_dim // n_head
         self.embedding_dim = embedding_dim
         self.vocab_size = vocab_size
         self.phoneme_vocab_size = phoneme_vocab_size
@@ -288,7 +296,7 @@ class T2SDecoder(T2SDecoderABC):
             self.embedding_dim, dropout=0.1, scale=False, alpha=True, max_batch_size=max_batch_size, max_seq_len=max_seq_length
         )
         self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
-        self.h = TransformerDecoder(hidden_dim, n_layer, num_heads, ffn_dim, vocab_size, max_seq_length, max_batch_size)
+        self.h = TransformerDecoder(hidden_dim, n_layer, n_head, ffn_dim, vocab_size, max_seq_length, max_batch_size)
 
         self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
 
