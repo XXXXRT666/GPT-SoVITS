@@ -1,7 +1,6 @@
 import os
 import re
 import subprocess
-import time
 
 import click
 import cpuinfo
@@ -154,9 +153,13 @@ def main(n=0, cuda_graph=False, compile_=False, implement="Flash_Attn"):
         df[f"{implement} Compile Times"] = compile_times
 
     if f"{implement} CUDA Graph Max It/s" in df.columns:
-        df[f"Speedup ({implement} CUDA Graph / Naive)"] = [round(i, 2) for i in df[f"{implement} CUDA Graph Max It/s"] / df["Naive Max It/s"]]
+        df[f"Speedup ({implement} CUDA Graph / Naive)"] = [
+            round(i, 2) for i in df[f"{implement} CUDA Graph Max It/s"] / df["Naive Max It/s"]
+        ]
     if f"{implement} Compile Max It/s" in df.columns:
-        df[f"Speedup ({implement} Compile / Naive)"] = [round(i, 2) for i in df[f"{implement} Compile Max It/s"] / df["Naive Max It/s"]]
+        df[f"Speedup ({implement} Compile / Naive)"] = [
+            round(i, 2) for i in df[f"{implement} Compile Max It/s"] / df["Naive Max It/s"]
+        ]
 
     df.to_csv(filename, index=False)
     print(f"CPU: {cpu_info['brand_raw']} GPU: {gpu_info}")

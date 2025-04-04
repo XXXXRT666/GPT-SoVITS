@@ -2,9 +2,10 @@ import contextlib
 import time
 from typing import List, Optional
 
+import flash_attn  # type: ignore
+import flashinfer  # type: ignore
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
 from tqdm import tqdm
 
 from GPT_SoVITS.AR.models.t2s_model_abc import (
@@ -14,8 +15,9 @@ from GPT_SoVITS.AR.models.t2s_model_abc import (
     TransformerBlockABC,
     TransformerDecoderABC,
 )
-from GPT_SoVITS.AR.models.t2s_model_abc import KVCacheHND as KVCache
-from GPT_SoVITS.AR.models.utils import sample
+from GPT_SoVITS.AR.models.t2s_model_abc import KVCacheNHD as KVCache
+
+# from GPT_SoVITS.AR.models.utils import sample
 from GPT_SoVITS.AR.modules.embedding import (
     SinePositionalEmbeddingNested as SinePositionalEmbedding,
 )
@@ -23,6 +25,25 @@ from GPT_SoVITS.AR.modules.embedding import TokenEmbedding
 
 Tensor = torch.Tensor
 dtype = torch.dtype
+
+
+def sample(
+    logits,
+    previous_tokens: Optional[torch.Tensor] = None,
+    temperature: float = 1.0,
+    top_k: Optional[int] = None,
+    top_p: Optional[int] = None,
+    repetition_penalty: float = 1.0,
+):
+    # if previous_tokens is not None and repetition_penalty != 1.0:
+    #     previous_tokens = previous_tokens.long()
+    #     score = torch.gather(logits, dim=1, index=previous_tokens)
+    #     score = torch.where(score < 0, score * repetition_penalty, score / repetition_penalty)
+    #     logits.scatter_(dim=1, index=previous_tokens, src=score)
+
+    logits = logits / max(temperature, 1e-5)
+
+    return (flashinfer.sampling.top_k_top_p_sampling_from_logits(logits, top_k, top_p),)
 
 
 class Attention(AttentionABC):
@@ -37,7 +58,9 @@ class Attention(AttentionABC):
         self.in_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=True)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
-    def forward(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
@@ -46,13 +69,13 @@ class Attention(AttentionABC):
         k = k.view(bsz, seqlen, self.n_head, self.head_dim)
         v = v.view(bsz, seqlen, self.n_head, self.head_dim)
 
-        q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
-
         k, v = self.kv_cache.update(input_pos, k, v)
 
-        attn: Tensor = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        attn: Tensor = flash_attn.flash_attn_with_kvcache(q, k, v, cache_seqlens=input_pos)
 
-        attn = attn.transpose(1, 2).contiguous().view(bsz, seqlen, self.hidden_dim)
+        attn = self.dropout.forward(attn)
+
+        attn = attn.view(bsz, seqlen, self.hidden_dim)
 
         attn = self.out_proj.forward(attn)
 
@@ -67,11 +90,7 @@ class TransformerBlock(TransformerBlockABC):
         self.feed_forward = FeedForward(hidden_dim, ffn_dim)
         self.attention_norm = nn.LayerNorm([self.hidden_dim])
         self.ffn_norm = nn.LayerNorm([self.hidden_dim])
-
-    def forward(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.attention.forward(x, input_pos, mask))
-        out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
-        return out
+        self.dropout = nn.Dropout(0.1)
 
 
 class TransformerDecoder(TransformerDecoderABC):
@@ -96,7 +115,7 @@ class TransformerDecoder(TransformerDecoderABC):
 
         self.n_layer = n_layer
 
-        self.layers = nn.ModuleList(  # type: ignore
+        self.layers: nn.ModuleList(  # type: ignore
             TransformerBlock(n_head, ffn_dim, hidden_dim) for _ in range(n_layer)
         )
 
@@ -115,11 +134,6 @@ class TransformerDecoder(TransformerDecoderABC):
 
         for b in self.layers:
             b.attention.kv_cache = KVCache(self.max_batch_size, self.max_seq_length, self.n_head, self.head_dim)
-
-    def forward(self, input_pos: Tensor, x: Tensor, mask: Tensor):
-        for layer in self.layers:
-            x = layer.forward(x, input_pos, mask)
-        return x
 
 
 class T2SDecoder(T2SDecoderABC):
@@ -199,14 +213,12 @@ class T2SDecoder(T2SDecoderABC):
         bert = self.bert_proj.forward(bert_features_nested)
         x_emb = x_emb + bert
         x_pos = self.ar_text_position.prefill(x_emb)
-        x_pos = torch.nested.to_padded_tensor(x_pos, 0)
 
         y_emb = self.ar_audio_embedding.forward(y)
         y_emb = torch.nested.as_nested_tensor(y_emb)
         y_pos = self.ar_audio_position.prefill(y_emb)
-        y_pos = torch.nested.to_padded_tensor(y_pos, 0)
 
-        xy_pos = torch.cat([x_pos, y_pos], dim=1)
+        xy_pos = torch.nested.nested_tensor([torch.cat([x_pos[i], y_pos[i]]) for i in range(len(x))])
 
         return xy_pos
 
@@ -221,6 +233,7 @@ class T2SDecoder(T2SDecoderABC):
         early_stop_num: int = -1,
         temperature: float = 1.0,
         repetition_penalty: float = 1.35,
+        use_cuda_graph=False,
         **kwargs,
     ):
         self.empty_cache()
@@ -229,18 +242,19 @@ class T2SDecoder(T2SDecoderABC):
         y = prompts
         x_lens = x_lens.to(torch.int64)
         y_len = y.shape[-1]
+        prefill_len = x_lens + y_len
         xy_pos = self.embed(x, y, bert_feature)
-        prefill_len = xy_pos.size(1)
 
-        xy_attn_mask = torch.zeros(bsz, prefill_len, prefill_len, device=xy_pos.device).bool()
+        xy_attn_mask = []
         for bs in range(bsz):
             pos = int(x_lens[bs].item())
-            mask = xy_attn_mask[bs]
+            mask = torch.zeros(pos + y_len, pos + y_len, device=xy_pos.device).bool()
             mask[:, :pos].fill_(True)
             mask[-y_len:, -y_len:] = ~torch.triu(
                 torch.ones(y_len, y_len, device=xy_pos.device, dtype=torch.bool), diagonal=1
             )
-        xy_attn_mask = xy_attn_mask.unsqueeze(1).expand(-1, self.n_head, -1, -1)
+            xy_attn_mask.append(mask)
+        xy_attn_mask_nested = torch.nested.nested_tensor(xy_attn_mask)
 
         completed = [False] * bsz
         y_results: List[Tensor] = [None] * bsz  # type: ignore
@@ -253,62 +267,81 @@ class T2SDecoder(T2SDecoderABC):
         with contextlib.nullcontext():
             for idx in tqdm(range(1500)):
                 if idx == 0:
-                    xy_dec = self.h.prefill(xy_pos, xy_attn_mask)
+                    xy_dec = self.h.prefill(xy_pos, xy_attn_mask_nested)
                     xy_dec = torch.stack([t[[-1]] for t in xy_dec.unbind()])
+                    input_pos = input_pos.to(torch.int32)
                 else:
-                    # with torch.profiler.record_function("AR"):
-                    with contextlib.nullcontext():
-                        xy_dec = self.h.forward(input_pos, xy_pos, attn_mask)  # type: ignore # noqa: F821
+                    if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
+                        self.capture(input_pos, xy_pos)
 
-                logits = self.ar_predict_layer(xy_dec[:, -1])
-                input_pos += 1
+                    with torch.profiler.record_function("AR"):
+                        # with contextlib.nullcontext():
+                        if self.__CUDAGraph is not None:
+                            self.h.xy_pos.copy_(xy_pos)
+                            self.__CUDAGraph.replay()
+                            xy_dec = self.h.xy_dec.clone()
+                        else:
+                            xy_dec = self.h.forward(input_pos, xy_pos)
+
+                with torch.profiler.record_function("Logits"):
+                    # with contextlib.nullcontext():
+                    logits = self.ar_predict_layer(xy_dec[:, -1])
+                    input_pos += 1
 
                 if idx == 0:
                     t1 = time.perf_counter()
-                    attn_mask = torch.zeros(bsz, self.n_head, 1, self.max_seq_length, device=xy_pos.device).bool()
-                    attn_mask[:, :, :, :prefill_len] = xy_attn_mask[:, :, [-1]]
                     logits = logits[:, :-1]
 
-                attn_mask[:, :, :, input_pos] = True  # type: ignore
+                with torch.profiler.record_function("Sampling"):
+                    # with contextlib.nullcontext():
+                    samples = sample(
+                        logits,
+                        y,
+                        top_k=top_k,
+                        top_p=top_p,
+                        repetition_penalty=repetition_penalty,
+                        temperature=temperature,
+                    )[0]
 
-                samples = sample(
-                    logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature
-                )[0]
+                    y = torch.concat([y, samples], dim=1)
 
-                y = torch.concat([y, samples], dim=1)
+                with torch.profiler.record_function("EOS"):
+                    # with contextlib.nullcontext():
+                    tokens = torch.argmax(logits, dim=-1)
 
-                tokens = torch.argmax(logits, dim=-1)
+                    EOS_mask = (samples[:, 0] == self.EOS) | (tokens == self.EOS)
+                    EOS_indices: List[int] = torch.where(EOS_mask)[0].tolist()
 
-                EOS_mask = (samples[:, 0] == self.EOS) | (tokens == self.EOS)
-                EOS_indices: List[int] = torch.where(EOS_mask)[0].tolist()
-
-                for i in EOS_indices:
-                    if not completed[i]:
-                        y_results[i] = y[i, y_len:-1]  # type: ignore
-                        completed[i] = True
-
-                if (early_stop_num != -1 and (y.shape[1] - y_len) > early_stop_num) or idx == 1499:
-                    tqdm.write(f"Reached early stop limit: {early_stop_num}")
-                    for i in range(bsz):
+                    for i in EOS_indices:
                         if not completed[i]:
-                            y_results[i] = y[i, y_len:]  # type: ignore
+                            y_results[i] = y[i, y_len:-1]  # type: ignore
                             completed[i] = True
-                    break
+
+                    if (early_stop_num != -1 and (y.shape[1] - y_len) > early_stop_num) or idx == 1499:
+                        tqdm.write(f"Reached early stop limit: {early_stop_num}")
+                        for i in range(bsz):
+                            if not completed[i]:
+                                y_results[i] = y[i, y_len:]  # type: ignore
+                                completed[i] = True
+                        break
 
                 if all(completed):
                     if y.shape[1] == 0:
                         y = torch.concat([y, torch.zeros_like(samples)], dim=1)
                         tqdm.write("bad zero prediction")
                     else:
-                        tqdm.write(f"T2S Decoding EOS {[prefill_len]} -> {[i.shape[0] for i in y_results]}")
+                        tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {[i.shape[0] for i in y_results]}")
                         tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")  # type: ignore
                     break
 
-                y_emb = self.ar_audio_embedding(y[:, -1:])
-                xy_pos = self.ar_audio_position.forward(input_pos - x_lens, y_emb)
+                with torch.profiler.record_function("Next xy_pos"):
+                    # with contextlib.nullcontext():
 
-                # if idx == 50:
-                #     break
+                    y_emb = self.ar_audio_embedding(y[:, -1:])
+                    xy_pos = self.ar_audio_position.forward(input_pos - x_lens, y_emb)
+
+        #         if idx == 50:
+        #             break
 
         # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
 

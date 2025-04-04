@@ -1,15 +1,20 @@
 import contextlib
 import time
-from typing import List, MutableSequence, Optional
+from typing import List, Optional
 
 import flash_attn  # type: ignore
 import torch
-import torch.nested._internal.nested_tensor
 import torch.nn as nn
-from torch.nn import functional as F
 from tqdm import tqdm
 
-from GPT_SoVITS.AR.models.t2s_model_abc import T2SDecoderABC
+from GPT_SoVITS.AR.models.t2s_model_abc import (
+    AttentionABC,
+    FeedForward,
+    T2SDecoderABC,
+    TransformerBlockABC,
+    TransformerDecoderABC,
+)
+from GPT_SoVITS.AR.models.t2s_model_abc import KVCacheNHD as KVCache
 from GPT_SoVITS.AR.models.utils import sample
 from GPT_SoVITS.AR.modules.embedding import (
     SinePositionalEmbeddingNested as SinePositionalEmbedding,
@@ -20,59 +25,7 @@ Tensor = torch.Tensor
 dtype = torch.dtype
 
 
-class KVCache(nn.Module):
-    def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim):
-        super().__init__()
-        cache_shape = (max_batch_size, max_seq_length, n_heads, head_dim)
-        self.n_head = n_heads
-        self.head_dim = head_dim
-        self.max_batch_size = max_batch_size
-        self.max_seq_length = max_seq_length
-
-        self.register_buffer("k_cache", torch.zeros(size=cache_shape), persistent=False)
-        self.register_buffer("v_cache", torch.zeros(size=cache_shape), persistent=False)
-        self.k_cache: Tensor
-        self.v_cache: Tensor
-
-    def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor):
-        # input_pos: [B, ], k_val: [B, 1, H, D]
-
-        index = (
-            (input_pos - 1)
-            .unsqueeze(-1)
-            .unsqueeze(-1)
-            .unsqueeze(-1)
-            .expand(
-                -1,
-                -1,
-                self.n_head,
-                self.head_dim,
-            )
-            .to(torch.int64)
-        )  # (bs, 1, num_head, head_dim)
-
-        k_out = self.k_cache
-        v_out = self.v_cache
-        k_out.scatter_(1, index, k_val)
-        v_out.scatter_(1, index, v_val)
-
-        return k_out, v_out
-
-    def forward(self):
-        pass
-
-    def empty(self):
-        self.k_cache.zero_()
-        self.v_cache.zero_()
-
-    def prefill_kv(self, bs: int, k_val: Tensor, v_val: Tensor):
-        # input_pos: int, k_val: [B, S, H, D]
-
-        self.k_cache[[bs], : k_val.shape[1]] = k_val
-        self.v_cache[[bs], : v_val.shape[1]] = v_val
-
-
-class Attention(nn.Module):
+class Attention(AttentionABC):
     def __init__(self, n_head: int, hidden_dim: int):
         super().__init__()
         self.n_head = n_head
@@ -86,16 +39,6 @@ class Attention(nn.Module):
 
         self.dropout = nn.Dropout(0.1)
 
-        self.kv_cache: KVCache
-
-        self._register_load_state_dict_pre_hook(self.load_hook)
-
-    def load_hook(self, state_dict: dict, prefix, *args):
-        keys_to_modify = [key for key in state_dict if "in_proj_" in key]
-        for key in keys_to_modify:
-            new_key = key.replace("in_proj_", "in_proj.")  # in_proj_ -> in_proj.
-            state_dict[new_key] = state_dict.pop(key)
-
     def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
 
@@ -105,9 +48,11 @@ class Attention(nn.Module):
         k = k.view(bsz, seqlen, self.n_head, self.head_dim)
         v = v.view(bsz, seqlen, self.n_head, self.head_dim)
 
-        k, v = self.kv_cache.update(input_pos, k, v)
+        # k, v = self.kv_cache.update(input_pos, k, v)
 
-        attn: Tensor = flash_attn.flash_attn_with_kvcache(q, k, v, cache_seqlens=input_pos)
+        attn: Tensor = flash_attn.flash_attn_with_kvcache(
+            q, self.kv_cache.k_cache, self.kv_cache.v_cache, k, v, cache_seqlens=input_pos - 1
+        )
 
         attn = self.dropout.forward(attn)
 
@@ -117,51 +62,8 @@ class Attention(nn.Module):
 
         return attn
 
-    def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
-        bsz = x.size(0)
 
-        outputs = []
-
-        for bs in range(bsz):
-            x_b = x[bs].unsqueeze(0)
-
-            q, k, v = self.in_proj.forward(x_b.unsqueeze(0)).chunk(3, dim=-1)
-
-            q = q.contiguous().view(1, -1, self.n_head, self.head_dim)
-            k = k.contiguous().view(1, -1, self.n_head, self.head_dim)
-            v = v.contiguous().view(1, -1, self.n_head, self.head_dim)
-
-            self.kv_cache.prefill_kv(bs, k, v)
-
-            q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
-
-            attn_mask = mask[bs].unsqueeze(0).unsqueeze(0).expand(1, self.n_head, -1, -1)
-
-            attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-
-            attn = self.dropout.forward(attn)
-
-            attn = attn.transpose(1, 2).contiguous().view(1, -1, self.hidden_dim)
-
-            output = self.out_proj.forward(attn)
-
-            outputs.append(output.squeeze(0))
-
-        return torch.nested.nested_tensor(outputs)
-
-
-class FeedForward(nn.Module):
-    def __init__(self, dim: int, hidden_dim: int) -> None:
-        super().__init__()
-        self.linear1 = nn.Linear(dim, hidden_dim, bias=True)
-        self.linear2 = nn.Linear(hidden_dim, dim, bias=True)
-        self.dropout = nn.Dropout(0.1)
-
-    def forward(self, x: Tensor) -> Tensor:
-        return self.dropout.forward(self.linear2(self.dropout.forward(F.relu(self.linear1(x)))))
-
-
-class TransformerBlock(nn.Module):
+class TransformerBlock(TransformerBlockABC):
     def __init__(self, n_head, ffn_dim, hidden_dim) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -171,30 +73,8 @@ class TransformerBlock(nn.Module):
         self.ffn_norm = nn.LayerNorm([self.hidden_dim])
         self.dropout = nn.Dropout(0.1)
 
-        self._register_load_state_dict_pre_hook(self.load_hook)
 
-    def load_hook(self, state_dict: dict[str, Tensor], prefix, *args):
-        for key in list(state_dict.keys()):
-            new_key = (
-                key.replace("self_attn", "attention")
-                .replace("linear", "feed_forward.linear")
-                .replace("norm1", "attention_norm")
-                .replace("norm2", "ffn_norm")
-            )
-            state_dict[new_key] = state_dict.pop(key)
-
-    def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.dropout.forward(self.attention.forward(x, input_pos)))
-        out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
-        return out
-
-    def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.dropout.forward(self.attention.prefill(x, mask)))
-        out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
-        return out
-
-
-class TransformerDecoder(nn.Module):
+class TransformerDecoder(TransformerDecoderABC):
     def __init__(
         self,
         hidden_dim,
@@ -216,7 +96,9 @@ class TransformerDecoder(nn.Module):
 
         self.n_layer = n_layer
 
-        self.layers: MutableSequence[TransformerBlock] = nn.ModuleList(TransformerBlock(n_head, ffn_dim, hidden_dim) for _ in range(n_layer))  # type: ignore
+        self.layers: nn.ModuleList(  # type: ignore
+            TransformerBlock(n_head, ffn_dim, hidden_dim) for _ in range(n_layer)
+        )
 
         self.max_seq_length: int = max_seq_length
         self.max_batch_size: int = max_batch_size
@@ -224,10 +106,6 @@ class TransformerDecoder(nn.Module):
         self.register_buffer("input_pos", torch.zeros((self.max_batch_size,)).to(torch.int32), persistent=False)
         self.register_buffer("xy_pos", torch.zeros((self.max_batch_size, 1, self.hidden_dim)), persistent=False)
         self.register_buffer("xy_dec", torch.zeros((self.max_batch_size, 1, self.hidden_dim)), persistent=False)
-
-        self.input_pos: Tensor
-        self.xy_pos: Tensor
-        self.xy_dec: Tensor
 
         self.setup_caches(self.max_batch_size, self.max_seq_length)
 
@@ -237,16 +115,6 @@ class TransformerDecoder(nn.Module):
 
         for b in self.layers:
             b.attention.kv_cache = KVCache(self.max_batch_size, self.max_seq_length, self.n_head, self.head_dim)
-
-    def forward(self, input_pos: Tensor, x: Tensor):
-        for layer in self.layers:
-            x = layer.forward(x, input_pos)
-        return x
-
-    def prefill(self, x: Tensor, mask: Tensor):
-        for layer in self.layers:
-            x = layer.prefill(x, mask)
-        return x
 
 
 class T2SDecoder(T2SDecoderABC):
@@ -289,11 +157,21 @@ class T2SDecoder(T2SDecoderABC):
         self.bert_proj = nn.Linear(1024, self.embedding_dim)
         self.ar_text_embedding = TokenEmbedding(self.embedding_dim, self.phoneme_vocab_size, self.p_dropout)
         self.ar_text_position = SinePositionalEmbedding(
-            self.embedding_dim, dropout=0.1, scale=False, alpha=True, max_batch_size=max_batch_size, max_seq_len=max_seq_length
+            self.embedding_dim,
+            dropout=0.1,
+            scale=False,
+            alpha=True,
+            max_batch_size=max_batch_size,
+            max_seq_len=max_seq_length,
         )
         self.ar_audio_embedding = TokenEmbedding(self.embedding_dim, self.vocab_size, self.p_dropout)
         self.ar_audio_position = SinePositionalEmbedding(
-            self.embedding_dim, dropout=0.1, scale=False, alpha=True, max_batch_size=max_batch_size, max_seq_len=max_seq_length
+            self.embedding_dim,
+            dropout=0.1,
+            scale=False,
+            alpha=True,
+            max_batch_size=max_batch_size,
+            max_seq_len=max_seq_length,
         )
         self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h = TransformerDecoder(hidden_dim, n_layer, n_head, ffn_dim, vocab_size, max_seq_length, max_batch_size)
@@ -301,20 +179,6 @@ class T2SDecoder(T2SDecoderABC):
         self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
 
         # self._register_load_state_dict_pre_hook(self.load_hook)
-
-    def load_hook(self, state_dict, prefix, *args):
-        model_keys = [key for key in state_dict if key.startswith("model.")]
-        for key in model_keys:
-            new_key = key[len("model.") :]
-            state_dict[new_key] = state_dict.pop(key)
-
-    def empty_cache(self):
-        for layer in self.h.layers:
-            layer.attention.kv_cache.empty()
-        self.h.input_pos.zero_()
-        self.h.xy_pos.zero_()
-        self.h.xy_dec.zero_()
-        # self.__CUDAGraph = None
 
     def embed(
         self,
@@ -338,23 +202,6 @@ class T2SDecoder(T2SDecoderABC):
         xy_pos = torch.nested.nested_tensor([torch.cat([x_pos[i], y_pos[i]]) for i in range(len(x))])
 
         return xy_pos
-
-    def capture(self, input_pos: Tensor, x: Tensor):
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-
-        self.h.xy_pos.copy_(x)
-        self.h.input_pos.copy_(input_pos)
-
-        with torch.cuda.stream(s):  # type: ignore
-            for _ in range(5):
-                self.h.forward(self.h.input_pos, self.h.xy_pos)
-        torch.cuda.current_stream().wait_stream(s)
-
-        self.__CUDAGraph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.__CUDAGraph):
-            self.h.xy_dec = self.h.forward(self.h.input_pos, self.h.xy_pos)
-        torch.cuda.synchronize()
 
     def forward(
         self,
@@ -384,7 +231,9 @@ class T2SDecoder(T2SDecoderABC):
             pos = int(x_lens[bs].item())
             mask = torch.zeros(pos + y_len, pos + y_len, device=xy_pos.device).bool()
             mask[:, :pos].fill_(True)
-            mask[-y_len:, -y_len:] = ~torch.triu(torch.ones(y_len, y_len, device=xy_pos.device, dtype=torch.bool), diagonal=1)
+            mask[-y_len:, -y_len:] = ~torch.triu(
+                torch.ones(y_len, y_len, device=xy_pos.device, dtype=torch.bool), diagonal=1
+            )
             xy_attn_mask.append(mask)
         xy_attn_mask_nested = torch.nested.nested_tensor(xy_attn_mask)
 
@@ -426,7 +275,14 @@ class T2SDecoder(T2SDecoderABC):
 
                 with torch.profiler.record_function("Sampling"):
                     # with contextlib.nullcontext():
-                    samples = sample(logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature)[0]
+                    samples = sample(
+                        logits,
+                        y,
+                        top_k=top_k,
+                        top_p=top_p,
+                        repetition_penalty=repetition_penalty,
+                        temperature=temperature,
+                    )[0]
 
                     y = torch.concat([y, samples], dim=1)
 
