@@ -23,8 +23,7 @@ psutil
 jieba_fast
 jieba
 split-lang
-fast_langdetect
-Faster_Whisper
+fast_langdetect>=0.3.0
 wordsegment
 rotary_embedding_torch
 ToJyutping
@@ -40,3 +39,9 @@ matplotlib
 flash_attn; sys_platform == 'linux'
 xformers; sys_platform == 'linux'
 py-cpuinfo
+pydantic<=2.10.6
+ctranslate2>=4.0,<5
+huggingface_hub>=0.13
+tokenizers>=0.13,<1
+av>=11
+tqdm

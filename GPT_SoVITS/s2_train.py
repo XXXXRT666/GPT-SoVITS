@@ -227,7 +227,11 @@ def run(rank, n_gpus, hps):
         # traceback.print_exc()
         epoch_str = 1
         global_step = 0
-        if hps.train.pretrained_s2G != "" and hps.train.pretrained_s2G != None and os.path.exists(hps.train.pretrained_s2G):
+        if (
+            hps.train.pretrained_s2G != ""
+            and hps.train.pretrained_s2G != None
+            and os.path.exists(hps.train.pretrained_s2G)
+        ):
             if rank == 0:
                 logger.info("loaded pretrained %s" % hps.train.pretrained_s2G)
             print(
@@ -242,7 +246,11 @@ def run(rank, n_gpus, hps):
                     strict=False,
                 ),
             )  ##测试不加载优化器
-        if hps.train.pretrained_s2D != "" and hps.train.pretrained_s2D != None and os.path.exists(hps.train.pretrained_s2D):
+        if (
+            hps.train.pretrained_s2D != ""
+            and hps.train.pretrained_s2D != None
+            and os.path.exists(hps.train.pretrained_s2D)
+        ):
             if rank == 0:
                 logger.info("loaded pretrained %s" % hps.train.pretrained_s2D)
             print(
@@ -423,18 +431,29 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 # scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
                 # scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
                 # scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
-                image_dict = {
-                    "slice/mel_org": utils.plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
-                    "slice/mel_gen": utils.plot_spectrogram_to_numpy(y_hat_mel[0].data.cpu().numpy()),
-                    "all/mel": utils.plot_spectrogram_to_numpy(mel[0].data.cpu().numpy()),
-                    "all/stats_ssl": utils.plot_spectrogram_to_numpy(stats_ssl[0].data.cpu().numpy()),
-                }
-                utils.summarize(
-                    writer=writer,
-                    global_step=global_step,
-                    images=image_dict,
-                    scalars=scalar_dict,
-                )
+                image_dict = None
+                try:  ###Some people installed the wrong version of matplotlib.
+                    image_dict = {
+                        "slice/mel_org": utils.plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
+                        "slice/mel_gen": utils.plot_spectrogram_to_numpy(y_hat_mel[0].data.cpu().numpy()),
+                        "all/mel": utils.plot_spectrogram_to_numpy(mel[0].data.cpu().numpy()),
+                        "all/stats_ssl": utils.plot_spectrogram_to_numpy(stats_ssl[0].data.cpu().numpy()),
+                    }
+                except:
+                    pass
+                if image_dict:
+                    utils.summarize(
+                        writer=writer,
+                        global_step=global_step,
+                        images=image_dict,
+                        scalars=scalar_dict,
+                    )
+                else:
+                    utils.summarize(
+                        writer=writer,
+                        global_step=global_step,
+                        scalars=scalar_dict,
+                    )
         global_step += 1
     if epoch % hps.train.save_every_epoch == 0 and rank == 0:
         if hps.train.if_save_latest == 0:
@@ -544,7 +563,9 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                     hps.data.mel_fmin,
                     hps.data.mel_fmax,
                 )
-                image_dict.update({f"gen/mel_{batch_idx}_{test}": utils.plot_spectrogram_to_numpy(y_hat_mel[0].cpu().numpy())})
+                image_dict.update(
+                    {f"gen/mel_{batch_idx}_{test}": utils.plot_spectrogram_to_numpy(y_hat_mel[0].cpu().numpy())}
+                )
                 audio_dict.update({f"gen/audio_{batch_idx}_{test}": y_hat[0, :, : y_hat_lengths[0]]})
                 image_dict.update({f"gt/mel_{batch_idx}": utils.plot_spectrogram_to_numpy(mel[0].cpu().numpy())})
                 audio_dict.update({f"gt/audio_{batch_idx}": y[0, :, : y_lengths[0]]})

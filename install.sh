@@ -173,11 +173,8 @@ pip install "$TAR_FILE"
 
 rm -rf "$TAR_FILE" "$DIR_NAME"
 
-pip install -r requirements.txt
+pip install -r extra-req.txt --no-deps
 
-if [ "$USE_CUDA" = true ]; then
-    pip uninstall onnxruntime -y
-    pip install onnxruntime-gpu
-fi
+pip install -r requirements.txt
 
 echo "Installation completed successfully!"

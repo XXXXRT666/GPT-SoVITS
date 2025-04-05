@@ -282,14 +282,11 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
             prompt_language_update,
             text_update,
             text_language_update,
-            {"__type__": "update", "visible": visible_sample_steps},
+            {"__type__": "update", "visible": visible_sample_steps, "value": 32},
             {"__type__": "update", "visible": visible_inp_refs},
-            {
-                "__type__": "update",
-                "value": False,
-                "interactive": True if model_version != "v3" else False,
-            },
+            {"__type__": "update", "value": False, "interactive": True if model_version != "v3" else False},
             {"__type__": "update", "visible": True if model_version == "v3" else False},
+            {"__type__": "update", "value": i18n("模型加载中，请等待"), "interactive": False},
         )
 
     dict_s2 = load_sovits_new(sovits_path)
@@ -353,6 +350,19 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
         # torch.save(vq_model.state_dict(),"merge_win.pth")
         vq_model.eval()
 
+    yield (
+        {"__type__": "update", "choices": list(dict_language.keys())},
+        {"__type__": "update", "choices": list(dict_language.keys())},
+        prompt_text_update,
+        prompt_language_update,
+        text_update,
+        text_language_update,
+        {"__type__": "update", "visible": visible_sample_steps, "value": 32},
+        {"__type__": "update", "visible": visible_inp_refs},
+        {"__type__": "update", "value": False, "interactive": True if model_version != "v3" else False},
+        {"__type__": "update", "visible": True if model_version == "v3" else False},
+        {"__type__": "update", "value": i18n("合成语音"), "interactive": True},
+    )
     with open("./weight.json") as f:
         data = f.read()
         data = json.loads(data)
@@ -1054,9 +1064,10 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
             )
             with gr.Column(scale=13):
                 ref_text_free = gr.Checkbox(
-                    label=i18n("开启无参考文本模式。不填参考文本亦相当于开启。") + i18n("v3暂不支持该模式，使用了会报错。"),
+                    label=i18n("开启无参考文本模式。不填参考文本亦相当于开启。")
+                    + i18n("v3暂不支持该模式，使用了会报错。"),
                     value=False,
-                    interactive=True,
+                    interactive=True if model_version != "v3" else False,
                     show_label=True,
                     scale=1,
                 )
@@ -1067,13 +1078,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
                         + i18n("听不清参考音频说的啥(不晓得写啥)可以开。开启后无视填写的参考文本。")
                     )
                 )
-                prompt_text = gr.Textbox(
-                    label=i18n("参考音频的文本"),
-                    value="",
-                    lines=5,
-                    max_lines=5,
-                    scale=1,
-                )
+                prompt_text = gr.Textbox(label=i18n("参考音频的文本"), value="", lines=5, max_lines=5, scale=1)
             with gr.Column(scale=14):
                 prompt_language = gr.Dropdown(
                     label=i18n("参考音频的语种"),
@@ -1203,7 +1208,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
             #     phoneme=gr.Textbox(label=i18n("音素框"), value="")
             #     get_phoneme_button = gr.Button(i18n("目标文本转音素"), variant="primary")
         with gr.Row():
-            inference_button = gr.Button(i18n("合成语音"), variant="primary", size="lg", scale=25)
+            inference_button = gr.Button(value=i18n("合成语音"), variant="primary", size="lg", scale=25)
             output = gr.Audio(label=i18n("输出的语音"), scale=14)
 
         inference_button.click(
@@ -1242,6 +1247,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
                 inp_refs,
                 ref_text_free,
                 if_sr_Checkbox,
+                inference_button,
             ],
         )
         GPT_dropdown.change(change_gpt_weights, [GPT_dropdown], [])
