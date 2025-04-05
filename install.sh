@@ -68,7 +68,7 @@ fi
 
 if [ ! -d "GPT_SoVITS/text/G2PWModel" ]; then
     echo "Download G2PWModel"
-    wget --tries=25 --wait=5 --read-timeout=40 --retry-on-http-error=404 "https://paddlespeech.cdn.bcebos.com/Parakeet/released_models/g2p/G2PWModel_1.1.zip"
+    wget --tries=25 --wait=5 --read-timeout=40 --retry-on-http-error=404 "https://www.modelscope.cn/models/kamiorinn/g2pw/resolve/master/G2PWModel_1.1.zip"
 
     unzip G2PWModel_1.1.zip
     rm -rf G2PWModel_1.1.zip
