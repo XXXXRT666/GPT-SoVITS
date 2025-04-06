@@ -1,13 +1,43 @@
 import contextlib
+import os
+import re
 import sys
 import time
-from functools import partial, wraps
+from functools import wraps
 
 import click
 import soundfile as sf
+import torch
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-from GPT_SoVITS.TTS_infer_pack.TTS import TTS, TTS_Config
+
+def get_dynamic_implement_list():
+    model_dir = "GPT_SoVITS/AR/models"
+    pattern = re.compile(r"t2s_model_(\w+)\.py$")
+    try:
+        files = os.listdir(model_dir)
+    except FileNotFoundError:
+        return []
+
+    implements = [match.group(1) for f in files if (match := pattern.match(f))]
+    return [i for i in implements if i not in {"abc", "onnx"}]
+
+
+class DynamicChoice(click.ParamType):
+    name = "dynamic choice"
+
+    def __init__(self, choices_fn):
+        self.choices_fn = choices_fn
+
+    def convert(self, value, param, ctx):
+        choices = self.choices_fn()
+        if value in choices:
+            return value
+        self.fail(
+            f"{value!r} is not a valid choice. (choose from {', '.join(choices)})",
+            param,
+            ctx,
+        )
 
 
 @contextlib.contextmanager
@@ -61,8 +91,12 @@ def with_sdpa_kernel_flash(func):
 @click.option("--cuda-graph", is_flag=True, help="Enable CUDA Graph.")
 @click.option("--compile", is_flag=True, help="Enable compilation mode.")
 @click.option("--bs", type=int, default=20, help="Batch Size")
-@click.option("--implement", type=str, default="flash_attn", help="T2S Decoder Implement")
+@click.option(
+    "--implement", type=DynamicChoice(get_dynamic_implement_list), default="flash_attn", help="T2S Decoder Implement"
+)
 def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
+    from GPT_SoVITS.TTS_infer_pack.TTS import TTS, TTS_Config
+
     if cuda_graph and compile:
         raise click.UsageError("Options --cuda-graph and --compile cannot be used together.")
 
@@ -79,9 +113,9 @@ def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
 
     tts_config.vits_weights_path = SoVITS
 
-    tts_config.device = "cuda"
+    tts_config.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    tts_config.is_half = True
+    tts_config.is_half = torch.cuda.is_available()
 
     print(tts_config)
 
@@ -97,7 +131,11 @@ def main(cuda_graph=False, compile=False, bs=20, implement="naive_static"):
 
     tts_pipeline = TTS(tts_config, BATCH_SIZE, implement)
 
-    tts_pipeline.t2s_model.model = tts_pipeline.t2s_model.model.cuda().half().requires_grad_(False)
+    tts_pipeline.t2s_model.model = (
+        tts_pipeline.t2s_model.model.cuda().half().requires_grad_(False)
+        if torch.cuda.is_available()
+        else tts_pipeline.t2s_model.model.requires_grad_(False)
+    )
 
     if compile:
         tts_pipeline.t2s_model.model.compile()

@@ -67,6 +67,7 @@ class TransformerBlock(TransformerBlockABC):
         self.feed_forward = FeedForward(hidden_dim, ffn_dim)
         self.attention_norm = nn.LayerNorm([self.hidden_dim])
         self.ffn_norm = nn.LayerNorm([self.hidden_dim])
+        self.dropout = nn.Dropout(0.1)
 
     def forward(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
         h = self.attention_norm.forward(x + self.attention.forward(x, input_pos, mask))
