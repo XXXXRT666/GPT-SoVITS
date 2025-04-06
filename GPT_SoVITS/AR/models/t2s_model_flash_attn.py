@@ -96,7 +96,7 @@ class TransformerDecoder(TransformerDecoderABC):
 
         self.n_layer = n_layer
 
-        self.layers: nn.ModuleList(  # type: ignore
+        self.layers = nn.ModuleList(  # type: ignore
             TransformerBlock(n_head, ffn_dim, hidden_dim) for _ in range(n_layer)
         )
 

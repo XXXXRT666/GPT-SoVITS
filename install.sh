@@ -175,6 +175,6 @@ rm -rf "$TAR_FILE" "$DIR_NAME"
 
 pip install -r extra-req.txt --no-deps
 
-pip install -r requirements.txt
+pip install -r requirements.txt -extra-irl https://flashinfer.ai/whl/cu124/torch2.5/flashinfer-python/
 
 echo "Installation completed successfully!"
