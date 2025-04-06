@@ -37,8 +37,6 @@ class Attention(AttentionABC):
         self.in_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=True)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
-        self.dropout = nn.Dropout(0.1)
-
     def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
 
@@ -71,7 +69,6 @@ class TransformerBlock(TransformerBlockABC):
         self.feed_forward = FeedForward(hidden_dim, ffn_dim)
         self.attention_norm = nn.LayerNorm([self.hidden_dim])
         self.ffn_norm = nn.LayerNorm([self.hidden_dim])
-        self.dropout = nn.Dropout(0.1)
 
 
 class TransformerDecoder(TransformerDecoderABC):

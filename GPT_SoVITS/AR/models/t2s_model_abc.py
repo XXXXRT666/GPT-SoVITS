@@ -32,7 +32,7 @@ class KVCacheABC(ABC, nn.Module):
     def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor, *args, **kwds) -> Tuple[Tensor, Tensor]: ...
 
     @abstractmethod
-    def prefill_kv(self, k_val: Tensor, v_val: Tensor, *args, **kwds) -> None: ...
+    def prefill_kv(self, k_val: Tensor, v_val: Tensor, bs: int) -> None: ...
 
     def forward(self):
         raise NotImplementedError()
@@ -125,11 +125,11 @@ class KVCacheHND(KVCacheABC):
         self.k_cache.zero_()
         self.v_cache.zero_()
 
-    def prefill_kv(self, k_val: Tensor, v_val: Tensor):
-        # input_pos: int, k_val: [B, H, S, D]
+    def prefill_kv(self, k_val: Tensor, v_val: Tensor, bs: int):
+        # input_pos: int, k_val: [B, S, H, D]
 
-        self.k_cache[:, :, : k_val.shape[2]] = k_val
-        self.v_cache[:, :, : v_val.shape[2]] = v_val
+        self.k_cache[[bs], :, : k_val.shape[1]] = k_val.transpose(1, 2)
+        self.v_cache[[bs], :, : v_val.shape[1]] = v_val.transpose(1, 2)
 
 
 class AttentionABC(ABC, nn.Module):
@@ -143,7 +143,7 @@ class AttentionABC(ABC, nn.Module):
         self.in_proj: nn.Linear
         self.out_proj: nn.Linear
 
-        self.dropout: nn.Dropout
+        self.dropout = nn.Dropout(0.1)
 
         self.kv_cache: KVCacheABC
 
@@ -210,7 +210,7 @@ class TransformerBlockABC(ABC, nn.Module):
         self.feed_forward: FeedForward
         self.attention_norm: nn.LayerNorm
         self.ffn_norm: nn.LayerNorm
-        self.dropout: nn.Dropout
+        self.dropout = nn.Dropout(0.1)
 
         self._register_load_state_dict_pre_hook(self.load_hook)
 

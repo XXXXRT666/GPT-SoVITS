@@ -11,7 +11,7 @@ import torch
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
 
-def get_dynamic_implement_list():
+def get_dynamic_implement_list() -> list[str]:
     model_dir = "GPT_SoVITS/AR/models"
     pattern = re.compile(r"t2s_model_(\w+)\.py$")
     try:
@@ -26,7 +26,7 @@ def get_dynamic_implement_list():
 class DynamicChoice(click.ParamType):
     name = "dynamic choice"
 
-    def __init__(self, choices_fn):
+    def __init__(self, choices_fn) -> None:
         self.choices_fn = choices_fn
 
     def convert(self, value, param, ctx):

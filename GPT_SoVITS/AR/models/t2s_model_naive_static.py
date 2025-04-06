@@ -52,6 +52,8 @@ class Attention(AttentionABC):
 
         attn: Tensor = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
+        attn = self.dropout.forward(attn)
+
         attn = attn.transpose(1, 2).contiguous().view(bsz, seqlen, self.hidden_dim)
 
         attn = self.out_proj.forward(attn)
@@ -67,7 +69,6 @@ class TransformerBlock(TransformerBlockABC):
         self.feed_forward = FeedForward(hidden_dim, ffn_dim)
         self.attention_norm = nn.LayerNorm([self.hidden_dim])
         self.ffn_norm = nn.LayerNorm([self.hidden_dim])
-        self.dropout = nn.Dropout(0.1)
 
     def forward(self, x: Tensor, input_pos: Tensor, mask: Tensor) -> Tensor:
         h = self.attention_norm.forward(x + self.attention.forward(x, input_pos, mask))
@@ -241,7 +242,6 @@ class T2SDecoder(T2SDecoderABC):
             mask[-y_len:, -y_len:] = ~torch.triu(
                 torch.ones(y_len, y_len, device=xy_pos.device, dtype=torch.bool), diagonal=1
             )
-        xy_attn_mask = xy_attn_mask.unsqueeze(1).expand(-1, self.n_head, -1, -1)
 
         completed = [False] * bsz
         y_results: List[Tensor] = [None] * bsz  # type: ignore
