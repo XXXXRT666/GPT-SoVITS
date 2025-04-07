@@ -126,6 +126,7 @@ fi
 echo "Installing PyTorch"
 
 if [ "$USE_CUDA" = true ]; then
+    conda install -c nvidia cuda-toolkit=12.4
     pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 elif [ "$USE_ROCM" = true ]; then
     pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/rocm6.2

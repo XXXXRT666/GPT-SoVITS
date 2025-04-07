@@ -14,6 +14,164 @@ from GPT_SoVITS.AR.modules.embedding import TokenEmbedding
 Tensor = torch.Tensor
 
 
+class Sampler(nn.Module):
+    def __init__(self, max_batch_size: int, vocab_size: int) -> None:
+        super().__init__()
+        self.max_batch_size = max_batch_size
+
+        self.logits: Tensor
+        self.samples: Tensor
+        self.register_buffer("logits", torch.zeros((max_batch_size, vocab_size)), persistent=False)
+        self.register_buffer("samples", torch.zeros((max_batch_size,), dtype=torch.int32), persistent=False)
+
+        self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
+
+    def empty_cache(self):
+        self.logits.zero_()
+        self.__CUDAGraph = None
+
+    @staticmethod
+    def multinomial_sample_one_no_sync(probs_sort: Tensor):  # Does multinomial sampling without a cuda synchronization
+        q = torch.empty_like(probs_sort).exponential_(1)
+        return torch.argmax(probs_sort / q, dim=-1, keepdim=True).to(dtype=torch.int)
+
+    @staticmethod
+    def logits_to_probs(
+        logits: Tensor,
+        previous_tokens: Tensor,
+        temperature: float,
+        top_k: int,
+        top_p: int,
+        repetition_penalty: float,
+    ):
+        previous_tokens = previous_tokens.long()
+        score = torch.gather(logits, dim=1, index=previous_tokens)
+        score = torch.where(score < 0, score * repetition_penalty, score / repetition_penalty)
+        logits.scatter_(dim=1, index=previous_tokens, src=score)
+
+        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+        cum_probs = torch.cumsum(torch.nn.functional.softmax(sorted_logits, dim=-1), dim=-1)
+        sorted_indices_to_remove = cum_probs > top_p
+        sorted_indices_to_remove[:, 0] = False  # keep at least one option
+        indices_to_remove = sorted_indices_to_remove.scatter(dim=1, index=sorted_indices, src=sorted_indices_to_remove)
+        logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+        logits = logits / max(temperature, 1e-5)
+
+        v, _ = torch.topk(logits, top_k)
+        pivot = v[:, -1].unsqueeze(-1)
+        logits = torch.where(logits < pivot, -float("Inf"), logits)
+
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        return probs
+
+    @staticmethod
+    def apply_repetition_penalty(logits: Tensor, previous_tokens: Tensor, repetition_penalty: float):
+        previous_tokens = previous_tokens.long()
+        score = torch.gather(logits, dim=1, index=previous_tokens)
+        score = torch.where(score < 0, score * repetition_penalty, score / repetition_penalty)
+        logits.scatter_(dim=1, index=previous_tokens, src=score)
+        return logits
+
+    @staticmethod
+    def logits_to_probs_cuda_graph(
+        logits: Tensor,
+        temperature: float,
+        top_k: int,
+        top_p: int,
+    ):
+        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+        cum_probs = torch.cumsum(torch.nn.functional.softmax(sorted_logits, dim=-1), dim=-1)
+        sorted_indices_to_remove = cum_probs > top_p
+        sorted_indices_to_remove[:, 0] = False  # keep at least one option
+        indices_to_remove = sorted_indices_to_remove.scatter(dim=1, index=sorted_indices, src=sorted_indices_to_remove)
+        logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+        logits = logits / max(temperature, 1e-5)
+
+        v, _ = torch.topk(logits, top_k)
+        pivot = v[:, -1].unsqueeze(-1)
+        logits = torch.where(logits < pivot, -float("Inf"), logits)
+
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        return probs
+
+    def __sample(
+        self,
+        logits: Tensor,
+        previous_tokens: Tensor,
+        temperature: float,
+        top_k: int,
+        top_p: int,
+        repetition_penalty: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        probs = self.logits_to_probs(
+            logits=logits,
+            previous_tokens=previous_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+        )
+        idx_next = self.multinomial_sample_one_no_sync(probs)
+        return idx_next, probs
+
+    def __sample_cuda_graph(
+        self,
+        logits: Tensor,
+        temperature: float,
+        top_k: int,
+        top_p: int,
+    ):
+        probs = self.logits_to_probs_cuda_graph(
+            logits=logits,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+        )
+        idx_next = self.multinomial_sample_one_no_sync(probs)
+        return idx_next
+
+    def capture(self, temperature: float, top_k: int, top_p: int):
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+
+        logits = self.logits
+
+        with torch.cuda.stream(s):  # type: ignore
+            for _ in range(5):
+                self.__sample_cuda_graph(logits, temperature, top_k, top_p)
+        torch.cuda.current_stream().wait_stream(s)
+
+        self.__CUDAGraph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(self.__CUDAGraph):
+            self.samples = self.__sample_cuda_graph(logits, temperature, top_k, top_p)
+        torch.cuda.synchronize()
+
+    def sample(
+        self,
+        logits: Tensor,
+        previous_tokens: Tensor,
+        temperature: float,
+        top_k: int,
+        top_p: int,
+        repetition_penalty: float,
+        use_cuda_graph=False,
+        idx=-1,
+    ):
+        self.logits.copy_(logits)
+        if use_cuda_graph and torch.cuda.is_available() and self.__CUDAGraph is None and idx > 0:
+            self.capture(temperature, top_k, top_p)
+        if self.__CUDAGraph is not None:
+            self.apply_repetition_penalty(logits, previous_tokens, repetition_penalty)
+            self.__CUDAGraph.replay()
+            samples = self.samples.clone()
+        else:
+            samples = self.__sample(logits, previous_tokens, temperature, top_k, top_p, repetition_penalty)[0]
+
+        return samples
+
+
 class KVCacheABC(ABC, nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -225,7 +383,7 @@ class TransformerBlockABC(ABC, nn.Module):
             state_dict[new_key] = state_dict.pop(key)
 
     def forward(self, x: Tensor, input_pos: Tensor, *args, **kwds) -> Tensor:
-        h = self.attention_norm.forward(x + self.dropout.forward(self.attention.forward(x, input_pos)))
+        h = self.attention_norm.forward(x + self.dropout.forward(self.attention.forward(x, input_pos, *args, **kwds)))
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
@@ -259,7 +417,7 @@ class TransformerDecoderABC(ABC, nn.Module):
 
     def forward(self, input_pos: Tensor, x: Tensor, *args, **kwds):
         for layer in self.layers:
-            x = layer.forward(x, input_pos)
+            x = layer.forward(x, input_pos, *args, **kwds)
         return x
 
     def prefill(self, x: Tensor, mask: Tensor):
@@ -292,6 +450,7 @@ class T2SDecoderABC(ABC, nn.Module):
         self.ar_audio_position: SinePositionalEmbedding
         self.ar_predict_layer: nn.Linear
         self.h: TransformerDecoderABC
+        self.sampler: Sampler
 
         self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
 
@@ -302,6 +461,7 @@ class T2SDecoderABC(ABC, nn.Module):
             state_dict[new_key] = state_dict.pop(key)
 
     def empty_cache(self):
+        self.sampler.empty_cache()
         for layer in self.h.layers:
             layer.attention.kv_cache.empty()
         self.h.input_pos.zero_()
@@ -345,19 +505,18 @@ class T2SDecoderABC(ABC, nn.Module):
             # mode="max-autotune",
         )
 
-    def capture(self, input_pos: Tensor, x: Tensor):
+    def capture(self, input_pos: Tensor, x: Tensor, *args, **kwds):
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
 
         self.h.xy_pos.copy_(x)
-        self.h.input_pos.copy_(input_pos)
 
         with torch.cuda.stream(s):  # type: ignore
             for _ in range(5):
-                self.h.forward(self.h.input_pos, self.h.xy_pos)
+                self.h.forward(input_pos, self.h.xy_pos, *args, **kwds)
         torch.cuda.current_stream().wait_stream(s)
 
         self.__CUDAGraph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(self.__CUDAGraph):
-            self.h.xy_dec = self.h.forward(self.h.input_pos, self.h.xy_pos)
+            self.h.xy_dec = self.h.forward(input_pos, self.h.xy_pos, *args, **kwds)
         torch.cuda.synchronize()

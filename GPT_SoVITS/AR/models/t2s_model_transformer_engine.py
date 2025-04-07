@@ -2,21 +2,23 @@ import contextlib
 import time
 from typing import List, Optional
 
-import flash_attn  # type: ignore
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import transformer_engine.pytorch as te  # type: ignore
 from tqdm import tqdm
 
 from GPT_SoVITS.AR.models.t2s_model_abc import (
     AttentionABC,
-    FeedForward,
     Sampler,
     T2SDecoderABC,
     TransformerBlockABC,
     TransformerDecoderABC,
 )
+from GPT_SoVITS.AR.models.t2s_model_abc import (
+    FeedForward as ffn,
+)
 from GPT_SoVITS.AR.models.t2s_model_abc import KVCacheNHD as KVCache
-from GPT_SoVITS.AR.models.utils import sample
 from GPT_SoVITS.AR.modules.embedding import (
     SinePositionalEmbeddingNested as SinePositionalEmbedding,
 )
@@ -24,6 +26,17 @@ from GPT_SoVITS.AR.modules.embedding import TokenEmbedding
 
 Tensor = torch.Tensor
 dtype = torch.dtype
+
+
+class FeedForward(ffn):
+    def __init__(self, dim: int, hidden_dim: int) -> None:
+        super().__init__(dim, hidden_dim)
+        self.linear1 = te.Linear(dim, hidden_dim, bias=True)
+        self.linear2 = te.Linear(hidden_dim, dim, bias=True)
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.dropout.forward(self.linear2(self.dropout.forward(F.relu(self.linear1(x)))))
 
 
 class Attention(AttentionABC):
@@ -35,10 +48,14 @@ class Attention(AttentionABC):
         self.head_dim = hidden_dim // n_head
 
         # key, query, value projections for all heads, but in a batch
-        self.in_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=True)
-        self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
+        self.in_proj = te.Linear(hidden_dim, hidden_dim * 3, bias=True)
+        self.out_proj = te.Linear(hidden_dim, hidden_dim, bias=True)
 
-    def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
+        self.attn = te.DotProductAttention(
+            num_attention_heads=self.n_head, kv_channels=self.head_dim, qkv_format="bshd"
+        )
+
+    def forward(self, x: Tensor, input_pos: Tensor, cu_seqlens_q: Tensor, cu_seqlens_kv: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
@@ -47,10 +64,10 @@ class Attention(AttentionABC):
         k = k.view(bsz, seqlen, self.n_head, self.head_dim)
         v = v.view(bsz, seqlen, self.n_head, self.head_dim)
 
-        # k, v = self.kv_cache.update(input_pos, k, v)
+        k, v = self.kv_cache.update(input_pos, k, v)
 
-        attn: Tensor = flash_attn.flash_attn_with_kvcache(
-            q, self.kv_cache.k_cache, self.kv_cache.v_cache, k, v, cache_seqlens=input_pos - 1
+        attn: Tensor = self.attn(
+            query_layer=q, key_layer=k, value_layer=v, cu_seqlens_q=cu_seqlens_q, cu_seqlens_kv=cu_seqlens_kv
         )
 
         attn = self.dropout.forward(attn)
@@ -68,8 +85,8 @@ class TransformerBlock(TransformerBlockABC):
         self.hidden_dim = hidden_dim
         self.attention = Attention(n_head, hidden_dim)
         self.feed_forward = FeedForward(hidden_dim, ffn_dim)
-        self.attention_norm = nn.LayerNorm([self.hidden_dim])
-        self.ffn_norm = nn.LayerNorm([self.hidden_dim])
+        self.attention_norm = te.LayerNorm([self.hidden_dim])
+        self.ffn_norm = te.LayerNorm([self.hidden_dim])
 
 
 class TransformerDecoder(TransformerDecoderABC):
@@ -107,6 +124,16 @@ class TransformerDecoder(TransformerDecoderABC):
 
         self.setup_caches(self.max_batch_size, self.max_seq_length)
 
+        self.cu_seqlens_q: Tensor
+        self.cu_seqlens_kv: Tensor
+
+        self.register_buffer(
+            "cu_seqlens_q", torch.arange(0, self.max_batch_size + 1, dtype=torch.int32), persistent=False
+        )
+        self.register_buffer(
+            "cu_seqlens_kv", torch.arange(0, self.max_batch_size + 1, dtype=torch.int32), persistent=False
+        )
+
     def setup_caches(self, max_batch_size=10, max_seq_length=2500):
         self.max_seq_length = max_seq_length
         self.max_batch_size = max_batch_size
@@ -116,6 +143,8 @@ class TransformerDecoder(TransformerDecoderABC):
 
 
 class T2SDecoder(T2SDecoderABC):
+    h: TransformerDecoder
+
     def __init__(
         self,
         config,
@@ -152,7 +181,7 @@ class T2SDecoder(T2SDecoderABC):
         self.EOS = EOS
         assert self.EOS == self.vocab_size - 1
 
-        self.bert_proj = nn.Linear(1024, self.embedding_dim)
+        self.bert_proj = te.Linear(1024, self.embedding_dim)
         self.ar_text_embedding = TokenEmbedding(self.embedding_dim, self.phoneme_vocab_size, self.p_dropout)
         self.ar_text_position = SinePositionalEmbedding(
             self.embedding_dim,
@@ -171,13 +200,17 @@ class T2SDecoder(T2SDecoderABC):
             max_batch_size=max_batch_size,
             max_seq_len=max_seq_length,
         )
-        self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
-        self.h = TransformerDecoder(hidden_dim, n_layer, n_head, ffn_dim, vocab_size, max_seq_length, max_batch_size)
+        self.ar_predict_layer = te.Linear(self.hidden_dim, self.vocab_size, bias=False)
+        self.h = TransformerDecoder(hidden_dim, n_layer, n_head, ffn_dim, vocab_size, max_seq_length, max_batch_size)  # type: ignore
         self.sampler = Sampler(max_batch_size, vocab_size)
 
         self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
 
         # self._register_load_state_dict_pre_hook(self.load_hook)
+
+    def empty_cache(self):
+        super().empty_cache()
+        self.h.cu_seqlens_kv.zero_()
 
     def embed(
         self,
@@ -201,6 +234,9 @@ class T2SDecoder(T2SDecoderABC):
         xy_pos = torch.nested.nested_tensor([torch.cat([x_pos[i], y_pos[i]]) for i in range(len(x))])
 
         return xy_pos
+
+    def capture(self, input_pos: Tensor, x: Tensor, cu_seqlens_q: Tensor, cu_seqlens_kv: Tensor):
+        return super().capture(input_pos, x, cu_seqlens_q, cu_seqlens_kv)
 
     def forward(
         self,
@@ -241,7 +277,13 @@ class T2SDecoder(T2SDecoderABC):
         t1 = 0.0
 
         self.h.input_pos.add_(prefill_len)
+        self.h.cu_seqlens_kv.copy_(
+            torch.cat([torch.tensor(0, device=xy_pos.device, dtype=torch.int32), self.h.input_pos])
+        )
+
         input_pos = self.h.input_pos
+        cu_seqlens_q = self.h.cu_seqlens_q
+        cu_seqlens_kv = self.h.cu_seqlens_kv
 
         # with torch.profiler.profile(
         #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA], record_shapes=True, with_stack=True
@@ -254,7 +296,7 @@ class T2SDecoder(T2SDecoderABC):
                     input_pos = input_pos.to(torch.int32)
                 else:
                     if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
-                        self.capture(input_pos, xy_pos)
+                        self.capture(input_pos, xy_pos, cu_seqlens_q, cu_seqlens_kv)
 
                     with torch.profiler.record_function("AR"):
                         # with contextlib.nullcontext():
@@ -263,12 +305,13 @@ class T2SDecoder(T2SDecoderABC):
                             self.__CUDAGraph.replay()
                             xy_dec = self.h.xy_dec.clone()
                         else:
-                            xy_dec = self.h.forward(input_pos, xy_pos)
+                            xy_dec = self.h.forward(input_pos, xy_pos, cu_seqlens_q, cu_seqlens_kv)
 
                 with torch.profiler.record_function("Logits"):
                     # with contextlib.nullcontext():
                     logits = self.ar_predict_layer(xy_dec[:, -1])
                     input_pos.add_(1)
+                    self.h.cu_seqlens_kv.add_(self.h.cu_seqlens_q)
 
                 if idx == 0:
                     logits = logits[:, :-1]

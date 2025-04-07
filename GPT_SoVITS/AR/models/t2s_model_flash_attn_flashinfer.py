@@ -258,7 +258,9 @@ class T2SDecoder(T2SDecoderABC):
 
         completed = [False] * bsz
         y_results: List[Tensor] = [None] * bsz  # type: ignore
-        self.h.input_pos += prefill_len
+        t1 = 0.0
+
+        self.h.input_pos.add_(prefill_len)
         input_pos = self.h.input_pos
 
         # with torch.profiler.profile(
@@ -286,10 +288,9 @@ class T2SDecoder(T2SDecoderABC):
                 with torch.profiler.record_function("Logits"):
                     # with contextlib.nullcontext():
                     logits = self.ar_predict_layer(xy_dec[:, -1])
-                    input_pos += 1
+                    input_pos.add_(1)
 
                 if idx == 0:
-                    t1 = time.perf_counter()
                     logits = logits[:, :-1]
 
                 with torch.profiler.record_function("Sampling"):
@@ -331,7 +332,7 @@ class T2SDecoder(T2SDecoderABC):
                         tqdm.write("bad zero prediction")
                     else:
                         tqdm.write(f"T2S Decoding EOS {prefill_len.tolist()} -> {[i.shape[0] for i in y_results]}")
-                        tqdm.write(f"{idx / (time.perf_counter() - t1):.2f}")  # type: ignore
+                        tqdm.write(f"{(idx - 1) / (time.perf_counter() - t1):.2f}")
                     break
 
                 with torch.profiler.record_function("Next xy_pos"):
@@ -339,6 +340,9 @@ class T2SDecoder(T2SDecoderABC):
 
                     y_emb = self.ar_audio_embedding(y[:, -1:])
                     xy_pos = self.ar_audio_position.forward(input_pos - x_lens, y_emb)
+
+                if idx == 2:
+                    t1 = time.perf_counter()
 
         #         if idx == 50:
         #             break

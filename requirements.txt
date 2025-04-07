@@ -39,8 +39,8 @@ x_transformers
 torchmetrics<=1.5
 matplotlib
 flash_attn; sys_platform == 'linux'
-xformers; sys_platform == 'linux'
 flashinfer-python; sys_platform == 'linux'
+transformer_engine[pytorch]; sys_platform == 'linux'
 py-cpuinfo
 pydantic<=2.10.6
 ctranslate2>=4.0,<5
