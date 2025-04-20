@@ -5,6 +5,7 @@ import random
 import sys
 import time
 import traceback
+from copy import deepcopy
 
 import torchaudio
 from tqdm import tqdm
@@ -534,6 +535,7 @@ class TTS:
         self.configs.hz = 50
         dict_s1 = torch.load(weights_path, map_location=self.configs.device)
         config = dict_s1["config"]
+        config = DictToAttrRecursive(config)
         self.configs.max_sec = config["data"]["max_sec"]
         t2s_model = Text2SemanticLightningModule(
             config, "****", is_train=False, batch_size=self.batch_size, implement=self.implement
@@ -1053,6 +1055,8 @@ class TTS:
                     data.append([])
                 data[-1].append(texts[i])
 
+            res_len = len(texts) % batch_size
+
             def make_batch(batch_texts):
                 batch_data = []
                 print(f"############ {i18n('提取文本Bert特征')} ############")
@@ -1095,6 +1099,7 @@ class TTS:
                     item = make_batch(item)
                     if item is None:
                         continue
+                import pickle
 
                 batch_phones: List[torch.LongTensor] = item["phones"]
                 # batch_phones:torch.LongTensor = item["phones"]

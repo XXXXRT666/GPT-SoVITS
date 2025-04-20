@@ -217,8 +217,12 @@ def get_batch_logps(
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
     # dummy token; we'll ignore the losses on these tokens later
 
-    per_token_logps_target = torch.gather(logits_target.log_softmax(-1), dim=2, index=labels_target.unsqueeze(2)).squeeze(2)
-    per_token_logps_reject = torch.gather(logits_reject.log_softmax(-1), dim=2, index=labels_reject.unsqueeze(2)).squeeze(2)
+    per_token_logps_target = torch.gather(
+        logits_target.log_softmax(-1), dim=2, index=labels_target.unsqueeze(2)
+    ).squeeze(2)
+    per_token_logps_reject = torch.gather(
+        logits_reject.log_softmax(-1), dim=2, index=labels_reject.unsqueeze(2)
+    ).squeeze(2)
 
     return per_token_logps_target.sum(-1), per_token_logps_reject.sum(-1)
 
