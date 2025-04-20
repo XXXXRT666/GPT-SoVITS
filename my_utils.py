@@ -1,17 +1,24 @@
 import os
-import sys
 import traceback
+<<<<<<< HEAD
 
+=======
+>>>>>>> upstream/main
 import ffmpeg
 import gradio as gr
 import numpy as np
 import pandas as pd
+<<<<<<< HEAD
 import torch
 
 from tools.i18n.i18n import I18nAuto
 
 i18n = I18nAuto(language=os.environ.get("language", "Auto"))
 Tensor = torch.Tensor
+=======
+
+i18n = I18nAuto(language=os.environ.get("language", "Auto"))
+>>>>>>> upstream/main
 
 
 def load_audio(file, sr):
@@ -38,9 +45,13 @@ def clean_path(path_str: str):
     if path_str.endswith(("\\", "/")):
         return clean_path(path_str[0:-1])
     path_str = path_str.replace("/", os.sep).replace("\\", os.sep)
+<<<<<<< HEAD
+    return path_str.strip(" '\n\"\u202a")  # path_str.strip(" ").strip('\'').strip("\n").strip('"').strip(" ").strip("\u202a")
+=======
     return path_str.strip(
         " '\n\"\u202a"
     )  # path_str.strip(" ").strip('\'').strip("\n").strip('"').strip(" ").strip("\u202a")
+>>>>>>> upstream/main
 
 
 def check_for_existance(file_list: list = None, is_train=False, is_dataset_processing=False):
@@ -132,90 +143,3 @@ def check_details(path_list=None, is_train=False, is_dataset_processing=False):
             ...
         else:
             gr.Warning(i18n("缺少语义数据集"))
-
-
-def check_infer_device():
-    import torch
-
-    is_half = True
-    if torch.cuda.is_available():
-        infer_device = "cuda"
-    else:
-        infer_device = "cpu"
-
-    if infer_device == "cuda":
-        gpu_name = torch.cuda.get_device_name(0)
-        if (
-            ("16" in gpu_name and "V100" not in gpu_name.upper())
-            or "P40" in gpu_name.upper()
-            or "P10" in gpu_name.upper()
-            or "1060" in gpu_name
-            or "1070" in gpu_name
-            or "1080" in gpu_name
-        ):
-            is_half = False
-
-    if infer_device == "cpu":
-        is_half = False
-    return infer_device, is_half
-
-
-class DictToAttrRecursive(dict):
-    def __init__(self, input_dict):
-        super().__init__(input_dict)
-        for key, value in input_dict.items():
-            if isinstance(value, dict):
-                value = DictToAttrRecursive(value)
-            self[key] = value
-            setattr(self, key, value)
-
-    def __getattr__(self, item):
-        try:
-            return self[item]
-        except KeyError:
-            raise AttributeError(f"Attribute {item} not found")
-
-    def __setattr__(self, key, value):
-        if isinstance(value, dict):
-            value = DictToAttrRecursive(value)
-        super(DictToAttrRecursive, self).__setitem__(key, value)
-        super().__setattr__(key, value)
-
-    def __delattr__(self, item):
-        try:
-            del self[item]
-        except KeyError:
-            raise AttributeError(f"Attribute {item} not found")
-
-    def update(self, other_dict=None, **kwargs):
-        if other_dict:
-            if isinstance(other_dict, DictToAttrRecursive):
-                other_dict = dict(other_dict)
-            for key, value in other_dict.items():
-                if isinstance(value, dict):
-                    if key in self and isinstance(self[key], DictToAttrRecursive):
-                        self[key].update(value)
-                    else:
-                        self[key] = DictToAttrRecursive(value)
-                else:
-                    self[key] = value
-                setattr(self, key, self[key])
-        for key, value in kwargs.items():
-            if isinstance(value, dict):
-                if key in self and isinstance(self[key], DictToAttrRecursive):
-                    self[key].update(value)
-                else:
-                    self[key] = DictToAttrRecursive(value)
-            else:
-                self[key] = value
-            setattr(self, key, self[key])
-
-
-class SilentPrint:
-    def __enter__(self):
-        self._original_stdout = sys.stdout
-        sys.stdout = open(os.devnull, "w")
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        sys.stdout.close()
-        sys.stdout = self._original_stdout

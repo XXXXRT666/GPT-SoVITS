@@ -7,12 +7,53 @@ cd "$SCRIPT_DIR" || exit 1
 
 set -e
 
-if ! command -v conda &>/dev/null; then
-    echo "Conda Not Found"
-    exit 1
+trap 'echo "Error Occured at \"$BASH_COMMAND\" with exit code $?"; exit 1' ERR
+
+OS_TYPE=$(uname)
+ARCHITECTURE=$(uname -m)
+
+if command -v conda >/dev/null 2>&1; then
+    echo "conda installed"
+else
+    echo "installing conda"
+
+    if [ "$OS_TYPE" = "Darwin" ] && [[ "$ARCHITECTURE" == "arm64" ]]; then
+        xcode-select --install
+        wget --tries=25 --wait=3 --read-timeout=40 -O anaconda.sh "https://repo.anaconda.com/archive/Anaconda3-2024.10-1-MacOSX-arm64.sh"
+    elif [ "$OS_TYPE" = "Linux" ] && [[ "$ARCHITECTURE" == "x86_64" ]]; then
+        wget --tries=25 --wait=3 --read-timeout=40 -O anaconda.sh "https://repo.anaconda.com/archive/Anaconda3-2024.10-1-Linux-x86_64.sh"
+    else
+        echo "Unsupported System for install.sh：$OS_TYPE with $ARCHITECTURE"
+        exit 1
+    fi
+
+    bash "anaconda.sh" -b -p "$HOME/anaconda3"
+
+    rm -rf "anaconda.sh"
+
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        "$HOME/anaconda3/condabin/conda" init zsh
+        source "$HOME/.zshrc"
+    elif [ "$OS_TYPE" = "Linux" ]; then
+        "$HOME/anaconda3/condabin/conda" init bash
+        source "$HOME/.bashrc"
+    fi
+
 fi
 
-trap 'echo "Error Occured at \"$BASH_COMMAND\" with exit code $?"; exit 1' ERR
+CONDA_PATH=$(conda info --base 2>/dev/null || echo "$HOME/anaconda3")
+
+source "$CONDA_PATH/etc/profile.d/conda.sh"
+
+if conda env list | awk '{print $1}' | grep -Fxq "GPTSoVITS"; then
+    :
+else
+    conda create -n GPTSoVITS python=3.10 -y
+fi
+
+conda activate GPTSoVITS
+
+conda install -y zip
 
 is_HF=false
 is_HF_MIRROR=false
@@ -41,38 +82,38 @@ fi
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --source)
-            case "$2" in
-                HF)
-                    is_HF=true
-                    ;;
-                HF-Mirror)
-                    is_HF_MIRROR=true
-                    ;;
-                ModelScope)
-                    is_MODELSCOPE=true
-                    ;;
-                *)
-                    echo "Error: Invalid Download Source: $2"
-                    echo "Choose From: [HF, HF-Mirror, ModelScope]"
-                    exit 1
-                    ;;
-            esac
-            shift 2
+    --source)
+        case "$2" in
+        HF)
+            is_HF=true
             ;;
-        --download-uvr5)
-            DOWNLOAD_UVR5=true
-            shift
+        HF-Mirror)
+            is_HF_MIRROR=true
             ;;
-        -h|--help)
-            print_help
-            exit 0
+        ModelScope)
+            is_MODELSCOPE=true
             ;;
         *)
-            echo "Unknown Argument: $1"
-            echo "Use -h or --help to see available options."
+            echo "Error: Invalid Download Source: $2"
+            echo "Choose From: [HF, HF-Mirror, ModelScope]"
             exit 1
             ;;
+        esac
+        shift 2
+        ;;
+    --download-uvr5)
+        DOWNLOAD_UVR5=true
+        shift
+        ;;
+    -h | --help)
+        print_help
+        exit 0
+        ;;
+    *)
+        echo "Unknown Argument: $1"
+        echo "Use -h or --help to see available options."
+        exit 1
+        ;;
     esac
 done
 
@@ -123,7 +164,7 @@ else
     echo "G2PWModel Exists"
 fi
 
-if [ "$DOWNLOAD_UVR5" = "true" ];then
+if [ "$DOWNLOAD_UVR5" = "true" ]; then
     if find "tools/uvr5/uvr5_weights" -mindepth 1 ! -name '.gitignore' | grep -q .; then
         echo "UVR5 Model Exists"
     else
@@ -137,10 +178,9 @@ if [ "$DOWNLOAD_UVR5" = "true" ];then
     fi
 fi
 
-# 安装构建工具
 # Install build tools
 echo "Installing GCC..."
-conda install -c conda-forge gcc=14 -y
+conda install -c conda-forge gcc -y
 
 echo "Installing G++..."
 conda install -c conda-forge gxx -y
@@ -148,18 +188,14 @@ conda install -c conda-forge gxx -y
 echo "Installing ffmpeg and cmake..."
 conda install ffmpeg cmake -y
 
-echo "Installing git-lfs and zip..."
-conda install git-lfs -y
-conda install zip -y
-
-git-lfs install
-
 echo "Checking for CUDA installation..."
 if command -v nvidia-smi &>/dev/null; then
     USE_CUDA=true
+
     echo "CUDA found."
 else
     echo "CUDA not found."
+
     USE_CUDA=false
 fi
 
@@ -169,10 +205,9 @@ if [ "$USE_CUDA" = false ]; then
         USE_ROCM=true
         echo "ROCm found."
         if grep -qi "microsoft" /proc/version; then
-            echo "You are running WSL."
+            echo "WSL found"
             IS_WSL=true
         else
-            echo "You are NOT running WSL."
             IS_WSL=false
         fi
     else
@@ -181,33 +216,33 @@ if [ "$USE_CUDA" = false ]; then
     fi
 fi
 
+echo "Installing PyTorch"
+
 if [ "$USE_CUDA" = true ]; then
-    echo "Installing PyTorch with CUDA support..."
+    conda install -c nvidia cuda-toolkit=12.4
     pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 elif [ "$USE_ROCM" = true ]; then
-    echo "Installing PyTorch with ROCm support..."
     pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/rocm6.2
 else
-    echo "Installing PyTorch for CPU..."
     pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
 fi
 
-echo "Installing Python dependencies from requirements.txt..."
+if [ "$USE_ROCM" = true ] && [ "$IS_WSL" = true ]; then
+    echo "Update to WSL compatible runtime lib..."
+    location=$(pip show torch | grep Location | awk -F ": " '{print $2}')
+    cd "${location}/torch/lib/" || exit 1
+    rm libhsa-runtime64.so*
+    cp /opt/rocm/lib/libhsa-runtime64.so.1.2 libhsa-runtime64.so
+fi
 
 # 刷新环境
 # Refresh environment
 hash -r
 
+echo "Installing Python dependencies from requirements.txt..."
+
 pip install -r extra-req.txt --no-deps
 
-pip install -r requirements.txt
-
-if [ "$USE_ROCM" = true ] && [ "$IS_WSL" = true ]; then
-    echo "Update to WSL compatible runtime lib..."
-    location=$(pip show torch | grep Location | awk -F ": " '{print $2}')
-    cd "${location}"/torch/lib/ || exit
-    rm libhsa-runtime64.so*
-    cp /opt/rocm/lib/libhsa-runtime64.so.1.2 libhsa-runtime64.so
-fi
+pip install -r requirements.txt -extra-irl https://flashinfer.ai/whl/cu124/torch2.5/flashinfer-python/
 
 echo "Installation completed successfully!"
