@@ -77,8 +77,8 @@ def run_gen_audio_compile(bs: int, implement: str):
     lines = result.stdout.splitlines()
 
     for i in range(len(lines)):
-        if "T2S Decoding EOS" in lines[i]:
-            match = re.search(r"[-+]?[0-9]*\.?[0-9]+", lines[i + 1])
+        if "Infer Speed" in lines[i]:
+            match = re.search(r"Infer Speed:\s*([0-9.]+)", lines[i])
             if match:
                 captured_values.append(float(match.group()))
         if "T2S Time" in lines[i]:

@@ -1,6 +1,7 @@
 import json
 import locale
 import os
+from typing import List
 
 I18N_JSON_DIR: os.PathLike = os.path.join(os.path.dirname(os.path.relpath(__file__)), "locale")
 
@@ -12,7 +13,7 @@ def load_language_list(language):
 
 
 def scan_language_list():
-    language_list = []
+    language_list: List[str] = []
     for name in os.listdir(I18N_JSON_DIR):
         if name.endswith(".json"):
             language_list.append(name.split(".")[0])

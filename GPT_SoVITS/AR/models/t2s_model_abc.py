@@ -1,10 +1,14 @@
+import os
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from typing import List, MutableSequence, Optional, Tuple
 
 import torch
 import torch._inductor.config
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.cuda.graphs import CUDAGraph
+from torch.profiler import ProfilerAction, tensorboard_trace_handler
 
 from GPT_SoVITS.AR.modules.embedding import (
     SinePositionalEmbeddingNested as SinePositionalEmbedding,
@@ -15,16 +19,16 @@ Tensor = torch.Tensor
 
 
 class Sampler(nn.Module):
-    def __init__(self, max_batch_size: int, vocab_size: int) -> None:
+    def __init__(self, batch_size: int, vocab_size: int) -> None:
         super().__init__()
-        self.max_batch_size = max_batch_size
+        self.batch_size = batch_size
 
         self.logits: Tensor
         self.samples: Tensor
-        self.register_buffer("logits", torch.zeros((max_batch_size, vocab_size)), persistent=False)
-        self.register_buffer("samples", torch.zeros((max_batch_size,), dtype=torch.int32), persistent=False)
+        self.register_buffer("logits", torch.zeros((batch_size, vocab_size)), persistent=False)
+        self.register_buffer("samples", torch.zeros((batch_size,), dtype=torch.int32), persistent=False)
 
-        self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
+        self.__CUDAGraph: Optional[CUDAGraph] = None
 
     def empty_cache(self):
         self.logits.zero_()
@@ -33,7 +37,7 @@ class Sampler(nn.Module):
     @staticmethod
     def multinomial_sample_one_no_sync(probs_sort: Tensor):  # Does multinomial sampling without a cuda synchronization
         q = torch.empty_like(probs_sort).exponential_(1)
-        return torch.argmax(probs_sort / q, dim=-1, keepdim=True).to(dtype=torch.int)
+        return torch.argmax(probs_sort / q, dim=-1, keepdim=True).to(dtype=torch.int32)
 
     @staticmethod
     def logits_to_probs(
@@ -158,7 +162,7 @@ class Sampler(nn.Module):
         repetition_penalty: float,
         use_cuda_graph=False,
         idx=-1,
-    ):
+    ) -> Tensor:
         self.logits.copy_(logits)
         if use_cuda_graph and torch.cuda.is_available() and self.__CUDAGraph is None and idx > 0:
             self.capture(temperature, top_k, top_p)
@@ -173,13 +177,13 @@ class Sampler(nn.Module):
 
 
 class KVCacheABC(ABC, nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, *args, **kwds) -> None:
         super().__init__()
         self.k_cache: Tensor
         self.v_cache: Tensor
         self.n_head: int
         self.head_dim: int
-        self.max_batch_size: int
+        self.batch_size: int
         self.max_seq_length: int
 
     def empty(self):
@@ -197,12 +201,13 @@ class KVCacheABC(ABC, nn.Module):
 
 
 class KVCacheNHD(KVCacheABC):
-    def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim):
+    def __init__(self, batch_size, max_seq_length, n_heads, head_dim):
         super().__init__()
-        cache_shape = (max_batch_size, max_seq_length, n_heads, head_dim)
+        assert batch_size > 0
+        cache_shape = (batch_size, max_seq_length, n_heads, head_dim)
         self.n_head = n_heads
         self.head_dim = head_dim
-        self.max_batch_size = max_batch_size
+        self.batch_size = batch_size
         self.max_seq_length = max_seq_length
 
         self.register_buffer("k_cache", torch.zeros(size=cache_shape), persistent=False)
@@ -244,12 +249,13 @@ class KVCacheNHD(KVCacheABC):
 
 
 class KVCacheHND(KVCacheABC):
-    def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim):
+    def __init__(self, batch_size, max_seq_length, n_heads, head_dim):
         super().__init__()
-        cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
+        assert batch_size > 0
+        cache_shape = (batch_size, n_heads, max_seq_length, head_dim)
         self.n_head = n_heads
         self.head_dim = head_dim
-        self.max_batch_size = max_batch_size
+        self.batch_size = batch_size
         self.max_seq_length = max_seq_length
 
         self.register_buffer("k_cache", torch.zeros(size=cache_shape), persistent=False)
@@ -303,8 +309,6 @@ class AttentionABC(ABC, nn.Module):
 
         self.dropout = nn.Dropout(0.1)
 
-        self.kv_cache: KVCacheABC
-
         self._register_load_state_dict_pre_hook(self.load_hook)
 
     def load_hook(self, state_dict: dict, prefix, *args):
@@ -314,9 +318,9 @@ class AttentionABC(ABC, nn.Module):
             state_dict[new_key] = state_dict.pop(key)
 
     @abstractmethod
-    def forward(self, x: Tensor, input_pos: Tensor, *args, **kwds) -> Tensor: ...
+    def forward(self, x: Tensor, input_pos: Tensor, kv_cache: KVCacheABC, *args, **kwds) -> Tensor: ...
 
-    def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
+    def prefill(self, x: Tensor, mask: Tensor, kv_cache: KVCacheABC) -> Tensor:
         bsz = x.size(0)
 
         outputs = []
@@ -330,7 +334,7 @@ class AttentionABC(ABC, nn.Module):
             k = k.contiguous().view(1, -1, self.n_head, self.head_dim)
             v = v.contiguous().view(1, -1, self.n_head, self.head_dim)
 
-            self.kv_cache.prefill_kv(k, v, bs)
+            kv_cache.prefill_kv(k, v, bs)
 
             q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
@@ -382,13 +386,33 @@ class TransformerBlockABC(ABC, nn.Module):
             )
             state_dict[new_key] = state_dict.pop(key)
 
-    def forward(self, x: Tensor, input_pos: Tensor, *args, **kwds) -> Tensor:
-        h = self.attention_norm.forward(x + self.dropout.forward(self.attention.forward(x, input_pos, *args, **kwds)))
+    def forward(self, x: Tensor, input_pos: Tensor, kv_cache: KVCacheABC, *args, **kwds) -> Tensor:
+        h = self.attention_norm.forward(
+            x
+            + self.dropout.forward(
+                self.attention.forward(
+                    x,
+                    input_pos,
+                    kv_cache,
+                    *args,
+                    **kwds,
+                )
+            )
+        )
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
-    def prefill(self, x: Tensor, mask: Tensor) -> Tensor:
-        h = self.attention_norm.forward(x + self.dropout.forward(self.attention.prefill(x, mask)))
+    def prefill(self, x: Tensor, mask: Tensor, kv_cache: KVCacheABC) -> Tensor:
+        h = self.attention_norm.forward(
+            x
+            + self.dropout.forward(
+                self.attention.prefill(
+                    x,
+                    mask,
+                    kv_cache,
+                )
+            )
+        )
         out = self.ffn_norm.forward(h + self.feed_forward.forward(h))
         return out
 
@@ -415,14 +439,14 @@ class TransformerDecoderABC(ABC, nn.Module):
     @abstractmethod
     def setup_caches(self, max_batch_size: int, max_seq_length: int) -> None: ...
 
-    def forward(self, input_pos: Tensor, x: Tensor, *args, **kwds):
-        for layer in self.layers:
-            x = layer.forward(x, input_pos, *args, **kwds)
+    def forward(self, input_pos: Tensor, x: Tensor, kv_caches: MutableSequence[KVCacheABC], *args, **kwds):
+        for layer, kv_cache in zip(self.layers, kv_caches):
+            x = layer.forward(x, input_pos, kv_cache, *args, **kwds)
         return x
 
-    def prefill(self, x: Tensor, mask: Tensor):
-        for layer in self.layers:
-            x = layer.prefill(x, mask)
+    def prefill(self, x: Tensor, mask: Tensor, kv_caches: MutableSequence[KVCacheABC]):
+        for layer, kv_cache in zip(self.layers, kv_caches):
+            x = layer.prefill(x, mask, kv_cache)
         return x
 
 
@@ -431,6 +455,7 @@ class T2SDecoderABC(ABC, nn.Module):
         super().__init__()
         self.norm_first: bool
 
+        self.n_layer: int
         self.hidden_dim: int
         self.n_head: int
 
@@ -450,9 +475,8 @@ class T2SDecoderABC(ABC, nn.Module):
         self.ar_audio_position: SinePositionalEmbedding
         self.ar_predict_layer: nn.Linear
         self.h: TransformerDecoderABC
-        self.sampler: Sampler
 
-        self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
+        self._register_load_state_dict_pre_hook(self.load_hook)
 
     def load_hook(self, state_dict, prefix, *args):
         model_keys = [key for key in state_dict if key.startswith("model.")]
@@ -460,36 +484,38 @@ class T2SDecoderABC(ABC, nn.Module):
             new_key = key[len("model.") :]
             state_dict[new_key] = state_dict.pop(key)
 
-    def empty_cache(self):
-        self.sampler.empty_cache()
-        for layer in self.h.layers:
-            layer.attention.kv_cache.empty()
-        self.h.input_pos.zero_()
-        self.h.xy_pos.zero_()
-        self.h.xy_dec.zero_()
-        self.__CUDAGraph = None
+    def init_cache(self, kvclass: KVCacheABC, bsz: int = 0) -> MutableSequence[KVCacheABC]:
+        bsz = bsz or self.h.max_batch_size
+        assert bsz < self.h.max_batch_size
+        seq_lens = self.h.max_seq_length
+        device = self.bert_proj.bias.device
+        dtype = self.bert_proj.bias.dtype
+        return nn.ModuleList(
+            [kvclass(bsz, seq_lens, self.n_head, self.head_dim) for _ in range(self.n_layer)],
+        ).to(device, dtype)  # type: ignore
 
     @abstractmethod
-    def embed(
-        self, x: List[torch.LongTensor], y: torch.LongTensor, bert_features: List[torch.LongTensor]
-    ) -> Tensor: ...
+    def embed(self, x: List[torch.Tensor], y: torch.Tensor, bert_features: List[Tensor]) -> Tensor: ...
 
-    @abstractmethod
-    def forward(
-        self,
-        x: List[torch.LongTensor],
-        x_lens: torch.Tensor,
-        prompts: torch.LongTensor,
-        bert_feature: List[torch.LongTensor],
-        top_k: int,
-        top_p: int,
-        early_stop_num: int,
-        temperature: float,
-        repetition_penalty: float,
-        **kwargs,
-    ) -> List[Tensor]: ...
+    # @abstractmethod
+    # def forward(
+    #     self,
+    #     x: List[torch.LongTensor],
+    #     x_lens: torch.Tensor,
+    #     prompts: torch.LongTensor,
+    #     bert_feature: List[torch.LongTensor],
+    #     top_k: int,
+    #     top_p: int,
+    #     early_stop_num: int,
+    #     temperature: float,
+    #     repetition_penalty: float,
+    #     use_cuda_graph: bool,
+    #     debug: bool,
+    #     *args,
+    #     **kwds,
+    # ) -> List[Tensor]: ...
 
-    def compile(self, *args, **kwargs):
+    def compile(self, *args, **kwds):
         torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
         torch._inductor.config.coordinate_descent_tuning = True
         torch._inductor.config.triton.unique_kernel_names = True
@@ -505,18 +531,84 @@ class T2SDecoderABC(ABC, nn.Module):
             # mode="max-autotune",
         )
 
-    def capture(self, input_pos: Tensor, x: Tensor, *args, **kwds):
+    def capture(self, input_pos: Tensor, x: Tensor, x_dec: Tensor, *args, **kwds) -> CUDAGraph:
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
 
-        self.h.xy_pos.copy_(x)
+        graph = torch.cuda.CUDAGraph()
 
         with torch.cuda.stream(s):  # type: ignore
             for _ in range(5):
-                self.h.forward(input_pos, self.h.xy_pos, *args, **kwds)
+                self.h.forward(input_pos, x, *args, **kwds)
         torch.cuda.current_stream().wait_stream(s)
 
-        self.__CUDAGraph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.__CUDAGraph):
-            self.h.xy_dec = self.h.forward(input_pos, self.h.xy_pos, *args, **kwds)
+        with torch.cuda.graph(graph):
+            x_dec.copy_(self.h.forward(input_pos, x, *args, **kwds))
         torch.cuda.synchronize()
+
+        return graph
+
+
+class TorchProfiler:
+    def __init__(self, debug: bool, log_dir: str = "./profiler") -> None:
+        self.debug = debug
+        self.log_dir = log_dir
+        self.__profiler: torch.profiler.profile
+
+        if self.debug and not os.path.exists(self.log_dir):
+            os.makedirs(self.log_dir)
+
+        self.tensorboard_handler = tensorboard_trace_handler(self.log_dir)
+
+    def profiler_callback(self, prof: torch.profiler.profile):
+        print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
+        print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=30))
+        self.tensorboard_handler(prof)
+
+    @staticmethod
+    def three_step_schedule(step: int) -> ProfilerAction:
+        if step == 0:
+            return ProfilerAction.NONE
+        elif step == 1:
+            return ProfilerAction.RECORD
+        elif step == 2:
+            return ProfilerAction.RECORD_AND_SAVE
+        else:
+            return ProfilerAction.NONE
+
+    def start(self):
+        if not self.debug:
+            return
+        assert self.__profiler is not None
+        self.__profiler.step()
+
+    def end(self):
+        if not self.debug:
+            return
+        assert self.__profiler is not None
+        self.__profiler.step()
+
+    def profiler(self):
+        if self.debug:
+            activities_list = [torch.profiler.ProfilerActivity.CPU]
+            if torch.cuda.is_available():
+                activities_list.append(torch.profiler.ProfilerActivity.CUDA)
+
+            self.__profiler = torch.profiler.profile(
+                activities=activities_list,
+                record_shapes=True,
+                with_stack=True,
+                with_modules=True,
+                profile_memory=True,
+                schedule=self.three_step_schedule,
+                on_trace_ready=self.profiler_callback,
+            )
+            return self.__profiler
+        else:
+            return nullcontext()
+
+    def record(self, func_name: str):
+        if self.debug:
+            return torch.profiler.record_function(func_name)
+        else:
+            return nullcontext()

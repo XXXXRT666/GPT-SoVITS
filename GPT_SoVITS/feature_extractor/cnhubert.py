@@ -24,7 +24,7 @@ cnhubert_base_path = None
 
 
 class CNHubert(nn.Module):
-    def __init__(self, base_path: str = None):
+    def __init__(self, base_path: os.PathLike):
         super().__init__()
         if base_path is None:
             base_path = cnhubert_base_path
