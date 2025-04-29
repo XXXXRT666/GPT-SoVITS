@@ -1,3 +1,5 @@
+import contextlib
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,46 +10,44 @@ from GPT_SoVITS.module.dit import DiT
 from GPT_SoVITS.module.models import Encoder, ResidualVectorQuantizer, TextEncoder
 from GPT_SoVITS.module.modules import MelStyleEncoder
 
+Tensor = torch.Tensor
+
 
 class CFM(nn.Module):
-    def __init__(self, in_channels: int, dit: nn.Module):
+    def __init__(self, in_channels: int, dit: DiT):
         super().__init__()
         self.sigma_min = 1e-6
 
-        self.estimator = dit
+        self.estimator: DiT = dit
 
         self.in_channels = in_channels
 
     @torch.no_grad()
-    def inference(self, mu, x_lens, prompt, n_timesteps, temperature=1.0, inference_cfg_rate=0):
+    def inference(self, mu: Tensor, x_lens: Tensor, prompt: Tensor, n_timesteps: int, temperature=1.0):
         """Forward diffusion"""
         B, T = mu.size(0), mu.size(1)
-        x = torch.randn([B, self.in_channels, T], device=mu.device, dtype=mu.dtype) * temperature
-        prompt_len = prompt.size(-1)
-        prompt_x = torch.zeros_like(x, dtype=mu.dtype)
-        prompt_x[..., :prompt_len] = prompt[..., :prompt_len]
-        x[..., :prompt_len] = 0
+        prompt = prompt.transpose(1, 2)
         mu = mu.transpose(2, 1)
+        prompt_len = prompt.size(1)
+
+        x = torch.randn([B, T, self.in_channels], device=mu.device, dtype=mu.dtype) * temperature
+        prompt_x = torch.zeros_like(x, dtype=mu.dtype)
+        prompt_x[:, :prompt_len] = prompt[:, :prompt_len]
+        x[:, :prompt_len] = 0
+
         t = 0
         d = 1 / n_timesteps
-        for j in range(n_timesteps):
+        for _ in range(n_timesteps):
             t_tensor = torch.ones(x.shape[0], device=x.device, dtype=mu.dtype) * t
             d_tensor = torch.ones(x.shape[0], device=x.device, dtype=mu.dtype) * d
-            v_pred = self.estimator.forward(
-                x, prompt_x, x_lens, t_tensor, d_tensor, mu, use_grad_ckpt=False, drop_audio_cond=False, drop_text=False
-            ).transpose(2, 1)
-            if inference_cfg_rate > 1e-5:
-                neg = self.estimator(
-                    x, prompt_x, x_lens, t_tensor, d_tensor, mu, use_grad_ckpt=False, drop_audio_cond=True, drop_text=True
-                ).transpose(2, 1)
-                v_pred = v_pred + (v_pred - neg) * inference_cfg_rate
+            v_pred = self.estimator.forward(x, prompt_x, x_lens, t_tensor, d_tensor, mu)
             x = x + d * v_pred
             t = t + d
-            x[:, :, :prompt_len] = 0
+            x[:, :prompt_len] = 0
         return x
 
 
-class SynthesizerTrnV3(nn.Module):
+class CFMSynthesizer(nn.Module):
     """
     Synthesizer for Training
     """
@@ -99,7 +99,9 @@ class SynthesizerTrnV3(nn.Module):
 
         self.model_dim = 512
         self.use_sdp = use_sdp
-        self.enc_p = TextEncoder(inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
+        self.enc_p = TextEncoder(
+            inter_channels, hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout
+        )
         self.ref_enc = MelStyleEncoder(704, style_vector_dim=gin_channels)
 
         ssl_dim = 768
@@ -130,7 +132,9 @@ class SynthesizerTrnV3(nn.Module):
             ),
         )  # text_dim is condition feature dim
 
-    def forward(self, ssl, y, mel, ssl_lengths, y_lengths, text, text_lengths, mel_lengths, use_grad_ckpt):  # ssl_lengths no need now
+    def forward(
+        self, ssl, y, mel, ssl_lengths, y_lengths, text, text_lengths, mel_lengths, use_grad_ckpt
+    ):  # ssl_lengths no need now
         with autocast("cuda", enabled=False):
             y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, y.size(2)), 1).to(y.dtype)
             ge = self.ref_enc(y[:, :704] * y_mask, y_mask)
@@ -146,7 +150,9 @@ class SynthesizerTrnV3(nn.Module):
                 x, m_p, logs_p, y_mask = self.enc_p(quantized, y_lengths, text, text_lengths, ge)
         fea = self.bridge(x)
         fea = F.interpolate(fea, scale_factor=1.875, mode="nearest")  ##BCT
-        fea, y_mask_ = self.wns1(fea, mel_lengths, ge)  ##If the 1-minute fine-tuning works fine, no need to manually adjust the learning rate.
+        fea, y_mask_ = self.wns1(
+            fea, mel_lengths, ge
+        )  ##If the 1-minute fine-tuning works fine, no need to manually adjust the learning rate.
         B = ssl.shape[0]
         prompt_len_max = mel_lengths * 2 / 3
         prompt_len = (torch.rand([B], device=fea.device) * prompt_len_max).floor().to(dtype=torch.long)

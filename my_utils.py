@@ -1,24 +1,16 @@
 import os
 import traceback
-<<<<<<< HEAD
 
-=======
->>>>>>> upstream/main
 import ffmpeg
 import gradio as gr
 import numpy as np
 import pandas as pd
-<<<<<<< HEAD
 import torch
 
 from tools.i18n.i18n import I18nAuto
 
 i18n = I18nAuto(language=os.environ.get("language", "Auto"))
 Tensor = torch.Tensor
-=======
-
-i18n = I18nAuto(language=os.environ.get("language", "Auto"))
->>>>>>> upstream/main
 
 
 def load_audio(file, sr):
@@ -45,13 +37,9 @@ def clean_path(path_str: str):
     if path_str.endswith(("\\", "/")):
         return clean_path(path_str[0:-1])
     path_str = path_str.replace("/", os.sep).replace("\\", os.sep)
-<<<<<<< HEAD
-    return path_str.strip(" '\n\"\u202a")  # path_str.strip(" ").strip('\'').strip("\n").strip('"').strip(" ").strip("\u202a")
-=======
     return path_str.strip(
         " '\n\"\u202a"
     )  # path_str.strip(" ").strip('\'').strip("\n").strip('"').strip(" ").strip("\u202a")
->>>>>>> upstream/main
 
 
 def check_for_existance(file_list: list = None, is_train=False, is_dataset_processing=False):

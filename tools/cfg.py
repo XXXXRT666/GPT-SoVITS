@@ -18,13 +18,16 @@ PRETRAINED_BASE = Path("GPT_SoVITS/pretrained_models")
 CNHUBERT_DEFAULT = PRETRAINED_BASE / "chinese-hubert-base"
 BERT_DEFAULT = PRETRAINED_BASE / "chinese-roberta-wwm-ext-large"
 BIGVGAN_DEFAULT = PRETRAINED_BASE / "models--nvidia--bigvgan_v2_24khz_100band_256x"
+HIFIGAN_DEFAULT = PRETRAINED_BASE / "gsv-v4-pretrained/vocoder.pth"
 
 PRETRAINED_T2S_V1 = PRETRAINED_BASE / "s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt"
 PRETRAINED_T2S_V2 = PRETRAINED_BASE / "gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt"
 PRETRAINED_T2S_V3 = PRETRAINED_BASE / "s1v3.ckpt"
+PRETRAINED_T2S_V4 = PRETRAINED_T2S_V3
 PRETRAINED_SOVITS_V1 = PRETRAINED_BASE / "s2G488k.pth"
 PRETRAINED_SOVITS_V2 = PRETRAINED_BASE / "gsv-v2final-pretrained/s2G2333k.pth"
 PRETRAINED_SOVITS_V3 = PRETRAINED_BASE / "s2Gv3.pth"
+PRETRAINED_SOVITS_V4 = PRETRAINED_BASE / "gsv-v4-pretrained/s2Gv4.pth"
 
 V1_LANGUAGES = [
     "all_zh",  # All Chinese
@@ -194,7 +197,7 @@ class Prompt(BaseModel):
     )
 
     # Exclude
-    version: Literal["v1", "v2", "v3"] = Field("v3", exclude=True)
+    version: Literal["v1", "v2", "v3", "v4"] = Field("v4", exclude=True)
 
     def is_empty(self) -> bool:
         return not self.ref_audio_path
@@ -217,32 +220,31 @@ class Prompt(BaseModel):
         return vals
 
 
-Prompt_p = partial(Prompt, version="v3")
+Prompt_p = partial(Prompt, version="v4")
 
 
 class Speaker(BaseModel):
-    t2s_path: Path = PRETRAINED_T2S_V3
-    sovits_path: Path = PRETRAINED_SOVITS_V3
-    version: Literal["v1", "v2", "v3"] = "v3"
+    t2s_path: Path = PRETRAINED_T2S_V4
+    sovits_path: Path = PRETRAINED_SOVITS_V4
+    version: Literal["v1", "v2", "v3", "v4"] = "v4"
     is_lora: bool = True
     prompt: Prompt = Field(default_factory=Prompt_p)
 
     cnhubert: Path = Field(default=CNHUBERT_DEFAULT, exclude=True)
     bert: Path = Field(default=BERT_DEFAULT, exclude=True)
     bigvgan: Path = Field(default=BIGVGAN_DEFAULT, exclude=True)
+    hifigan: Path = Field(default=HIFIGAN_DEFAULT, exclude=True)
 
     languages: list = Field(default_factory=list, exclude=True)
 
     @model_validator(mode="before")
     @classmethod
     def check_lang(cls, vals):
-        version = vals.version
+        version = str(vals.version)
         match version:
             case "v1":
                 vals.languages = V1_LANGUAGES
-            case "v2":
-                vals.languages = V2_LANGUAGES
-            case "v3":
+            case "v2", "v3", "v4":
                 vals.languages = V2_LANGUAGES
 
         prompt_lang = vals.prompt.prompt_lang
@@ -250,9 +252,9 @@ class Speaker(BaseModel):
             assert prompt_lang in vals.languages, ValueError("Invalid prompt language")
 
         vals.prompt.verison = version
-        if version == "v3" and vals.prompt.aux_ref_audio_paths:
+        if version in {"v3", "v4"} and vals.prompt.aux_ref_audio_paths:
             vals.prompt.aux_ref_audio_paths = []
-            warnings.warn("Auxiliary Ref Audio Not Supported in V3", UserWarning)
+            warnings.warn(f"Auxiliary Ref Audio Not Supported in {version.capitalize()}", UserWarning)
 
         if not os.path.exists(vals.t2s_path):
             warnings.warn("File not found, falling back to PRETRAINED_T2S.", UserWarning)
@@ -263,6 +265,8 @@ class Speaker(BaseModel):
                     vals.t2s_path = PRETRAINED_T2S_V2
                 case "v3":
                     vals.t2s_path = PRETRAINED_T2S_V3
+                case "v4":
+                    vals.t2s_path = PRETRAINED_T2S_V4
 
         if not os.path.exists(vals.sovits_path):
             warnings.warn("File not found, falling back to PRETRAINED_SoVITS.", UserWarning)
@@ -273,6 +277,8 @@ class Speaker(BaseModel):
                     vals.sovits_path = PRETRAINED_SOVITS_V2
                 case "v3":
                     vals.sovits_path = PRETRAINED_SOVITS_V3
+                case "v4":
+                    vals.sovits_path = PRETRAINED_SOVITS_V4
 
         return vals
 
@@ -281,9 +287,7 @@ class Speaker(BaseModel):
         match version:
             case "v1":
                 self.languages = V1_LANGUAGES
-            case "v2":
-                self.languages = V2_LANGUAGES
-            case "v3":
+            case "v2", "v3", "v4":
                 self.languages = V2_LANGUAGES
 
 

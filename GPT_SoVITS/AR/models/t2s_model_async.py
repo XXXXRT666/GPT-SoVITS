@@ -47,7 +47,7 @@ class DQCache(Generic[K, V]):
 
 @dataclass
 class T2SResult:
-    result: List[Tensor]
+    result: List[Tensor] | None = None
     status: Literal["Success", "Error", "Cancelled"] = "Success"
     exception: Optional[Exception] = None
     traceback: Optional[str] = None
@@ -239,11 +239,11 @@ class AsyncT2SEngine:
                 async with self.lock:
                     self.futures[request.request_id] = future
                 result = future.result()
-                t2s_result = T2SResult(result, "Success")
+                t2s_result = T2SResult(result=result, status="Success")
         except asyncio.CancelledError:
-            t2s_result = T2SResult([], "Cancelled")
+            t2s_result = T2SResult(status="Cancelled")
         except Exception as e:
-            t2s_result = T2SResult([], "Error", exception=e, traceback=traceback.format_exc())
+            t2s_result = T2SResult(status="Error", exception=e, traceback=traceback.format_exc())
         yield t2s_result
 
     async def cancel(self, request_id: str):
