@@ -245,7 +245,7 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
     print(sovits_path,version, model_version, if_lora_v3)
     is_exist=is_exist_s2gv3 if model_version=="v3"else is_exist_s2gv4
     if if_lora_v3 == True and is_exist == False:
-        info = "GPT_SoVITS/pretrained_models/s2Gv3.pth" + i18n("SoVITS V3 底模缺失，无法加载相应 LoRA 权重")
+        info = "GPT_SoVITS/pretrained_models/s2Gv3.pth" + i18n("SoVITS %s 底模缺失，无法加载相应 LoRA 权重"%model_version)
         gr.Warning(info)
         raise FileExistsError(info)
     dict_language = dict_language_v1 if version == "v1" else dict_language_v2
@@ -304,6 +304,7 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
         )
         model_version = version
     else:
+        hps.model.version=model_version
         vq_model = SynthesizerTrnV3(
             hps.data.filter_length // 2 + 1,
             hps.train.segment_size // hps.data.hop_length,
@@ -1276,5 +1277,5 @@ if __name__ == "__main__":
         inbrowser=True,
         share=is_share,
         server_port=infer_ttswebui,
-        quiet=True,
+        # quiet=True,
     )

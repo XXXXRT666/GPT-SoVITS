@@ -243,6 +243,16 @@ echo "Installing Python dependencies from requirements.txt..."
 
 pip install -r extra-req.txt --no-deps
 
-pip install -r requirements.txt -extra-irl https://flashinfer.ai/whl/cu124/torch2.5/flashinfer-python/
+pip install -r requirements.txt
+
+python -c "import nltk; nltk.download(['averaged_perceptron_tagger','averaged_perceptron_tagger_eng','cmudict'])"
+
+if [ "$USE_ROCM" = true ] && [ "$IS_WSL" = true ]; then
+    echo "Update to WSL compatible runtime lib..."
+    location=$(pip show torch | grep Location | awk -F ": " '{print $2}')
+    cd "${location}"/torch/lib/ || exit
+    rm libhsa-runtime64.so*
+    cp /opt/rocm/lib/libhsa-runtime64.so.1.2 libhsa-runtime64.so
+fi
 
 echo "Installation completed successfully!"
