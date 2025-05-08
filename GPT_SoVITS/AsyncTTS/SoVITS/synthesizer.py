@@ -5,8 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.amp.autocast_mode import autocast
 
+from GPT_SoVITS.AsyncTTS.SoVITS.CFM.dit import DiT
 from GPT_SoVITS.module import commons
-from GPT_SoVITS.module.dit import DiT
 from GPT_SoVITS.module.models import Encoder, ResidualVectorQuantizer, TextEncoder
 from GPT_SoVITS.module.modules import MelStyleEncoder
 
@@ -35,7 +35,7 @@ class CFM(nn.Module):
         prompt_x[:, :prompt_len] = prompt[:, :prompt_len]
         x[:, :prompt_len] = 0
 
-        t = 0
+        t = 0.0
         d = 1 / n_timesteps
         for _ in range(n_timesteps):
             t_tensor = torch.ones(x.shape[0], device=x.device, dtype=mu.dtype) * t

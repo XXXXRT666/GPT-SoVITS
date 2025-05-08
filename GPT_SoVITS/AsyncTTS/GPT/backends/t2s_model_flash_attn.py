@@ -1,49 +1,28 @@
-import contextlib
 import time
-from typing import List, Optional
+from typing import List
 
 import flash_attn  # type: ignore
-import flashinfer  # type: ignore
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from GPT_SoVITS.AR.models.t2s_model_abc import (
-    AttentionABC,
-    FeedForward,
-    T2SDecoderABC,
-    TransformerBlockABC,
-    TransformerDecoderABC,
-)
-from GPT_SoVITS.AR.models.t2s_model_abc import KVCacheNHD as KVCache
-
-# from GPT_SoVITS.AR.models.utils import sample
 from GPT_SoVITS.AR.modules.embedding import (
     SinePositionalEmbeddingNested as SinePositionalEmbedding,
 )
 from GPT_SoVITS.AR.modules.embedding import TokenEmbedding
+from GPT_SoVITS.AsyncTTS.GPT.backends.t2s_model_abc import (
+    AttentionABC,
+    FeedForward,
+    Sampler,
+    T2SDecoderABC,
+    TorchProfiler,
+    TransformerBlockABC,
+    TransformerDecoderABC,
+)
+from GPT_SoVITS.AsyncTTS.GPT.backends.t2s_model_abc import KVCacheNHD as KVCache
 
 Tensor = torch.Tensor
 dtype = torch.dtype
-
-
-def sample(
-    logits,
-    previous_tokens: Optional[torch.Tensor] = None,
-    temperature: float = 1.0,
-    top_k: Optional[int] = None,
-    top_p: Optional[int] = None,
-    repetition_penalty: float = 1.0,
-):
-    # if previous_tokens is not None and repetition_penalty != 1.0:
-    #     previous_tokens = previous_tokens.long()
-    #     score = torch.gather(logits, dim=1, index=previous_tokens)
-    #     score = torch.where(score < 0, score * repetition_penalty, score / repetition_penalty)
-    #     logits.scatter_(dim=1, index=previous_tokens, src=score)
-
-    logits = logits / max(temperature, 1e-5)
-
-    return (flashinfer.sampling.top_k_top_p_sampling_from_logits(logits, top_k, top_p),)
 
 
 class Attention(AttentionABC):
@@ -58,9 +37,7 @@ class Attention(AttentionABC):
         self.in_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=True)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
-        self.dropout = nn.Dropout(0.1)
-
-    def forward(self, x: Tensor, input_pos: Tensor) -> Tensor:
+    def forward(self, x: Tensor, input_pos: Tensor, kv_cache: KVCache) -> Tensor:
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj.forward(x).chunk(3, dim=-1)
@@ -69,9 +46,11 @@ class Attention(AttentionABC):
         k = k.view(bsz, seqlen, self.n_head, self.head_dim)
         v = v.view(bsz, seqlen, self.n_head, self.head_dim)
 
-        k, v = self.kv_cache.update(input_pos, k, v)
+        # k, v = self.kv_cache.update(input_pos, k, v)
 
-        attn: Tensor = flash_attn.flash_attn_with_kvcache(q, k, v, cache_seqlens=input_pos)
+        attn: Tensor = flash_attn.flash_attn_with_kvcache(
+            q, kv_cache.k_cache, kv_cache.v_cache, k, v, cache_seqlens=input_pos - 1
+        )
 
         attn = self.dropout.forward(attn)
 
@@ -90,7 +69,6 @@ class TransformerBlock(TransformerBlockABC):
         self.feed_forward = FeedForward(hidden_dim, ffn_dim)
         self.attention_norm = nn.LayerNorm([self.hidden_dim])
         self.ffn_norm = nn.LayerNorm([self.hidden_dim])
-        self.dropout = nn.Dropout(0.1)
 
 
 class TransformerDecoder(TransformerDecoderABC):
@@ -159,6 +137,7 @@ class T2SDecoder(T2SDecoderABC):
         ffn_dim = hidden_dim * 4
         self.norm_first = norm_first
 
+        self.n_layer = n_layer
         self.hidden_dim = hidden_dim
         self.n_head = n_head
         assert hidden_dim % n_head == 0
@@ -194,8 +173,6 @@ class T2SDecoder(T2SDecoderABC):
         )
         self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h = TransformerDecoder(hidden_dim, n_layer, n_head, ffn_dim, vocab_size, max_seq_length, max_batch_size)
-
-        self.__CUDAGraph: Optional[torch.cuda.CUDAGraph] = None
 
         # self._register_load_state_dict_pre_hook(self.load_hook)
 
@@ -234,9 +211,11 @@ class T2SDecoder(T2SDecoderABC):
         temperature: float = 1.0,
         repetition_penalty: float = 1.35,
         use_cuda_graph=False,
+        debug=False,
         **kwargs,
     ):
-        self.empty_cache()
+        kv_cache = self.init_cache(KVCache)  # type: ignore
+        sampler = Sampler(self.max_batch_size, self.vocab_size)
 
         bsz = len(x)
         y = prompts
@@ -260,54 +239,56 @@ class T2SDecoder(T2SDecoderABC):
         y_results: List[Tensor] = [None] * bsz  # type: ignore
         t1 = 0.0
 
-        self.h.input_pos.add_(prefill_len)
-        input_pos = self.h.input_pos
+        input_pos = self.h.input_pos.clone()
+        input_pos.add_(prefill_len)
 
-        # with torch.profiler.profile(
-        #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA], record_shapes=True, with_stack=True
-        # ) as prof:
-        with contextlib.nullcontext():
+        graph: torch.cuda.CUDAGraph = None  # type: ignore
+        xy_pos_ = self.h.xy_pos.clone()
+        xy_dec_ = self.h.xy_dec.clone()
+
+        torch_profiler = TorchProfiler(debug)
+
+        with torch_profiler.profiler():
             for idx in tqdm(range(1500)):
                 if idx == 0:
-                    xy_dec = self.h.prefill(xy_pos, xy_attn_mask_nested)
+                    xy_dec = self.h.prefill(xy_pos, xy_attn_mask_nested, kv_cache)
                     xy_dec = torch.stack([t[[-1]] for t in xy_dec.unbind()])
-                    input_pos = input_pos.to(torch.int32)
                 else:
-                    if torch.cuda.is_available() and use_cuda_graph and self.__CUDAGraph is None:
-                        self.capture(input_pos, xy_pos)
+                    torch_profiler.start()
+                    if torch.cuda.is_available() and use_cuda_graph and graph is None:
+                        xy_pos_.copy_(xy_pos)
+                        graph = self.capture(input_pos, xy_pos_, xy_dec_)
 
-                    with torch.profiler.record_function("AR"):
-                        # with contextlib.nullcontext():
-                        if self.__CUDAGraph is not None:
-                            self.h.xy_pos.copy_(xy_pos)
-                            self.__CUDAGraph.replay()
-                            xy_dec = self.h.xy_dec.clone()
+                    with torch_profiler.record("AR"):
+                        if graph is not None:
+                            xy_pos_.copy_(xy_pos)
+                            graph.replay()
+                            xy_dec = xy_dec_.clone()
                         else:
-                            xy_dec = self.h.forward(input_pos, xy_pos)
+                            xy_dec = self.h.forward(input_pos, xy_pos, kv_cache)
 
-                with torch.profiler.record_function("Logits"):
-                    # with contextlib.nullcontext():
+                with torch_profiler.record("Logits"):
                     logits = self.ar_predict_layer(xy_dec[:, -1])
                     input_pos.add_(1)
 
                 if idx == 0:
                     logits = logits[:, :-1]
 
-                with torch.profiler.record_function("Sampling"):
-                    # with contextlib.nullcontext():
-                    samples = sample(
-                        logits,
-                        y,
+                with torch_profiler.record("Sampling"):
+                    samples = sampler.sample(
+                        logits=logits,
+                        previous_tokens=y,
                         top_k=top_k,
                         top_p=top_p,
                         repetition_penalty=repetition_penalty,
                         temperature=temperature,
-                    )[0]
+                        use_cuda_graph=use_cuda_graph,
+                        idx=idx,
+                    )
 
                     y = torch.concat([y, samples], dim=1)
 
-                with torch.profiler.record_function("EOS"):
-                    # with contextlib.nullcontext():
+                with torch_profiler.record("EOS"):
                     tokens = torch.argmax(logits, dim=-1)
 
                     EOS_mask = (samples[:, 0] == self.EOS) | (tokens == self.EOS)
@@ -335,22 +316,14 @@ class T2SDecoder(T2SDecoderABC):
                         tqdm.write(f"{(idx - 1) / (time.perf_counter() - t1):.2f}")
                     break
 
-                with torch.profiler.record_function("Next xy_pos"):
-                    # with contextlib.nullcontext():
-
+                with torch_profiler.record("Next xy_pos"):
                     y_emb = self.ar_audio_embedding(y[:, -1:])
                     xy_pos = self.ar_audio_position.forward(input_pos - x_lens, y_emb)
 
                 if idx == 2:
                     t1 = time.perf_counter()
 
-        #         if idx == 50:
-        #             break
-
-        # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
-
-        # print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=30))
-
-        # exit()
+                if idx == 51:
+                    torch_profiler.end()
 
         return y_results

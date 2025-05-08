@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from x_transformers.x_transformers import RotaryEmbedding
 
-from GPT_SoVITS.module.dit_modules import (
+from GPT_SoVITS.AsyncTTS.SoVITS.CFM.dit_modules import (
     AdaLayerNormZero,
     AdaLayerNormZero_Final,
     Attention,

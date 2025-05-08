@@ -24,21 +24,7 @@ def register_method(name):
     return decorator
 
 
-splits = {
-    "，",
-    "。",
-    "？",
-    "！",
-    ",",
-    ".",
-    "?",
-    "!",
-    "~",
-    ":",
-    "：",
-    "—",
-    "…",
-}
+splits = {"，", "。", "？", "！", ",", ".", "?", "!", "~", ":", "：", "—", "…"}
 
 
 def split_big_text(text, max_len=510):

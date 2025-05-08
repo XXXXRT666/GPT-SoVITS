@@ -1,9 +1,9 @@
 import asyncio
 import os
-import threading
 import time
 import traceback
 import uuid
+from asyncio import AbstractEventLoop, Semaphore
 from collections import deque
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -13,19 +13,16 @@ from weakref import WeakValueDictionary
 import torch
 from tqdm import tqdm
 
-from GPT_SoVITS.AR.models.t2s_model_abc import KVCacheNHD as KVCache
-from GPT_SoVITS.AR.models.t2s_model_abc import Sampler, T2SDecoderABC, TorchProfiler
+from GPT_SoVITS.AsyncTTS.GPT.backends.t2s_model_abc import KVCacheNHD as KVCache
+from GPT_SoVITS.AsyncTTS.GPT.backends.t2s_model_abc import Sampler, T2SDecoderABC, TorchProfiler
+from GPT_SoVITS.AsyncTTS.utils import AsyncRLock
 
 Tensor = torch.Tensor
+
 K = TypeVar("K")
 V = TypeVar("V")
 
-try:
-    import uvloop
-except ImportError:
-    pass
-else:
-    asyncio.set_event_loop(uvloop.new_event_loop())
+torch.set_grad_enabled(False)
 
 
 class DQCache(Generic[K, V]):
@@ -75,8 +72,8 @@ class T2SSession:
         self.decoder = decoder
         self.request = request
 
-        bsz = len(self.x)
-        y_len = self.y.size(-1)
+        bsz = len(request.x)
+        y_len = request.prompts.size(-1)
         self.bsz = bsz
         self.y_len = y_len
 
@@ -119,20 +116,29 @@ class T2SSession:
 
 
 class AsyncT2SEngine:
-    def __init__(self, decoder_model: T2SDecoderABC):
-        self.decoder_model = decoder_model
-        self.background_loop = asyncio.new_event_loop()
+    def __init__(
+        self,
+        decoder_model: T2SDecoderABC,
+        background_loop: AbstractEventLoop,
+        lock: AsyncRLock,
+        semaphore: Semaphore,
+        device: torch.device = torch.device("cpu"),
+        dtype: torch.dtype = torch.float32,
+    ) -> None:
+        assert device.type in {"cpu", "cuda", "mps"}
+        assert dtype in {torch.float16, torch.bfloat16, torch.float32}
+        self.device = device
+        self.dtype = dtype
+
+        self.decoder_path: os.PathLike
+        self.decoder_model: T2SDecoderABC = decoder_model
+
+        self.background_loop = background_loop
+        self.lock = lock
+        self.semaphore = semaphore
+
         self.sessions: DQCache[str, T2SSession] = DQCache()
         self.futures: WeakValueDictionary[str, Future] = WeakValueDictionary()
-        self.lock = asyncio.Lock()
-        self.semaphore = asyncio.Semaphore(20)
-
-        self.loop_thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        self.loop_thread.start()
-
-    def _run_event_loop(self):
-        asyncio.set_event_loop(self.background_loop)
-        self.background_loop.run_forever()
 
     async def _handle_request(self, request: T2SRequest):
         async with self.lock:
@@ -251,10 +257,6 @@ class AsyncT2SEngine:
             future = self.futures.pop(request_id, None)
         if future and not future.done():
             future.cancel()
-
-    @classmethod
-    def from_pretrained(cls, weights_path: os.PathLike, implement: str):
-        return cls(cls.load_decoder(weights_path, implement))
 
     @staticmethod
     def load_decoder(weights_path: os.PathLike, implement: str):

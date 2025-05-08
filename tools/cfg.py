@@ -202,7 +202,7 @@ class Prompt(BaseModel):
     def is_empty(self) -> bool:
         return not self.ref_audio_path
 
-    @model_validator(mode="before")
+    @model_validator(mode="after")
     @classmethod
     def check_all(cls, vals):
         if vals.ref_audio_path and not os.path.exists(vals.ref_audio_path):
@@ -227,17 +227,12 @@ class Speaker(BaseModel):
     t2s_path: Path = PRETRAINED_T2S_V4
     sovits_path: Path = PRETRAINED_SOVITS_V4
     version: Literal["v1", "v2", "v3", "v4"] = "v4"
-    is_lora: bool = True
     prompt: Prompt = Field(default_factory=Prompt_p)
 
-    cnhubert: Path = Field(default=CNHUBERT_DEFAULT, exclude=True)
-    bert: Path = Field(default=BERT_DEFAULT, exclude=True)
-    bigvgan: Path = Field(default=BIGVGAN_DEFAULT, exclude=True)
-    hifigan: Path = Field(default=HIFIGAN_DEFAULT, exclude=True)
-
     languages: list = Field(default_factory=list, exclude=True)
+    name: str = Field(default="", exclude=True)
 
-    @model_validator(mode="before")
+    @model_validator(mode="after")
     @classmethod
     def check_lang(cls, vals):
         version = str(vals.version)
@@ -251,7 +246,7 @@ class Speaker(BaseModel):
         if prompt_lang is not None:
             assert prompt_lang in vals.languages, ValueError("Invalid prompt language")
 
-        vals.prompt.verison = version
+        vals.prompt.version = version
         if version in {"v3", "v4"} and vals.prompt.aux_ref_audio_paths:
             vals.prompt.aux_ref_audio_paths = []
             warnings.warn(f"Auxiliary Ref Audio Not Supported in {version.capitalize()}", UserWarning)
@@ -293,10 +288,10 @@ class Speaker(BaseModel):
 
 class Speakers_Cfg(BaseModel):
     speakers_dict: Dict[str, Speaker] = {
-        "WebUI": Speaker(),
-        "API": Speaker(),
+        "WebUI": Speaker(name="WebUI"),
+        "API": Speaker(name="API"),
     }
-    file_path: str = Field(default="./tools/cfgs/speakers.json", exclude=True)
+    file_path: str = Field(default="tools/cfgs/speakers.json", exclude=True)
 
     def get_speaker(self, speaker_name: str):
         return self.speakers_dict.get(speaker_name, Speaker())
@@ -304,12 +299,12 @@ class Speakers_Cfg(BaseModel):
     def list_speaker(self):
         return self.speakers_dict.keys()
 
-    @model_validator(mode="before")
+    @model_validator(mode="after")
     @classmethod
     def check_all(cls, vals):
         default_dict = {
-            "WebUI": Speaker(),
-            "API": Speaker(),
+            "WebUI": Speaker(name="WebUI"),
+            "API": Speaker(name="API"),
         }
         vals.speakers_dict = {**default_dict, **vals.speakers_dict}
 
@@ -361,5 +356,5 @@ class Cfg(BaseModel):
 
 
 if __name__ == "__main__":
-    Cfg()
-    Speakers_Cfg()
+    Cfg.from_json("tools/cfgs/cfg.json")
+    Speakers_Cfg.from_json("tools/cfgs/speakers.json")
