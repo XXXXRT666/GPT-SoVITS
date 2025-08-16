@@ -101,30 +101,27 @@ RESP:
 
 """
 
-import os
-import sys
-import traceback
-from typing import Generator, Union
-
-now_dir = os.getcwd()
-sys.path.append(now_dir)
-sys.path.append("%s/GPT_SoVITS" % (now_dir))
-
 import argparse
-import subprocess
-import wave
+import os
 import signal
+import subprocess
+import sys
+import threading
+import traceback
+import wave
+from io import BytesIO
+from typing import Generator
+
 import numpy as np
 import soundfile as sf
-from fastapi import FastAPI, Response
-from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn
-from io import BytesIO
-from tools.i18n.i18n import I18nAuto
-from GPT_SoVITS.TTS_infer_pack.TTS import TTS, TTS_Config
-from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import get_method_names as get_cut_method_names
+from fastapi import FastAPI, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-import threading
+
+from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import get_method_names as get_cut_method_names
+from GPT_SoVITS.TTS_infer_pack.TTS import TTS, TTS_Config
+from tools.i18n.i18n import I18nAuto
 
 # print(sys.path)
 i18n = I18nAuto()
@@ -198,8 +195,6 @@ def pack_ogg(io_buffer: BytesIO, data: np.ndarray, rate: int):
     def handle_pack_ogg():
         with sf.SoundFile(io_buffer, mode="w", samplerate=rate, channels=1, format="ogg") as audio_file:
             audio_file.write(data)
-
-
 
     # See: https://docs.python.org/3/library/threading.html
     # The stack size of this thread is at least 32768
@@ -384,7 +379,7 @@ async def tts_handle(req: dict):
     check_res = check_params(req)
     if check_res is not None:
         return check_res
-    
+
     if streaming_mode == 0:
         streaming_mode = False
         return_fragment = False
@@ -403,7 +398,10 @@ async def tts_handle(req: dict):
         fixed_length_chunk = True
 
     else:
-        return JSONResponse(status_code=400, content={"message": f"the value of streaming_mode must be 0, 1, 2, 3(int) or true/false(bool)"})
+        return JSONResponse(
+            status_code=400,
+            content={"message": f"the value of streaming_mode must be 0, 1, 2, 3(int) or true/false(bool)"},
+        )
 
     req["streaming_mode"] = streaming_mode
     req["return_fragment"] = return_fragment
@@ -412,7 +410,6 @@ async def tts_handle(req: dict):
     print(f"{streaming_mode} {return_fragment} {fixed_length_chunk}")
 
     streaming_mode = streaming_mode or return_fragment
-
 
     try:
         tts_generator = tts_pipeline.run(req)
