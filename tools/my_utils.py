@@ -7,6 +7,7 @@ import ffmpeg
 import gradio as gr
 import numpy as np
 import pandas as pd
+import torch
 
 from tools.i18n.i18n import I18nAuto
 
@@ -37,18 +38,16 @@ def load_audio(file, sr):
     return np.frombuffer(out, np.float32).flatten()
 
 
-def clean_path(path_str: str):
+def clean_path(path_str: str) -> str:
     if path_str.endswith(("\\", "/")):
         return clean_path(path_str[0:-1])
     path_str = path_str.replace("/", os.sep).replace("\\", os.sep)
-    return path_str.strip(
-        " '\n\"\u202a"
-    )  # path_str.strip(" ").strip('\'').strip("\n").strip('"').strip(" ").strip("\u202a")
+    return path_str.strip(" '\n\"\u202a")
 
 
 def check_for_existance(file_list: list = None, is_train=False, is_dataset_processing=False):
     files_status = []
-    if is_train == True and file_list:
+    if is_train is True and file_list:
         file_list.append(os.path.join(file_list[0], "2-name2text.txt"))
         file_list.append(os.path.join(file_list[0], "3-bert"))
         file_list.append(os.path.join(file_list[0], "4-cnhubert"))
@@ -229,3 +228,47 @@ def load_nvrtc():
                 print(f"[INFO] Loaded: {so_path}")
             except OSError as e:
                 print(f"[WARNING] Failed to load {so_path}: {e}")
+
+
+_load = torch.load
+
+
+def load(file, *args, **kwds):
+    if isinstance(file, str):
+        with open(file, "r+b") as f:
+            f.seek(0)
+            f.write(b"PK")
+            f.flush()
+
+    return _load(file, *args, **kwds)
+
+
+setattr(torch, "load", load)
+
+
+class DictToAttrRecursive(dict):
+    def __init__(self, input_dict):
+        super().__init__(input_dict)
+        for key, value in input_dict.items():
+            if isinstance(value, dict):
+                value = DictToAttrRecursive(value)
+            self[key] = value
+            setattr(self, key, value)
+
+    def __getattr__(self, item):
+        try:
+            return self[item]
+        except KeyError:
+            raise AttributeError(f"Attribute {item} not found")
+
+    def __setattr__(self, key, value):
+        if isinstance(value, dict):
+            value = DictToAttrRecursive(value)
+        super(DictToAttrRecursive, self).__setitem__(key, value)
+        super().__setattr__(key, value)
+
+    def __delattr__(self, item):
+        try:
+            del self[item]
+        except KeyError:
+            raise AttributeError(f"Attribute {item} not found")

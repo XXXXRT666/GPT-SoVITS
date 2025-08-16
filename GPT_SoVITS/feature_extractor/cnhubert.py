@@ -1,5 +1,6 @@
-import torch
 import os
+
+import torch
 from transformers import logging as tf_logging
 
 tf_logging.set_verbosity_error()
@@ -8,13 +9,13 @@ import logging
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 
+import torch.nn as nn
 from transformers import (
-    Wav2Vec2FeatureExtractor,
     HubertModel,
+    Wav2Vec2FeatureExtractor,
 )
 
-import utils
-import torch.nn as nn
+import GPT_SoVITS.utils as utils
 
 cnhubert_base_path = None
 

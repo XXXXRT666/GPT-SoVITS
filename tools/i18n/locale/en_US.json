@@ -1,11 +1,11 @@
 {
     "(1)MDX-Net(onnx_dereverb):对于双通道混响是最好的选择，不能去除单通道混响；": "(1)MDX-Net(onnx_dereverb): Best choice for dual-channel reverberation, cannot remove single-channel reverberation;",
     "(234)DeEcho:去除延迟效果。Aggressive比Normal去除得更彻底，DeReverb额外去除混响，可去除单声道混响，但是对高频重的板式混响去不干净。": "(234)DeEcho: Removes delay effects. Aggressive mode removes more thoroughly than Normal mode. DeReverb additionally removes reverberation, can remove mono reverberation, but does not clean heavily high-frequency plate reverberation.",
-    "*实验/模型名": "*Experiment/model name",
-    "*文本标注文件": "*Text labelling file",
-    "*训练集音频文件目录": "*Audio dataset folder",
-    "*请上传并填写参考信息": "*Please upload and fill reference information",
-    "*请填写需要合成的目标文本和语种模式": "*Please fill in the target text and language mode for synthesis",
+    "实验/模型名": "Experiment/model name",
+    "文本标注文件": "Text labelling file",
+    "训练集音频文件目录": "Audio dataset folder",
+    "请上传并填写参考信息": "Please upload and fill reference information",
+    "请填写需要合成的目标文本和语种模式": "Please fill in the target text and language mode for synthesis",
     ".限制范围越小判别效果越好。": "Less Multilingual is better",
     "1-GPT-SoVITS-TTS": "1-GPT-SOVITS-TTS",
     "1、DeEcho-DeReverb模型的耗时是另外2个DeEcho模型的接近2倍；": "1. The DeEcho-DeReverb model's processing time is nearly twice that of the other two DeEcho models.",
@@ -222,5 +222,6 @@
     "预训练SoVITS-D模型路径": "Pretrained SoVITS-D Model Path",
     "预训练SoVITS-G模型路径": "Pretrained SoVITS-G Model Path",
     "预训练中文BERT模型路径": "Pretrained Chinese BERT Model Path",
-    "预训练模型路径": "Pretrained Model Path"
+    "预训练模型路径": "Pretrained Model Path",
+    "推理后端": "Inference Backend"
 }

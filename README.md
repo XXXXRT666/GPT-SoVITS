@@ -46,7 +46,7 @@ https://github.com/RVC-Boss/GPT-SoVITS/assets/129054828/05bee1fa-bdd8-4d85-9350-
 **RTF(inference speed) of GPT-SoVITS v2 ProPlus**:
 0.028 tested in 4060Ti, 0.014 tested in 4090 (1400words~=4min, inference time is 3.36s), 0.526 in M4 CPU. You can test our [huggingface demo](https://lj1995-gpt-sovits-proplus.hf.space/) (half H200) to experience high-speed inference .
 
-请不要尬黑GPT-SoVITS推理速度慢，谢谢！
+请不要尬黑 GPT-SoVITS 推理速度慢，谢谢！
 
 **User guide: [简体中文](https://www.yuque.com/baicaigongchang1145haoyuangong/ib3g1e) | [English](https://rentry.co/GPT-SoVITS-guide#/)**
 
@@ -248,13 +248,13 @@ if you want to switch to V1,then double-click`go-webui-v1.bat` or use `go-webui-
 #### Others
 
 ```bash
-python webui.py <language(optional)>
+PYTHONPATH=. python webui.py <language(optional)>
 ```
 
 if you want to switch to V1,then
 
 ```bash
-python webui.py v1 <language(optional)>
+PYTHONPATH=. python webui.py v1 <language(optional)>
 ```
 
 Or maunally switch version in WebUI
@@ -285,7 +285,7 @@ python GPT_SoVITS/inference_webui.py <language(optional)>
 OR
 
 ```bash
-python webui.py
+PYTHONPATH=. python webui.py
 ```
 
 then open the inference webui at `1-GPT-SoVITS-TTS/1C-inference`
@@ -332,7 +332,7 @@ Use v3 from v2 environment:
 
 3. Download v3 pretrained models (s1v3.ckpt, s2Gv3.pth and models--nvidia--bigvgan_v2_24khz_100band_256x folder) from [huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main) and put them into `GPT_SoVITS/pretrained_models`.
 
-   additional: for Audio Super Resolution model, you can read [how to download](./tools/AP_BWE_main/24kto48k/readme.txt)
+   additional: for Audio Super Resolution model, you can read [how to download](./tools/AP_BWE/24kto48k/readme.txt)
 
 ## V4 Release Notes
 

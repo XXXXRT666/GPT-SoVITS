@@ -21,20 +21,20 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import yaml
-from AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from BigVGAN.bigvgan import BigVGAN
 from feature_extractor.cnhubert import CNHubert
-from module.mel_processing import mel_spectrogram_torch, spectrogram_torch
-from module.models import SynthesizerTrn, SynthesizerTrnV3, Generator
 from peft import LoraConfig, get_peft_model
-from process_ckpt import get_sovits_version_from_path_fast, load_sovits_new
+from sv import SV
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 
+from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
+from GPT_SoVITS.module.mel_processing import mel_spectrogram_torch, spectrogram_torch
+from GPT_SoVITS.module.models import Generator, SynthesizerTrn, SynthesizerTrnV3
+from GPT_SoVITS.process_ckpt import get_sovits_version_from_path_fast, load_sovits_new
 from tools.audio_sr import AP_BWE
 from tools.i18n.i18n import I18nAuto, scan_language_list
 from TTS_infer_pack.text_segmentation_method import splits
 from TTS_infer_pack.TextPreprocessor import TextPreprocessor
-from sv import SV
 
 resample_transform_dict = {}
 
@@ -64,33 +64,32 @@ def denorm_spec(x):
     return (x + 1) / 2 * (spec_max - spec_min) + spec_min
 
 
-mel_fn = lambda x: mel_spectrogram_torch(
-    x,
-    **{
-        "n_fft": 1024,
-        "win_size": 1024,
-        "hop_size": 256,
-        "num_mels": 100,
-        "sampling_rate": 24000,
-        "fmin": 0,
-        "fmax": None,
-        "center": False,
-    },
-)
+def mel_fn(x):
+    return mel_spectrogram_torch(
+        y=x,
+        n_fft=1024,
+        num_mels=100,
+        sampling_rate=24000,
+        hop_size=256,
+        win_size=1024,
+        fmin=0,
+        fmax=None,
+        center=False,
+    )
 
-mel_fn_v4 = lambda x: mel_spectrogram_torch(
-    x,
-    **{
-        "n_fft": 1280,
-        "win_size": 1280,
-        "hop_size": 320,
-        "num_mels": 100,
-        "sampling_rate": 32000,
-        "fmin": 0,
-        "fmax": None,
-        "center": False,
-    },
-)
+
+def mel_fn_v4(x):
+    return mel_spectrogram_torch(
+        y=x,
+        n_fft=1280,
+        num_mels=100,
+        sampling_rate=32000,
+        hop_size=320,
+        win_size=1280,
+        fmin=0,
+        fmax=None,
+        center=False,
+    )
 
 
 def speed_change(input_audio: np.ndarray, speed: float, sr: int):
@@ -488,7 +487,7 @@ class TTS:
             self.init_sv_model()
         path_sovits = self.configs.default_configs[model_version]["vits_weights_path"]
 
-        if if_lora_v3 == True and os.path.exists(path_sovits) == False:
+        if if_lora_v3 is True and os.path.exists(path_sovits) is False:
             info = path_sovits + i18n("SoVITS %s 底模缺失，无法加载相应 LoRA 权重" % model_version)
             raise FileExistsError(info)
 
@@ -549,7 +548,7 @@ class TTS:
 
         self.is_v2pro = model_version in {"v2Pro", "v2ProPlus"}
 
-        if if_lora_v3 == False:
+        if if_lora_v3 is False:
             print(
                 f"Loading VITS weights from {weights_path}. {vits_model.load_state_dict(dict_s2['weight'], strict=False)}"
             )
@@ -579,8 +578,6 @@ class TTS:
             self.vits_model = self.vits_model.half()
 
         self.configs.save_configs()
-
-
 
     def init_t2s_weights(self, weights_path: str):
         print(f"Loading Text2Semantic weights from {weights_path}")
@@ -654,7 +651,7 @@ class TTS:
             self.vocoder_configs["overlapped_len"] = 12
 
         self.vocoder = self.vocoder.eval()
-        if self.configs.is_half == True:
+        if self.configs.is_half is True:
             self.vocoder = self.vocoder.half().to(self.configs.device)
         else:
             self.vocoder = self.vocoder.to(self.configs.device)
@@ -784,7 +781,7 @@ class TTS:
         )
         if self.configs.is_half:
             spec = spec.half()
-        if self.is_v2pro == True:
+        if self.is_v2pro is True:
             audio = resample(audio, self.configs.sampling_rate, 16000, self.configs.device)
             if self.configs.is_half:
                 audio = audio.half()

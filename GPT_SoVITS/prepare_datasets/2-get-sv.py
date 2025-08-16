@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-import sys
 import os
+import sys
 
 inp_text = os.environ.get("inp_text")
 inp_wav_dir = os.environ.get("inp_wav_dir")
@@ -18,16 +18,19 @@ import torch
 is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
 
 import traceback
+
 import torchaudio
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 sys.path.append(f"{now_dir}/GPT_SoVITS/eres2net")
-from tools.my_utils import clean_path
-from time import time as ttime
 import shutil
-from ERes2NetV2 import ERes2NetV2
+from time import time as ttime
+
 import kaldi as Kaldi
+from ERes2NetV2 import ERes2NetV2
+
+from tools.my_utils import clean_path
 
 
 def my_save(fea, path):  #####fix issue: torch.save doesn't support chinese path
@@ -63,7 +66,7 @@ class SV:
         embedding_model.eval()
         self.embedding_model = embedding_model
         self.res = torchaudio.transforms.Resample(32000, 16000).to(device)
-        if is_half == False:
+        if is_half is False:
             self.embedding_model = self.embedding_model.to(device)
         else:
             self.embedding_model = self.embedding_model.half().to(device)
@@ -72,7 +75,7 @@ class SV:
     def compute_embedding3(self, wav):  # (1,x)#-1~1
         with torch.no_grad():
             wav = self.res(wav)
-            if self.is_half == True:
+            if self.is_half is True:
                 wav = wav.half()
             feat = torch.stack(
                 [Kaldi.fbank(wav0.unsqueeze(0), num_mel_bins=80, sample_frequency=16000, dither=0) for wav0 in wav]

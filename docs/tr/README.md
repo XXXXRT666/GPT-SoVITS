@@ -229,13 +229,13 @@ V1'e geçmek istiyorsanız, `go-webui-v1.bat` dosyasına çift tıklayın veya `
 #### Diğerleri
 
 ```bash
-python webui.py <dil(isteğe bağlı)>
+PYTHONPATH=. python webui.py <dil(isteğe bağlı)>
 ```
 
 V1'e geçmek istiyorsanız,
 
 ```bash
-python webui.py v1 <dil(isteğe bağlı)>
+PYTHONPATH=. python webui.py v1 <dil(isteğe bağlı)>
 ```
 
 veya WebUI'de manuel olarak sürüm değiştirin.
@@ -266,7 +266,7 @@ python GPT_SoVITS/inference_webui.py <dil(isteğe bağlı)>
 VEYA
 
 ```bash
-python webui.py
+PYTHONPATH=. python webui.py
 ```
 
 ardından çıkarım webui'sini `1-GPT-SoVITS-TTS/1C-inference` adresinde açın.
@@ -313,7 +313,7 @@ V2 ortamında V3 kullanımı:
 
 3. [huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main) üzerinden v3 önceden eğitilmiş modellerini (s1v3.ckpt, s2Gv3.pth ve models--nvidia--bigvgan_v2_24khz_100band_256x klasörünü) indirin ve `GPT_SoVITS/pretrained_models` dizinine yerleştirin.
 
-   ek: Ses Süper Çözünürlük modeli için [nasıl indirileceği](../../tools/AP_BWE_main/24kto48k/readme.txt) hakkında bilgi alabilirsiniz.
+   ek: Ses Süper Çözünürlük modeli için [nasıl indirileceği](../../tools/AP_BWE/24kto48k/readme.txt) hakkında bilgi alabilirsiniz.
 
 ## V4 Sürüm Notları
 

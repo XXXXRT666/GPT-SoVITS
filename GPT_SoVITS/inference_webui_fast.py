@@ -6,19 +6,24 @@
 全部按英文识别
 全部按日文识别
 """
-import psutil
+
 import os
+
+import psutil
+
 
 def set_high_priority():
     """把当前 Python 进程设为 HIGH_PRIORITY_CLASS"""
     if os.name != "nt":
-        return # 仅 Windows 有效
+        return  # 仅 Windows 有效
     p = psutil.Process(os.getpid())
     try:
         p.nice(psutil.HIGH_PRIORITY_CLASS)
         print("已将进程优先级设为 High")
     except psutil.AccessDenied:
         print("权限不足，无法修改优先级（请用管理员运行）")
+
+
 set_high_priority()
 import json
 import logging
@@ -225,7 +230,7 @@ with open("./weight.json", "r", encoding="utf-8") as file:
     if isinstance(sovits_path, list):
         sovits_path = sovits_path[0]
 
-from process_ckpt import get_sovits_version_from_path_fast
+from GPT_SoVITS.process_ckpt import get_sovits_version_from_path_fast
 
 v3v4set = {"v3", "v4"}
 
@@ -238,7 +243,7 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
     # print(sovits_path,version, model_version, if_lora_v3)
     is_exist = is_exist_s2gv3 if model_version == "v3" else is_exist_s2gv4
     path_sovits = path_sovits_v3 if model_version == "v3" else path_sovits_v4
-    if if_lora_v3 == True and is_exist == False:
+    if if_lora_v3 is True and is_exist is False:
         info = path_sovits + "SoVITS %s" % model_version + i18n("底模缺失，无法加载相应 LoRA 权重")
         gr.Warning(info)
         raise FileExistsError(info)
@@ -315,7 +320,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
     with gr.Column():
         # with gr.Group():
         gr.Markdown(value=i18n("模型切换"))
-        with gr.Row():
+        with gr.Row(equal_height=True):
             GPT_dropdown = gr.Dropdown(
                 label=i18n("GPT模型列表"),
                 choices=sorted(GPT_names, key=custom_sort_key),
@@ -331,18 +336,22 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
             refresh_button = gr.Button(i18n("刷新模型路径"), variant="primary")
             refresh_button.click(fn=change_choices, inputs=[], outputs=[SoVITS_dropdown, GPT_dropdown])
 
-    with gr.Row():
+    with gr.Row(equal_height=True):
         with gr.Column():
             gr.Markdown(value=i18n("*请上传并填写参考信息"))
-            with gr.Row():
-                inp_ref = gr.Audio(label=i18n("主参考音频(请上传3~10秒内参考音频，超过会报错！)"), type="filepath")
+            with gr.Row(equal_height=True):
+                inp_ref = gr.Audio(
+                    label=i18n("主参考音频(请上传3~10秒内参考音频，超过会报错！)"),
+                    type="filepath",
+                    waveform_options={"show_recording_waveform": False},
+                )
                 inp_refs = gr.File(
                     label=i18n("辅参考音频(可选多个，或不选)"),
                     file_count="multiple",
                     visible=True if model_version != "v3" else False,
                 )
             prompt_text = gr.Textbox(label=i18n("主参考音频的文本"), value="", lines=2)
-            with gr.Row():
+            with gr.Row(equal_height=True):
                 prompt_language = gr.Dropdown(
                     label=i18n("主参考音频的语种"), choices=list(dict_language.keys()), value=i18n("中文")
                 )
@@ -368,26 +377,26 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
 
     with gr.Group():
         gr.Markdown(value=i18n("推理设置"))
-        with gr.Row():
+        with gr.Row(equal_height=True):
             with gr.Column():
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     batch_size = gr.Slider(
                         minimum=1, maximum=200, step=1, label=i18n("batch_size"), value=20, interactive=True
                     )
                     sample_steps = gr.Radio(
                         label=i18n("采样步数(仅对V3/4生效)"), value=32, choices=[4, 8, 16, 32, 64, 128], visible=True
                     )
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     fragment_interval = gr.Slider(
                         minimum=0.01, maximum=1, step=0.01, label=i18n("分段间隔(秒)"), value=0.3, interactive=True
                     )
                     speed_factor = gr.Slider(
                         minimum=0.6, maximum=1.65, step=0.05, label="语速", value=1.0, interactive=True
                     )
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     top_k = gr.Slider(minimum=1, maximum=100, step=1, label=i18n("top_k"), value=5, interactive=True)
                     top_p = gr.Slider(minimum=0, maximum=1, step=0.05, label=i18n("top_p"), value=1, interactive=True)
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     temperature = gr.Slider(
                         minimum=0, maximum=1, step=0.05, label=i18n("temperature"), value=1, interactive=True
                     )
@@ -396,7 +405,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                     )
 
             with gr.Column():
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     how_to_cut = gr.Dropdown(
                         label=i18n("怎么切"),
                         choices=[
@@ -415,7 +424,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                         label=i18n("音频超采样(仅对V3生效))"), value=False, interactive=True, show_label=True
                     )
 
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     parallel_infer = gr.Checkbox(label=i18n("并行推理"), value=True, interactive=True, show_label=True)
                     split_bucket = gr.Checkbox(
                         label=i18n("数据分桶(并行推理时会降低一点计算量)"),
@@ -424,12 +433,15 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                         show_label=True,
                     )
 
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     seed = gr.Number(label=i18n("随机种子"), value=-1)
                     keep_random = gr.Checkbox(label=i18n("保持随机"), value=True, interactive=True, show_label=True)
 
-                output = gr.Audio(label=i18n("输出的语音"))
-                with gr.Row():
+                output = gr.Audio(
+                    label=i18n("输出的语音"),
+                    waveform_options={"show_recording_waveform": False},
+                )
+                with gr.Row(equal_height=True):
                     inference_button = gr.Button(i18n("合成语音"), variant="primary")
                     stop_infer = gr.Button(i18n("终止合成"), variant="primary")
 
@@ -485,7 +497,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                 "文本切分工具。太长的文本合成出来效果不一定好，所以太长建议先切。合成会根据文本的换行分开合成再拼起来。"
             )
         )
-        with gr.Row():
+        with gr.Row(equal_height=True):
             text_inp = gr.Textbox(label=i18n("需要合成的切分前文本"), value="", lines=4)
             with gr.Column():
                 _how_to_cut = gr.Radio(

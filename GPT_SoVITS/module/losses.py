@@ -4,7 +4,7 @@ import torch
 
 
 def feature_loss(fmap_r, fmap_g):
-    loss = 0
+    loss = torch.tensor(0)
     for dr, dg in zip(fmap_r, fmap_g):
         for rl, gl in zip(dr, dg):
             rl = rl.float().detach()
@@ -15,7 +15,7 @@ def feature_loss(fmap_r, fmap_g):
 
 
 def discriminator_loss(disc_real_outputs, disc_generated_outputs):
-    loss = 0
+    loss = torch.tensor(0)
     r_losses = []
     g_losses = []
     for dr, dg in zip(disc_real_outputs, disc_generated_outputs):
@@ -31,7 +31,7 @@ def discriminator_loss(disc_real_outputs, disc_generated_outputs):
 
 
 def generator_loss(disc_outputs):
-    loss = 0
+    loss = torch.tensor(0)
     gen_losses = []
     for dg in disc_outputs:
         dg = dg.float()

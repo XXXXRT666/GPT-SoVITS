@@ -1,12 +1,13 @@
-from text import cleaned_text_to_sequence
 import os
+
+from text import cleaned_text_to_sequence
+
 # if os.environ.get("version","v1")=="v1":
 #     from text import chinese
 #     from text.symbols import symbols
 # else:
 #     from text import chinese2 as chinese
 #     from text.symbols2 import symbols
-
 from text import symbols as symbols_v1
 from text import symbols2 as symbols_v2
 
@@ -18,7 +19,7 @@ special = [
 ]
 
 
-def clean_text(text, language, version=None):
+def clean_text(text, language, version=None) -> tuple[list[str], list[int] | None, str]:
     if version is None:
         version = os.environ.get("version", "v2")
     if version == "v1":

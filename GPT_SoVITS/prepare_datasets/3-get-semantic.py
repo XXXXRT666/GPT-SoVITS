@@ -29,18 +29,19 @@ else:
 import torch
 
 is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
-import traceback
 import sys
+import traceback
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 import logging
-import utils
+
+import GPT_SoVITS.utils as utils
 
 if version != "v3":
-    from module.models import SynthesizerTrn
+    from GPT_SoVITS.module.models import SynthesizerTrn
 else:
-    from module.models import SynthesizerTrnV3 as SynthesizerTrn
+    from GPT_SoVITS.module.models import SynthesizerTrnV3 as SynthesizerTrn
 from tools.my_utils import clean_path
 
 logging.getLogger("numba").setLevel(logging.WARNING)
@@ -56,7 +57,7 @@ logging.getLogger("numba").setLevel(logging.WARNING)
 
 hubert_dir = "%s/4-cnhubert" % (opt_dir)
 semantic_path = "%s/6-name2semantic-%s.tsv" % (opt_dir, i_part)
-if os.path.exists(semantic_path) == False:
+if os.path.exists(semantic_path) is False:
     os.makedirs(opt_dir, exist_ok=True)
 
     if torch.cuda.is_available():
@@ -73,7 +74,7 @@ if os.path.exists(semantic_path) == False:
         version=version,
         **hps.model,
     )
-    if is_half == True:
+    if is_half is True:
         vq_model = vq_model.half().to(device)
     else:
         vq_model = vq_model.to(device)
@@ -88,10 +89,10 @@ if os.path.exists(semantic_path) == False:
 
     def name2go(wav_name, lines):
         hubert_path = "%s/%s.pt" % (hubert_dir, wav_name)
-        if os.path.exists(hubert_path) == False:
+        if os.path.exists(hubert_path) is False:
             return
         ssl_content = torch.load(hubert_path, map_location="cpu")
-        if is_half == True:
+        if is_half is True:
             ssl_content = ssl_content.half().to(device)
         else:
             ssl_content = ssl_content.to(device)

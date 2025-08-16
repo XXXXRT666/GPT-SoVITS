@@ -19,7 +19,6 @@
 [![Change Log](https://img.shields.io/badge/Change%20Log-View%20Updates-blue?style=for-the-badge&logo=googledocs&logoColor=white)](https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/en/Changelog_EN.md)
 [![License](https://img.shields.io/badge/LICENSE-MIT-green.svg?style=for-the-badge&logo=opensourceinitiative)](https://github.com/RVC-Boss/GPT-SoVITS/blob/main/LICENSE)
 
-
 [**English**](../../README.md) | **中文简体** | [**日本語**](../ja/README.md) | [**한국어**](../ko/README.md) | [**Türkçe**](../tr/README.md)
 
 </div>
@@ -236,13 +235,13 @@ D:\GPT-SoVITS\xxx/xxx.wav|xxx|zh|我爱玩原神.
 #### 其他
 
 ```bash
-python webui.py <language(optional)>
+PYTHONPATH=. python webui.py <language(optional)>
 ```
 
 若想使用 V1,则
 
 ```bash
-python webui.py v1 <language(optional)>
+PYTHONPATH=. python webui.py v1 <language(optional)>
 ```
 
 或者在 webUI 内动态切换
@@ -273,7 +272,7 @@ python GPT_SoVITS/inference_webui.py <language(optional)>
 或者
 
 ```bash
-python webui.py
+PYTHONPATH=. python webui.py
 ```
 
 然后在 `1-GPT-SoVITS-TTS/1C-推理` 中打开推理 webUI
@@ -320,7 +319,7 @@ python webui.py
 
 3. 从[huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main)下载这些 v3 新增预训练模型 (s1v3.ckpt, s2Gv3.pth and models--nvidia--bigvgan_v2_24khz_100band_256x folder)将他们放到`GPT_SoVITS/pretrained_models`目录下
 
-   如果想用音频超分功能缓解 v3 模型生成 24k 音频觉得闷的问题, 需要下载额外的模型参数, 参考[how to download](../../tools/AP_BWE_main/24kto48k/readme.txt)
+   如果想用音频超分功能缓解 v3 模型生成 24k 音频觉得闷的问题, 需要下载额外的模型参数, 参考[how to download](../../tools/AP_BWE/24kto48k/readme.txt)
 
 ## V4 更新说明
 

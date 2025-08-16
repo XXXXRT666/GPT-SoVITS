@@ -1,23 +1,91 @@
-import os
-import sys
-
-os.environ["version"] = version = "v2Pro"
-now_dir = os.getcwd()
-sys.path.insert(0, now_dir)
-import warnings
-
-warnings.filterwarnings("ignore")
+import argparse
 import json
+import os
 import platform
+import re
 import shutil
-import signal
+import traceback
+import warnings
+from multiprocessing import cpu_count
+from subprocess import Popen
 
+import gradio as gr
 import psutil
-import torch
 import yaml
 
+from config import (
+    GPU_INDEX,
+    GPU_INFOS,
+    IS_GPU,
+    GPT_weight_root,
+    GPT_weight_version2root,
+    SoVITS_weight_root,
+    SoVITS_weight_version2root,
+    change_choices,
+    exp_root,
+    get_weights_names,
+    infer_device,
+    is_half,
+    is_share,
+    memset,
+    pretrained_gpt_name,
+    pretrained_sovits_name,
+    python_exec,
+    webui_port_infer_tts,
+    webui_port_main,
+    webui_port_subfix,
+    webui_port_uvr5,
+)
+from GPT_SoVITS.Accelerate import backends, logger, tb
+from tools import my_utils
+from tools.asr.config import asr_dict
+from tools.assets import css, js, top_html
+from tools.i18n.i18n import I18nAuto, scan_language_list
+from tools.my_utils import check_details, check_for_existance
+
+os.environ["PYTHONPATH"] = now_dir = os.getcwd()
+os.environ["version"] = version = "v2Pro"
 os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
-torch.manual_seed(233333)
+os.environ["no_proxy"] = "localhost, 127.0.0.1, ::1"
+os.environ["all_proxy"] = ""
+
+warnings.filterwarnings("ignore")
+
+backends_gradio = [(b.replace("-", " "), b) for b in backends]
+
+_LANG_RE = re.compile(r"^[a-z]{2}[_-][A-Z]{2}$")
+
+
+def lang_type(text: str) -> str:
+    if text == "Auto":
+        return text
+    if not _LANG_RE.match(text):
+        raise argparse.ArgumentTypeError(f"Unspported Format: {text}, Expected ll_CC/ll-CC")
+    ll, cc = re.split(r"[_-]", text)
+    language = f"{ll}_{cc}"
+    if language in scan_language_list():
+        return language
+    else:
+        return "en_US"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="train_webui",
+        description="python -s webui.py zh_CN",
+    )
+    p.add_argument(
+        "language",
+        nargs="?",
+        default="Auto",
+        type=lang_type,
+        help="Language Code, Such as zh_CN, en-US",
+    )
+    return p
+
+
+args = build_parser().parse_args()
+
 tmp = os.path.join(now_dir, "TEMP")
 os.makedirs(tmp, exist_ok=True)
 os.environ["TEMP"] = tmp
@@ -25,72 +93,17 @@ if os.path.exists(tmp):
     for name in os.listdir(tmp):
         if name == "jieba.cache":
             continue
-        path = "%s/%s" % (tmp, name)
+        path = f"{tmp}/{name}" % (tmp, name)
         delete = os.remove if os.path.isfile(path) else shutil.rmtree
         try:
             delete(path)
         except Exception as e:
-            print(str(e))
+            print(e)
             pass
-import site
-import traceback
 
-site_packages_roots = []
-for path in site.getsitepackages():
-    if "packages" in path:
-        site_packages_roots.append(path)
-if site_packages_roots == []:
-    site_packages_roots = ["%s/runtime/Lib/site-packages" % now_dir]
-# os.environ["OPENBLAS_NUM_THREADS"] = "4"
-os.environ["no_proxy"] = "localhost, 127.0.0.1, ::1"
-os.environ["all_proxy"] = ""
-for site_packages_root in site_packages_roots:
-    if os.path.exists(site_packages_root):
-        try:
-            with open("%s/users.pth" % (site_packages_root), "w") as f:
-                f.write(
-                    # "%s\n%s/runtime\n%s/tools\n%s/tools/asr\n%s/GPT_SoVITS\n%s/tools/uvr5"
-                    "%s\n%s/GPT_SoVITS/BigVGAN\n%s/tools\n%s/tools/asr\n%s/GPT_SoVITS\n%s/tools/uvr5"
-                    % (now_dir, now_dir, now_dir, now_dir, now_dir, now_dir)
-                )
-            break
-        except PermissionError:
-            traceback.print_exc()
-import shutil
-import subprocess
-from subprocess import Popen
 
-from tools.assets import css, js, top_html
-from tools.i18n.i18n import I18nAuto, scan_language_list
-
-language = sys.argv[-1] if sys.argv[-1] in scan_language_list() else "Auto"
-os.environ["language"] = language
+language = str(args.language)
 i18n = I18nAuto(language=language)
-from multiprocessing import cpu_count
-
-from config import (
-    GPU_INDEX,
-    GPU_INFOS,
-    IS_GPU,
-    exp_root,
-    infer_device,
-    is_half,
-    is_share,
-    memset,
-    python_exec,
-    webui_port_infer_tts,
-    webui_port_main,
-    webui_port_subfix,
-    webui_port_uvr5,
-)
-from tools import my_utils
-from tools.my_utils import check_details, check_for_existance
-
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-
-# os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1' # 当遇到mps不支持的步骤时使用cpu
-import gradio as gr
 
 n_cpu = cpu_count()
 
@@ -139,30 +152,7 @@ def set_default():
 
 set_default()
 
-gpus = "-".join(map(str, GPU_INDEX))
 default_gpu_numbers = infer_device.index
-
-
-def fix_gpu_number(input):  # 将越界的number强制改到界内
-    try:
-        if int(input) not in set_gpu_numbers:
-            return default_gpu_numbers
-    except:
-        return input
-    return input
-
-
-def fix_gpu_numbers(inputs):
-    output = []
-    try:
-        for input in inputs.split(","):
-            output.append(str(fix_gpu_number(input)))
-        return ",".join(output)
-    except:
-        return inputs
-
-
-from config import pretrained_gpt_name, pretrained_sovits_name
 
 
 def check_pretrained_is_exist(version):
@@ -175,7 +165,7 @@ def check_pretrained_is_exist(version):
     )
     _ = ""
     for i in pretrained_model_list:
-        if "s2Dv3" not in i and "s2Dv4" not in i and os.path.exists(i) == False:
+        if "s2Dv3" not in i and "s2Dv4" not in i and os.path.exists(i) is False:
             _ += f"\n    {i}"
     if _:
         print("warning: ", i18n("以下模型不存在:") + _)
@@ -183,62 +173,43 @@ def check_pretrained_is_exist(version):
 
 check_pretrained_is_exist(version)
 for key in pretrained_sovits_name.keys():
-    if os.path.exists(pretrained_sovits_name[key]) == False:
+    if os.path.exists(pretrained_sovits_name[key]) is False:
         pretrained_sovits_name[key] = ""
 for key in pretrained_gpt_name.keys():
-    if os.path.exists(pretrained_gpt_name[key]) == False:
+    if os.path.exists(pretrained_gpt_name[key]) is False:
         pretrained_gpt_name[key] = ""
 
-from config import (
-    GPT_weight_root,
-    GPT_weight_version2root,
-    SoVITS_weight_root,
-    SoVITS_weight_version2root,
-    change_choices,
-    get_weights_names,
-)
 
 for root in SoVITS_weight_root + GPT_weight_root:
     os.makedirs(root, exist_ok=True)
 SoVITS_names, GPT_names = get_weights_names()
 
-p_label = None
-p_uvr5 = None
-p_asr = None
-p_denoise = None
-p_tts_inference = None
+p_label: Popen | None = None
+p_uvr5: Popen | None = None
+p_asr: Popen | None = None
+p_denoise: Popen | None = None
+p_tts_inference: Popen | None = None
 
 
-def kill_proc_tree(pid, including_parent=True):
+def kill_process(pid: int, process_name=""):
     try:
-        parent = psutil.Process(pid)
+        p = psutil.Process(pid)
     except psutil.NoSuchProcess:
-        # Process already terminated
         return
 
-    children = parent.children(recursive=True)
-    for child in children:
+    for c in p.children(recursive=False):
         try:
-            os.kill(child.pid, signal.SIGTERM)  # or signal.SIGKILL
-        except OSError:
-            pass
-    if including_parent:
-        try:
-            os.kill(parent.pid, signal.SIGTERM)  # or signal.SIGKILL
-        except OSError:
+            c.kill()
+            c.wait(timeout=5)
+        except (psutil.NoSuchProcess, psutil.TimeoutExpired):
             pass
 
+    try:
+        p.kill()
+        p.wait(timeout=5)
+    except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+        pass
 
-system = platform.system()
-
-
-def kill_process(pid, process_name=""):
-    if system == "Windows":
-        cmd = "taskkill /t /f /pid %s" % pid
-        # os.system(cmd)
-        subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        kill_proc_tree(pid)
     print(process_name + i18n("进程已终止"))
 
 
@@ -281,8 +252,8 @@ def change_label(path_list):
         )
         yield (
             process_info(process_name_subfix, "opened"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True),
         )
         print(cmd)
         p_label = Popen(cmd, shell=True)
@@ -291,8 +262,8 @@ def change_label(path_list):
         p_label = None
         yield (
             process_info(process_name_subfix, "closed"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
+            gr.update(visible=True),
+            gr.update(visible=False),
         )
 
 
@@ -311,8 +282,8 @@ def change_uvr5():
         )
         yield (
             process_info(process_name_uvr5, "opened"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True),
         )
         print(cmd)
         p_uvr5 = Popen(cmd, shell=True)
@@ -321,50 +292,65 @@ def change_uvr5():
         p_uvr5 = None
         yield (
             process_info(process_name_uvr5, "closed"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
+            gr.update(visible=True),
+            gr.update(visible=False),
         )
 
 
 process_name_tts = i18n("TTS推理WebUI")
 
 
-def change_tts_inference(bert_path, cnhubert_base_path, gpu_number, gpt_path, sovits_path, batched_infer_enabled):
+def change_tts_inference(
+    bert_path: str,
+    cnhubert_base_path: str,
+    gpu_number: int,
+    gpt_path: str,
+    sovits_path: str,
+    batched_infer_enabled: bool,
+    backends_dropdown: str,
+):
     global p_tts_inference
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu_number)
+    cmd: list[str] = [python_exec, "-s"]
     if batched_infer_enabled:
-        cmd = '"%s" -s GPT_SoVITS/inference_webui_fast.py "%s"' % (python_exec, language)
+        cmd.extend(["GPT_SoVITS/inference_webui_fast.py", language])
     else:
-        cmd = '"%s" -s GPT_SoVITS/inference_webui.py "%s"' % (python_exec, language)
-    # #####v3暂不支持加速推理
-    # if version=="v3":
-    #     cmd = '"%s" GPT_SoVITS/inference_webui.py "%s"'%(python_exec, language)
+        # fmt: off
+        cmd.extend(
+            [
+                "GPT_SoVITS/inference_webui.py", language,
+                "-b", backends_dropdown,
+                "-d", "{infer_device.type}:{gpu_number}",
+                "-p", str(webui_port_infer_tts),
+            ]
+        ) # fmt: on
+
+        if is_share:
+            cmd.append("-s")
+
     if p_tts_inference is None:
-        os.environ["gpt_path"] = gpt_path
-        os.environ["sovits_path"] = sovits_path
-        os.environ["cnhubert_base_path"] = cnhubert_base_path
-        os.environ["bert_path"] = bert_path
-        os.environ["_CUDA_VISIBLE_DEVICES"] = fix_gpu_number(gpu_number)
-        os.environ["is_half"] = str(is_half)
-        os.environ["infer_ttswebui"] = str(webui_port_infer_tts)
-        os.environ["is_share"] = str(is_share)
+        env["gpt_path"] = gpt_path
+        env["sovits_path"] = sovits_path
+        env["is_half"] = str(is_half)
+        env["infer_ttswebui"] = str(webui_port_infer_tts)
+        env["is_share"] = str(is_share)
         yield (
             process_info(process_name_tts, "opened"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True),
         )
         print(cmd)
-        p_tts_inference = Popen(cmd, shell=True)
+        p_tts_inference = Popen(cmd, env=env)
     else:
         kill_process(p_tts_inference.pid, process_name_tts)
         p_tts_inference = None
         yield (
             process_info(process_name_tts, "closed"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
+            gr.update(visible=True),
+            gr.update(visible=False),
         )
 
-
-from tools.asr.config import asr_dict
 
 process_name_asr = i18n("语音识别")
 
@@ -386,11 +372,11 @@ def open_asr(asr_inp_dir, asr_opt_dir, asr_model, asr_model_size, asr_lang, asr_
         output_file_path = os.path.abspath(f"{output_folder}/{output_file_name}.list")
         yield (
             process_info(process_name_asr, "opened"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
         )
         print(cmd)
         p_asr = Popen(cmd, shell=True)
@@ -398,20 +384,20 @@ def open_asr(asr_inp_dir, asr_opt_dir, asr_model, asr_model_size, asr_lang, asr_
         p_asr = None
         yield (
             process_info(process_name_asr, "finish"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "value": output_file_path},
-            {"__type__": "update", "value": output_file_path},
-            {"__type__": "update", "value": asr_inp_dir},
+            gr.update(visible=True),
+            gr.update(visible=False),
+            gr.update(value=output_file_path),
+            gr.update(value=output_file_path),
+            gr.update(value=asr_inp_dir),
         )
     else:
         yield (
             process_info(process_name_asr, "occupy"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
         )
 
 
@@ -422,64 +408,8 @@ def close_asr():
         p_asr = None
     return (
         process_info(process_name_asr, "closed"),
-        {"__type__": "update", "visible": True},
-        {"__type__": "update", "visible": False},
-    )
-
-
-process_name_denoise = i18n("语音降噪")
-
-
-def open_denoise(denoise_inp_dir, denoise_opt_dir):
-    global p_denoise
-    if p_denoise == None:
-        denoise_inp_dir = my_utils.clean_path(denoise_inp_dir)
-        denoise_opt_dir = my_utils.clean_path(denoise_opt_dir)
-        check_for_existance([denoise_inp_dir])
-        cmd = '"%s" -s tools/cmd-denoise.py -i "%s" -o "%s" -p %s' % (
-            python_exec,
-            denoise_inp_dir,
-            denoise_opt_dir,
-            "float16" if is_half == True else "float32",
-        )
-
-        yield (
-            process_info(process_name_denoise, "opened"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
-        )
-        print(cmd)
-        p_denoise = Popen(cmd, shell=True)
-        p_denoise.wait()
-        p_denoise = None
-        yield (
-            process_info(process_name_denoise, "finish"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "value": denoise_opt_dir},
-            {"__type__": "update", "value": denoise_opt_dir},
-        )
-    else:
-        yield (
-            process_info(process_name_denoise, "occupy"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
-        )
-
-
-def close_denoise():
-    global p_denoise
-    if p_denoise is not None:
-        kill_process(p_denoise.pid, process_name_denoise)
-        p_denoise = None
-    return (
-        process_info(process_name_denoise, "closed"),
-        {"__type__": "update", "visible": True},
-        {"__type__": "update", "visible": False},
+        gr.update(visible=True),
+        gr.update(visible=False),
     )
 
 
@@ -503,7 +433,7 @@ def open1Ba(
     lora_rank,
 ):
     global p_train_SoVITS
-    if p_train_SoVITS == None:
+    if p_train_SoVITS is None:
         exp_name = exp_name.rstrip(" ")
         config_file = (
             "GPT_SoVITS/configs/s2.json"
@@ -511,13 +441,13 @@ def open1Ba(
             else f"GPT_SoVITS/configs/s2{version}.json"
         )
         with open(config_file) as f:
-            data = f.read()
-            data = json.loads(data)
+            config = f.read()
+            data: dict = json.loads(config)
         s2_dir = "%s/%s" % (exp_root, exp_name)
         os.makedirs("%s/logs_s2_%s" % (s2_dir, version), exist_ok=True)
         if check_for_existance([s2_dir], is_train=True):
             check_details([s2_dir], is_train=True)
-        if is_half == False:
+        if is_half is False:
             data["train"]["fp16_run"] = False
             batch_size = max(1, batch_size // 2)
         data["train"]["batch_size"] = batch_size
@@ -528,7 +458,6 @@ def open1Ba(
         data["train"]["if_save_latest"] = if_save_latest
         data["train"]["if_save_every_weights"] = if_save_every_weights
         data["train"]["save_every_epoch"] = save_every_epoch
-        data["train"]["gpu_numbers"] = gpu_numbers1Ba
         data["train"]["grad_ckpt"] = if_grad_ckpt
         data["train"]["lora_rank"] = lora_rank
         data["model"]["version"] = version
@@ -539,16 +468,17 @@ def open1Ba(
         tmp_config_path = "%s/tmp_s2.json" % tmp
         with open(tmp_config_path, "w") as f:
             f.write(json.dumps(data))
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_numbers1Ba).strip("[]").replace(" ", "")
         if version in ["v1", "v2", "v2Pro", "v2ProPlus"]:
             cmd = '"%s" -s GPT_SoVITS/s2_train.py --config "%s"' % (python_exec, tmp_config_path)
         else:
             cmd = '"%s" -s GPT_SoVITS/s2_train_v3_lora.py --config "%s"' % (python_exec, tmp_config_path)
         yield (
             process_info(process_name_sovits, "opened"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.skip(),
+            gr.skip(),
         )
         print(cmd)
         p_train_SoVITS = Popen(cmd, shell=True)
@@ -557,18 +487,18 @@ def open1Ba(
         SoVITS_dropdown_update, GPT_dropdown_update = change_choices()
         yield (
             process_info(process_name_sovits, "finish"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
+            gr.update(visible=True),
+            gr.update(visible=False),
             SoVITS_dropdown_update,
             GPT_dropdown_update,
         )
     else:
         yield (
             process_info(process_name_sovits, "occupy"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.skip(),
+            gr.skip(),
         )
 
 
@@ -579,8 +509,8 @@ def close1Ba():
         p_train_SoVITS = None
     return (
         process_info(process_name_sovits, "closed"),
-        {"__type__": "update", "visible": True},
-        {"__type__": "update", "visible": False},
+        gr.update(visible=True),
+        gr.update(visible=False),
     )
 
 
@@ -600,18 +530,18 @@ def open1Bb(
     pretrained_s1,
 ):
     global p_train_GPT
-    if p_train_GPT == None:
+    if p_train_GPT is None:
         exp_name = exp_name.rstrip(" ")
         with open(
             "GPT_SoVITS/configs/s1longer.yaml" if version == "v1" else "GPT_SoVITS/configs/s1longer-v2.yaml"
         ) as f:
-            data = f.read()
-            data = yaml.load(data, Loader=yaml.FullLoader)
+            config = f.read()
+            data: dict = yaml.load(config, Loader=yaml.FullLoader)
         s1_dir = "%s/%s" % (exp_root, exp_name)
         os.makedirs("%s/logs_s1" % (s1_dir), exist_ok=True)
         if check_for_existance([s1_dir], is_train=True):
             check_details([s1_dir], is_train=True)
-        if is_half == False:
+        if is_half is False:
             data["train"]["precision"] = "32"
             batch_size = max(1, batch_size // 2)
         data["train"]["batch_size"] = batch_size
@@ -628,7 +558,7 @@ def open1Bb(
         data["output_dir"] = "%s/logs_s1_%s" % (s1_dir, version)
         # data["version"]=version
 
-        os.environ["_CUDA_VISIBLE_DEVICES"] = fix_gpu_numbers(gpu_numbers.replace("-", ","))
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_numbers).strip("[]").replace(" ", "")
         os.environ["hz"] = "25hz"
         tmp_config_path = "%s/tmp_s1.yaml" % tmp
         with open(tmp_config_path, "w") as f:
@@ -637,10 +567,10 @@ def open1Bb(
         cmd = '"%s" -s GPT_SoVITS/s1_train.py --config_file "%s" ' % (python_exec, tmp_config_path)
         yield (
             process_info(process_name_gpt, "opened"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.skip(),
+            gr.skip(),
         )
         print(cmd)
         p_train_GPT = Popen(cmd, shell=True)
@@ -649,18 +579,18 @@ def open1Bb(
         SoVITS_dropdown_update, GPT_dropdown_update = change_choices()
         yield (
             process_info(process_name_gpt, "finish"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
+            gr.update(visible=True),
+            gr.update(visible=False),
             SoVITS_dropdown_update,
             GPT_dropdown_update,
         )
     else:
         yield (
             process_info(process_name_gpt, "occupy"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.skip(),
+            gr.skip(),
         )
 
 
@@ -671,8 +601,8 @@ def close1Bb():
         p_train_GPT = None
     return (
         process_info(process_name_gpt, "closed"),
-        {"__type__": "update", "visible": True},
-        {"__type__": "update", "visible": False},
+        gr.update(visible=True),
+        gr.update(visible=False),
     )
 
 
@@ -685,14 +615,13 @@ def open_slice(inp, opt_root, threshold, min_length, min_interval, hop_size, max
     inp = my_utils.clean_path(inp)
     opt_root = my_utils.clean_path(opt_root)
     check_for_existance([inp])
-    if os.path.exists(inp) == False:
+    if os.path.exists(inp) is False:
         yield (
             i18n("输入路径不存在"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
-            {"__type__": "update"},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=True),
+            gr.update(visible=False),
+            gr.skip(),
+            gr.skip(),
         )
         return
     if os.path.isfile(inp):
@@ -702,11 +631,10 @@ def open_slice(inp, opt_root, threshold, min_length, min_interval, hop_size, max
     else:
         yield (
             i18n("输入路径存在但不可用"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
-            {"__type__": "update"},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=True),
+            gr.update(visible=False),
+            gr.skip(),
+            gr.skip(),
         )
         return
     if ps_slice == []:
@@ -730,31 +658,28 @@ def open_slice(inp, opt_root, threshold, min_length, min_interval, hop_size, max
             ps_slice.append(p)
         yield (
             process_info(process_name_slice, "opened"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.skip(),
+            gr.skip(),
         )
         for p in ps_slice:
             p.wait()
         ps_slice = []
         yield (
             process_info(process_name_slice, "finish"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "value": opt_root},
-            {"__type__": "update", "value": opt_root},
-            {"__type__": "update", "value": opt_root},
+            gr.update(visible=True),
+            gr.update(visible=False),
+            gr.update(value=opt_root),
+            gr.update(value=opt_root),
         )
     else:
         yield (
             process_info(process_name_slice, "occupy"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
-            {"__type__": "update"},
-            {"__type__": "update"},
-            {"__type__": "update"},
+            gr.update(visible=False),
+            gr.update(visible=True),
+            gr.skip(),
+            gr.skip(),
         )
 
 
@@ -764,86 +689,82 @@ def close_slice():
         for p_slice in ps_slice:
             try:
                 kill_process(p_slice.pid, process_name_slice)
-            except:
+            except Exception as _:
                 traceback.print_exc()
         ps_slice = []
     return (
         process_info(process_name_slice, "closed"),
-        {"__type__": "update", "visible": True},
-        {"__type__": "update", "visible": False},
+        gr.update(visible=True),
+        gr.update(visible=False),
     )
 
 
-ps1a = []
+ps1a = None
 process_name_1a = i18n("文本分词与特征提取")
 
 
-def open1a(inp_text, inp_wav_dir, exp_name, gpu_numbers, bert_pretrained_dir):
+def open1a(
+    inp_text: str,
+    inp_wav_dir: str,
+    exp_name: str,
+    gpu_numbers: list[int],
+    bert_pretrained_dir: str,
+    version: str,
+    nproc: int = 1,
+):
     global ps1a
     inp_text = my_utils.clean_path(inp_text)
     inp_wav_dir = my_utils.clean_path(inp_wav_dir)
     if check_for_existance([inp_text, inp_wav_dir], is_dataset_processing=True):
         check_details([inp_text, inp_wav_dir], is_dataset_processing=True)
     exp_name = exp_name.rstrip(" ")
-    if ps1a == []:
-        opt_dir = "%s/%s" % (exp_root, exp_name)
-        config = {
-            "inp_text": inp_text,
-            "inp_wav_dir": inp_wav_dir,
-            "exp_name": exp_name,
-            "opt_dir": opt_dir,
-            "bert_pretrained_dir": bert_pretrained_dir,
-        }
-        gpu_names = gpu_numbers.split("-")
-        all_parts = len(gpu_names)
-        for i_part in range(all_parts):
-            config.update(
-                {
-                    "i_part": str(i_part),
-                    "all_parts": str(all_parts),
-                    "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
-                    "is_half": str(is_half),
-                }
-            )
-            os.environ.update(config)
-            cmd = '"%s" -s GPT_SoVITS/prepare_datasets/1-get-text.py' % python_exec
-            print(cmd)
-            p = Popen(cmd, shell=True)
-            ps1a.append(p)
+    if ps1a is None:
+        opt_dir = f"{exp_root}/{exp_name}"
+
+        # fmt: off
+        cmd = [
+            python_exec, "-s", "GPT_SoVITS/prepare_datasets/1-get-text.py",
+            "--inp", inp_text,
+            "--opt", opt_dir,
+            "--bert", bert_pretrained_dir,
+            "--version", version,
+            "--device", infer_device.type,
+            "--device-id", str(gpu_numbers).strip("[]").replace(" ",""),
+            "--nproc", str(nproc),
+        ] # fmt: on
+
+        if is_half:
+            cmd.append("--fp16")
+
+        print(" ".join(cmd))
+        p = Popen(cmd)
+
         yield (
             process_info(process_name_1a, "running"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True)
         )
-        for p in ps1a:
-            p.wait()
-        opt = []
-        for i_part in range(all_parts):
-            txt_path = "%s/2-name2text-%s.txt" % (opt_dir, i_part)
-            with open(txt_path, "r", encoding="utf8") as f:
-                opt += f.read().strip("\n").split("\n")
-            os.remove(txt_path)
-        path_text = "%s/2-name2text.txt" % opt_dir
-        with open(path_text, "w", encoding="utf8") as f:
-            f.write("\n".join(opt) + "\n")
-        ps1a = []
-        if len("".join(opt)) > 0:
+
+        code = p.wait()
+        ps1a = None
+
+        if code == 0:
             yield (
                 process_info(process_name_1a, "finish"),
-                {"__type__": "update", "visible": True},
-                {"__type__": "update", "visible": False},
+                gr.update(visible=True),
+                gr.update(visible=False),
             )
         else:
             yield (
                 process_info(process_name_1a, "failed"),
-                {"__type__": "update", "visible": True},
-                {"__type__": "update", "visible": False},
+                gr.update(visible=True),
+                gr.update(visible=False),
             )
     else:
         yield (
             process_info(process_name_1a, "occupy"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True),
         )
 
 
@@ -853,13 +774,13 @@ def close1a():
         for p1a in ps1a:
             try:
                 kill_process(p1a.pid, process_name_1a)
-            except:
+            except Exception as _:
                 traceback.print_exc()
         ps1a = []
     return (
         process_info(process_name_1a, "closed"),
-        {"__type__": "update", "visible": True},
-        {"__type__": "update", "visible": False},
+        gr.update(visible=True),
+        gr.update(visible=False),
     )
 
 
@@ -892,7 +813,6 @@ def open1b(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, ssl_pretrained
                 {
                     "i_part": str(i_part),
                     "all_parts": str(all_parts),
-                    "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                 }
             )
             os.environ.update(config)
@@ -902,8 +822,8 @@ def open1b(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, ssl_pretrained
             ps1b.append(p)
         yield (
             process_info(process_name_1b, "running"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True),
         )
         for p in ps1b:
             p.wait()
@@ -914,7 +834,6 @@ def open1b(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, ssl_pretrained
                     {
                         "i_part": str(i_part),
                         "all_parts": str(all_parts),
-                        "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                     }
                 )
                 os.environ.update(config)
@@ -927,14 +846,14 @@ def open1b(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, ssl_pretrained
             ps1b = []
         yield (
             process_info(process_name_1b, "finish"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
+            gr.update(visible=True),
+            gr.update(visible=False),
         )
     else:
         yield (
             process_info(process_name_1b, "occupy"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True),
         )
 
 
@@ -944,13 +863,13 @@ def close1b():
         for p1b in ps1b:
             try:
                 kill_process(p1b.pid, process_name_1b)
-            except:
+            except Exception as _:
                 traceback.print_exc()
         ps1b = []
     return (
         process_info(process_name_1b, "closed"),
-        {"__type__": "update", "visible": True},
-        {"__type__": "update", "visible": False},
+        gr.update(visible=True),
+        gr.update(visible=False),
     )
 
 
@@ -986,7 +905,6 @@ def open1c(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, pretrained_s2G
                 {
                     "i_part": str(i_part),
                     "all_parts": str(all_parts),
-                    "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                 }
             )
             os.environ.update(config)
@@ -996,8 +914,8 @@ def open1c(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, pretrained_s2G
             ps1c.append(p)
         yield (
             process_info(process_name_1c, "running"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True),
         )
         for p in ps1c:
             p.wait()
@@ -1013,14 +931,14 @@ def open1c(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, pretrained_s2G
         ps1c = []
         yield (
             process_info(process_name_1c, "finish"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
+            gr.update(visible=True),
+            gr.update(visible=False),
         )
     else:
         yield (
             process_info(process_name_1c, "occupy"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True),
         )
 
 
@@ -1030,13 +948,13 @@ def close1c():
         for p1c in ps1c:
             try:
                 kill_process(p1c.pid, process_name_1c)
-            except:
+            except Exception as _:
                 traceback.print_exc()
         ps1c = []
     return (
         process_info(process_name_1c, "closed"),
-        {"__type__": "update", "visible": True},
-        {"__type__": "update", "visible": False},
+        gr.update(visible=True),
+        gr.update(visible=False),
     )
 
 
@@ -1067,8 +985,8 @@ def open1abc(
         try:
             #############################1a
             path_text = "%s/2-name2text.txt" % opt_dir
-            if os.path.exists(path_text) == False or (
-                os.path.exists(path_text) == True
+            if os.path.exists(path_text) is False or (
+                os.path.exists(path_text) is True
                 and len(open(path_text, "r", encoding="utf8").read().strip("\n").split("\n")) < 2
             ):
                 config = {
@@ -1086,7 +1004,6 @@ def open1abc(
                         {
                             "i_part": str(i_part),
                             "all_parts": str(all_parts),
-                            "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                         }
                     )
                     os.environ.update(config)
@@ -1096,8 +1013,8 @@ def open1abc(
                     ps1abc.append(p)
                 yield (
                     i18n("进度") + ": 1A-Doing",
-                    {"__type__": "update", "visible": False},
-                    {"__type__": "update", "visible": True},
+                    gr.update(visible=False),
+                    gr.update(visible=True),
                 )
                 for p in ps1abc:
                     p.wait()
@@ -1113,8 +1030,8 @@ def open1abc(
                 assert len("".join(opt)) > 0, process_info(process_name_1a, "failed")
             yield (
                 i18n("进度") + ": 1A-Done",
-                {"__type__": "update", "visible": False},
-                {"__type__": "update", "visible": True},
+                gr.update(visible=False),
+                gr.update(visible=True),
             )
             ps1abc = []
             #############################1b
@@ -1133,7 +1050,6 @@ def open1abc(
                     {
                         "i_part": str(i_part),
                         "all_parts": str(all_parts),
-                        "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                     }
                 )
                 os.environ.update(config)
@@ -1143,8 +1059,8 @@ def open1abc(
                 ps1abc.append(p)
             yield (
                 i18n("进度") + ": 1A-Done, 1B-Doing",
-                {"__type__": "update", "visible": False},
-                {"__type__": "update", "visible": True},
+                gr.update(visible=False),
+                gr.update(visible=True),
             )
             for p in ps1abc:
                 p.wait()
@@ -1155,7 +1071,6 @@ def open1abc(
                         {
                             "i_part": str(i_part),
                             "all_parts": str(all_parts),
-                            "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                         }
                     )
                     os.environ.update(config)
@@ -1168,13 +1083,13 @@ def open1abc(
                 ps1abc = []
             yield (
                 i18n("进度") + ": 1A-Done, 1B-Done",
-                {"__type__": "update", "visible": False},
-                {"__type__": "update", "visible": True},
+                gr.update(visible=False),
+                gr.update(visible=True),
             )
             #############################1c
             path_semantic = "%s/6-name2semantic.tsv" % opt_dir
-            if os.path.exists(path_semantic) == False or (
-                os.path.exists(path_semantic) == True and os.path.getsize(path_semantic) < 31
+            if os.path.exists(path_semantic) is False or (
+                os.path.exists(path_semantic) is True and os.path.getsize(path_semantic) < 31
             ):
                 config_file = (
                     "GPT_SoVITS/configs/s2.json"
@@ -1195,7 +1110,6 @@ def open1abc(
                         {
                             "i_part": str(i_part),
                             "all_parts": str(all_parts),
-                            "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                         }
                     )
                     os.environ.update(config)
@@ -1205,8 +1119,8 @@ def open1abc(
                     ps1abc.append(p)
                 yield (
                     i18n("进度") + ": 1A-Done, 1B-Done, 1C-Doing",
-                    {"__type__": "update", "visible": False},
-                    {"__type__": "update", "visible": True},
+                    gr.update(visible=False),
+                    gr.update(visible=True),
                 )
                 for p in ps1abc:
                     p.wait()
@@ -1221,28 +1135,28 @@ def open1abc(
                     f.write("\n".join(opt) + "\n")
                 yield (
                     i18n("进度") + ": 1A-Done, 1B-Done, 1C-Done",
-                    {"__type__": "update", "visible": False},
-                    {"__type__": "update", "visible": True},
+                    gr.update(visible=False),
+                    gr.update(visible=True),
                 )
             ps1abc = []
             yield (
                 process_info(process_name_1abc, "finish"),
-                {"__type__": "update", "visible": True},
-                {"__type__": "update", "visible": False},
+                gr.update(visible=True),
+                gr.update(visible=False),
             )
-        except:
+        except Exception as _:
             traceback.print_exc()
             close1abc()
             yield (
                 process_info(process_name_1abc, "failed"),
-                {"__type__": "update", "visible": True},
-                {"__type__": "update", "visible": False},
+                gr.update(visible=True),
+                gr.update(visible=False),
             )
     else:
         yield (
             process_info(process_name_1abc, "occupy"),
-            {"__type__": "update", "visible": False},
-            {"__type__": "update", "visible": True},
+            gr.update(visible=False),
+            gr.update(visible=True),
         )
 
 
@@ -1252,13 +1166,13 @@ def close1abc():
         for p1abc in ps1abc:
             try:
                 kill_process(p1abc.pid, process_name_1abc)
-            except:
+            except Exception as _:
                 traceback.print_exc()
         ps1abc = []
     return (
         process_info(process_name_1abc, "closed"),
-        {"__type__": "update", "visible": True},
-        {"__type__": "update", "visible": False},
+        gr.update(visible=True),
+        gr.update(visible=False),
     )
 
 
@@ -1272,23 +1186,20 @@ def switch_version(version_):
         gr.Warning(i18n("未下载模型") + ": " + version.upper())
     set_default()
     return (
-        {"__type__": "update", "value": pretrained_sovits_name[version]},
-        {"__type__": "update", "value": pretrained_sovits_name[version].replace("s2G", "s2D")},
-        {"__type__": "update", "value": pretrained_gpt_name[version]},
-        {"__type__": "update", "value": pretrained_gpt_name[version]},
-        {"__type__": "update", "value": pretrained_sovits_name[version]},
-        {"__type__": "update", "value": default_batch_size, "maximum": default_max_batch_size},
-        {"__type__": "update", "value": default_sovits_epoch, "maximum": max_sovits_epoch},
-        {"__type__": "update", "value": default_sovits_save_every_epoch, "maximum": max_sovits_save_every_epoch},
-        {"__type__": "update", "visible": True if version not in v3v4set else False},
-        {
-            "__type__": "update",
-            "value": False if not if_force_ckpt else True,
-            "interactive": True if not if_force_ckpt else False,
-        },
-        {"__type__": "update", "interactive": True, "value": False},
-        {"__type__": "update", "visible": True if version in v3v4set else False},
-    )  # {'__type__': 'update', "interactive": False if version in v3v4set else True, "value": False}, \ ####batch infer
+        gr.update(value=pretrained_sovits_name[version]),
+        gr.update(value=pretrained_sovits_name[version].replace("s2G", "s2D")),
+        gr.update(value=pretrained_gpt_name[version]),
+        gr.update(value=pretrained_gpt_name[version]),
+        gr.update(value=pretrained_sovits_name[version]),
+        gr.update(value=default_batch_size, maximum=default_max_batch_size),
+        gr.update(value=default_sovits_epoch, maximum=max_sovits_epoch),
+        gr.update(value=default_sovits_save_every_epoch, maximum=max_sovits_save_every_epoch),
+        gr.update(visible=True if version not in v3v4set else False),
+        gr.update(value=False if not if_force_ckpt else True, interactive=True if not if_force_ckpt else False),
+        gr.update(value=False, interactive=True),
+        gr.update(value=True, interactive=False),
+        gr.update(visible=True if version in v3v4set else False),
+    )
 
 
 if os.path.exists("GPT_SoVITS/text/G2PWModel"):
@@ -1300,9 +1211,19 @@ else:
 
 
 def sync(text):
-    return {"__type__": "update", "value": text}
+    return gr.update(value=text)
 
 
+def changeBackend(flag: bool):
+    if flag:
+        return gr.update(choices=["Torch Varlen"], value="Torch Varlen")
+    else:
+        return gr.update(choices=backends_gradio, value=backends_gradio[-1][-1])
+
+
+GPU_INDEX.add(0)
+GPU_INDEX_LIST = list(GPU_INDEX)
+GPU_INDEX_LIST.sort()
 with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css) as app:
     gr.HTML(
         top_html.format(
@@ -1315,9 +1236,9 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
     with gr.Tabs():
         with gr.TabItem("0-" + i18n("前置数据集获取工具")):  # 提前随机切片防止uvr5爆内存->uvr5->slicer->asr->打标
             with gr.Accordion(label="0a-" + i18n("UVR5人声伴奏分离&去混响去延迟工具")):
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     with gr.Column(scale=3):
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             uvr5_info = gr.Textbox(label=process_info(process_name_uvr5, "info"))
                     open_uvr5 = gr.Button(
                         value=process_info(process_name_uvr5, "open"), variant="primary", visible=True
@@ -1327,14 +1248,19 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                     )
 
             with gr.Accordion(label="0b-" + i18n("语音切分工具")):
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     with gr.Column(scale=3):
-                        with gr.Row():
-                            slice_inp_path = gr.Textbox(label=i18n("音频自动切分输入路径，可文件可文件夹"), value="")
+                        with gr.Row(equal_height=True):
+                            slice_inp_path = gr.Textbox(
+                                label=i18n("音频自动切分输入路径，可文件可文件夹"),
+                                placeholder="D:/InputAudioFolder"
+                                if platform.system() == "Windows"
+                                else "~/InputAudioFolder",
+                            )
                             slice_opt_root = gr.Textbox(
                                 label=i18n("切分后的子音频的输出根目录"), value="output/slicer_opt"
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             threshold = gr.Textbox(
                                 label=i18n("threshold:音量小于这个值视作静音的备选切割点"), value="-34"
                             )
@@ -1348,7 +1274,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                                 value="10",
                             )
                             max_sil_kept = gr.Textbox(label=i18n("max_sil_kept:切完后静音最多留多长"), value="500")
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             _max = gr.Slider(
                                 minimum=0,
                                 maximum=1,
@@ -1365,7 +1291,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                                 value=0.25,
                                 interactive=True,
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             n_process = gr.Slider(
                                 minimum=1,
                                 maximum=n_cpu,
@@ -1382,32 +1308,19 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                         value=process_info(process_name_slice, "close"), variant="primary", visible=False
                     )
 
-            # gr.Markdown(value="0bb-" + i18n("语音降噪工具")+i18n("(不稳定，先别用，可能劣化模型效果！)"))
-            with gr.Row(visible=False):
-                with gr.Column(scale=3):
-                    with gr.Row():
-                        denoise_input_dir = gr.Textbox(label=i18n("输入文件夹路径"), value="")
-                        denoise_output_dir = gr.Textbox(label=i18n("输出文件夹路径"), value="output/denoise_opt")
-                    with gr.Row():
-                        denoise_info = gr.Textbox(label=process_info(process_name_denoise, "info"))
-                open_denoise_button = gr.Button(
-                    value=process_info(process_name_denoise, "open"), variant="primary", visible=True
-                )
-                close_denoise_button = gr.Button(
-                    value=process_info(process_name_denoise, "close"), variant="primary", visible=False
-                )
-
             with gr.Accordion(label="0c-" + i18n("语音识别工具")):
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     with gr.Column(scale=3):
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             asr_inp_dir = gr.Textbox(
-                                label=i18n("输入文件夹路径"), value="D:\\GPT-SoVITS\\raw\\xxx", interactive=True
+                                label=i18n("输入文件夹路径"),
+                                value="output/silcer_opt",
+                                interactive=True,
                             )
                             asr_opt_dir = gr.Textbox(
                                 label=i18n("输出文件夹路径"), value="output/asr_opt", interactive=True
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             asr_model = gr.Dropdown(
                                 label=i18n("ASR 模型"),
                                 choices=list(asr_dict.keys()),
@@ -1423,7 +1336,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                             asr_precision = gr.Dropdown(
                                 label=i18n("数据类型精度"), choices=["float32"], interactive=True, value="float32"
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             asr_info = gr.Textbox(label=process_info(process_name_asr, "info"))
                     open_asr_button = gr.Button(
                         value=process_info(process_name_asr, "open"), variant="primary", visible=True
@@ -1433,10 +1346,10 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                     )
 
                 def change_lang_choices(key):  # 根据选择的模型修改可选的语言
-                    return {"__type__": "update", "choices": asr_dict[key]["lang"], "value": asr_dict[key]["lang"][0]}
+                    return gr.update(value=asr_dict[key]["lang"][0], choices=asr_dict[key]["lang"])
 
                 def change_size_choices(key):  # 根据选择的模型修改可选的模型尺寸
-                    return {"__type__": "update", "choices": asr_dict[key]["size"], "value": asr_dict[key]["size"][-1]}
+                    return gr.update(value=asr_dict[key]["size"][-1], choices=asr_dict[key]["size"])
 
                 def change_precision_choices(key):  # 根据选择的模型修改可选的语言
                     if key == "Faster Whisper (多语种)":
@@ -1448,19 +1361,19 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                             precision = "float32"
                     else:
                         precision = "float32"
-                    return {"__type__": "update", "choices": asr_dict[key]["precision"], "value": precision}
+                    return gr.update(value=precision, choices=asr_dict[key]["precision"])
 
                 asr_model.change(change_lang_choices, [asr_model], [asr_lang])
                 asr_model.change(change_size_choices, [asr_model], [asr_size])
                 asr_model.change(change_precision_choices, [asr_model], [asr_precision])
 
             with gr.Accordion(label="0d-" + i18n("语音文本校对标注工具")):
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     with gr.Column(scale=3):
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             path_list = gr.Textbox(
                                 label=i18n("标注文件路径 (含文件后缀 *.list)"),
-                                value="D:\\RVC1006\\GPT-SoVITS\\raw\\xxx.list",
+                                value="output/asr_opt/slicer_opt.list",
                                 interactive=True,
                             )
                             label_info = gr.Textbox(label=process_info(process_name_subfix, "info"))
@@ -1478,14 +1391,15 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
 
         with gr.TabItem(i18n("1-GPT-SoVITS-TTS")):
             with gr.Accordion(i18n("微调模型信息")):
-                with gr.Row():
-                    with gr.Row(equal_height=True):
+                with gr.Row(equal_height=True):
+                    with gr.Column():
                         exp_name = gr.Textbox(
-                            label=i18n("*实验/模型名"),
+                            label=i18n("实验/模型名"),
                             value="xxx",
                             interactive=True,
                             scale=3,
                         )
+                    with gr.Column():
                         gpu_info_box = gr.Textbox(
                             label=i18n("显卡信息"),
                             value=gpu_info,
@@ -1493,14 +1407,24 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                             interactive=False,
                             scale=5,
                         )
-                        version_checkbox = gr.Radio(
+                    with gr.Column():
+                        version_checkbox = gr.Dropdown(
                             label=i18n("训练模型的版本"),
                             value=version,
-                            choices=["v1", "v2", "v4", "v2Pro", "v2ProPlus"],
+                            choices=[
+                                ("V1", "v1"),
+                                ("V2", "v2"),
+                                ("V4", "v4"),
+                                ("V2 Pro", "v2Pro"),
+                                ("V2 Pro Plus", "v2ProPlus"),
+                            ],
                             scale=5,
                         )
+                    with gr.Column():
+                        n_processes = gr.Slider(0, 10, 2, step=1, label=i18n("每卡预处理进程数"))
+
             with gr.Accordion(label=i18n("预训练模型路径"), open=False):
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     with gr.Row(equal_height=True):
                         pretrained_s1 = gr.Textbox(
                             label=i18n("预训练GPT模型路径"),
@@ -1529,15 +1453,15 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
 
             with gr.TabItem("1A-" + i18n("训练集格式化工具")):
                 with gr.Accordion(label=i18n("输出logs/实验名目录下应有23456开头的文件和文件夹")):
-                    with gr.Row():
-                        with gr.Row():
+                    with gr.Row(equal_height=True):
+                        with gr.Row(equal_height=True):
                             inp_text = gr.Textbox(
                                 label=i18n("*文本标注文件"),
                                 value=r"D:\RVC1006\GPT-SoVITS\raw\xxx.list",
                                 interactive=True,
                                 scale=10,
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             inp_wav_dir = gr.Textbox(
                                 label=i18n("*训练集音频文件目录"),
                                 # value=r"D:\RVC1006\GPT-SoVITS\raw\xxx",
@@ -1549,90 +1473,99 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                             )
 
                 with gr.Accordion(label="1Aa-" + process_name_1a):
-                    with gr.Row():
-                        with gr.Row():
-                            gpu_numbers1a = gr.Textbox(
-                                label=i18n("GPU卡号以-分割，每个卡号一个进程"),
-                                value="%s-%s" % (gpus, gpus),
+                    with gr.Row(equal_height=True):
+                        with gr.Row(equal_height=True):
+                            gpu_numbers1a = gr.Dropdown(
+                                label=i18n("GPU卡号"),
+                                choices=GPU_INDEX_LIST,
+                                value=GPU_INDEX_LIST,
                                 interactive=True,
+                                multiselect=True,
+                                allow_custom_value=False,
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             bert_pretrained_dir = gr.Textbox(
                                 label=i18n("预训练中文BERT模型路径"),
                                 value="GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
                                 interactive=False,
                                 lines=2,
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             button1a_open = gr.Button(
                                 value=process_info(process_name_1a, "open"), variant="primary", visible=True
                             )
                             button1a_close = gr.Button(
                                 value=process_info(process_name_1a, "close"), variant="primary", visible=False
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             info1a = gr.Textbox(label=process_info(process_name_1a, "info"))
 
                 with gr.Accordion(label="1Ab-" + process_name_1b):
-                    with gr.Row():
-                        with gr.Row():
-                            gpu_numbers1Ba = gr.Textbox(
-                                label=i18n("GPU卡号以-分割，每个卡号一个进程"),
-                                value="%s-%s" % (gpus, gpus),
+                    with gr.Row(equal_height=True):
+                        with gr.Row(equal_height=True):
+                            gpu_numbers1Ba = gr.Dropdown(
+                                label=i18n("GPU卡号"),
+                                choices=GPU_INDEX_LIST,
+                                value=GPU_INDEX_LIST,
                                 interactive=True,
+                                multiselect=True,
+                                allow_custom_value=False,
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             cnhubert_base_dir = gr.Textbox(
                                 label=i18n("预训练SSL模型路径"),
                                 value="GPT_SoVITS/pretrained_models/chinese-hubert-base",
                                 interactive=False,
                                 lines=2,
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             button1b_open = gr.Button(
                                 value=process_info(process_name_1b, "open"), variant="primary", visible=True
                             )
                             button1b_close = gr.Button(
                                 value=process_info(process_name_1b, "close"), variant="primary", visible=False
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             info1b = gr.Textbox(label=process_info(process_name_1b, "info"))
 
                 with gr.Accordion(label="1Ac-" + process_name_1c):
-                    with gr.Row():
-                        with gr.Row():
-                            gpu_numbers1c = gr.Textbox(
-                                label=i18n("GPU卡号以-分割，每个卡号一个进程"),
-                                value="%s-%s" % (gpus, gpus),
+                    with gr.Row(equal_height=True):
+                        with gr.Row(equal_height=True):
+                            gpu_numbers1c = gr.Dropdown(
+                                label=i18n("GPU卡号"),
+                                choices=GPU_INDEX_LIST,
+                                value=GPU_INDEX_LIST,
                                 interactive=True,
+                                multiselect=True,
+                                allow_custom_value=False,
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             pretrained_s2G_ = gr.Textbox(
                                 label=i18n("预训练SoVITS-G模型路径"),
                                 value=pretrained_sovits_name[version],
                                 interactive=False,
                                 lines=2,
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             button1c_open = gr.Button(
                                 value=process_info(process_name_1c, "open"), variant="primary", visible=True
                             )
                             button1c_close = gr.Button(
                                 value=process_info(process_name_1c, "close"), variant="primary", visible=False
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             info1c = gr.Textbox(label=process_info(process_name_1c, "info"))
 
                 with gr.Accordion(label="1Aabc-" + process_name_1abc):
-                    with gr.Row():
-                        with gr.Row():
+                    with gr.Row(equal_height=True):
+                        with gr.Row(equal_height=True):
                             button1abc_open = gr.Button(
                                 value=process_info(process_name_1abc, "open"), variant="primary", visible=True
                             )
                             button1abc_close = gr.Button(
                                 value=process_info(process_name_1abc, "close"), variant="primary", visible=False
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             info1abc = gr.Textbox(label=process_info(process_name_1abc, "info"))
 
             pretrained_s2G.change(sync, [pretrained_s2G], [pretrained_s2G_])
@@ -1656,19 +1589,13 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                     alpha,
                     n_process,
                 ],
-                [slicer_info, open_slicer_button, close_slicer_button, asr_inp_dir, denoise_input_dir, inp_wav_dir],
+                [slicer_info, open_slicer_button, close_slicer_button, asr_inp_dir, inp_wav_dir],
             )
             close_slicer_button.click(close_slice, [], [slicer_info, open_slicer_button, close_slicer_button])
-            open_denoise_button.click(
-                open_denoise,
-                [denoise_input_dir, denoise_output_dir],
-                [denoise_info, open_denoise_button, close_denoise_button, asr_inp_dir, inp_wav_dir],
-            )
-            close_denoise_button.click(close_denoise, [], [denoise_info, open_denoise_button, close_denoise_button])
 
             button1a_open.click(
                 open1a,
-                [inp_text, inp_wav_dir, exp_name, gpu_numbers1a, bert_pretrained_dir],
+                [inp_text, inp_wav_dir, exp_name, gpu_numbers1a, bert_pretrained_dir, version_checkbox, n_processes],
                 [info1a, button1a_open, button1a_close],
             )
             button1a_close.click(close1a, [], [info1a, button1a_open, button1a_close])
@@ -1704,149 +1631,152 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
 
             with gr.TabItem("1B-" + i18n("微调训练")):
                 with gr.Accordion(label="1Ba-" + i18n("SoVITS 训练: 模型权重文件在 SoVITS_weights/")):
-                    with gr.Row():
+                    with gr.Row(equal_height=True):
+                        batch_size = gr.Slider(
+                            minimum=1,
+                            maximum=default_max_batch_size,
+                            step=1,
+                            label=i18n("每张显卡的batch_size"),
+                            value=default_batch_size,
+                            interactive=True,
+                        )
+                        total_epoch = gr.Slider(
+                            minimum=1,
+                            maximum=max_sovits_epoch,
+                            step=1,
+                            label=i18n("总训练轮数total_epoch，不建议太高"),
+                            value=default_sovits_epoch,
+                            interactive=True,
+                        )
+                        with gr.Column(scale=2):
+                            if_save_latest = gr.Checkbox(
+                                label=i18n("是否仅保存最新的权重文件以节省硬盘空间"),
+                                value=True,
+                                interactive=True,
+                                show_label=True,
+                            )
+                            if_save_every_weights = gr.Checkbox(
+                                label=i18n("是否在每次保存时间点将最终小模型保存至weights文件夹"),
+                                value=True,
+                                interactive=True,
+                                show_label=True,
+                            )
+                            if_grad_ckpt = gr.Checkbox(
+                                label="v3是否开启梯度检查点节省显存占用",
+                                value=False,
+                                interactive=True if version in v3v4set else False,
+                                show_label=True,
+                                visible=False,
+                            )  # 只有V3s2可以用
+                    with gr.Row(equal_height=True):
+                        text_low_lr_rate = gr.Slider(
+                            minimum=0.2,
+                            maximum=0.6,
+                            step=0.05,
+                            label=i18n("文本模块学习率权重"),
+                            value=0.4,
+                            visible=True if version not in v3v4set else False,
+                        )  # v3v4 not need
+                        lora_rank = gr.Radio(
+                            label=i18n("LoRA秩"),
+                            value="32",
+                            choices=["16", "32", "64", "128"],
+                            visible=True if version in v3v4set else False,
+                        )  # v1v2 not need
+                        save_every_epoch = gr.Slider(
+                            minimum=1,
+                            maximum=max_sovits_save_every_epoch,
+                            step=1,
+                            label=i18n("保存频率save_every_epoch"),
+                            value=default_sovits_save_every_epoch,
+                            interactive=True,
+                        )
+                        with gr.Column(scale=3):
+                            gpu_numbers1Ba = gr.Dropdown(
+                                label=i18n("GPU卡号"),
+                                choices=GPU_INDEX_LIST,
+                                value=GPU_INDEX_LIST,
+                                interactive=True,
+                                multiselect=True,
+                                allow_custom_value=False,
+                            )
+                    with gr.Row(equal_height=True):
                         with gr.Column():
-                            with gr.Row():
-                                batch_size = gr.Slider(
-                                    minimum=1,
-                                    maximum=default_max_batch_size,
-                                    step=1,
-                                    label=i18n("每张显卡的batch_size"),
-                                    value=default_batch_size,
-                                    interactive=True,
-                                )
-                                total_epoch = gr.Slider(
-                                    minimum=1,
-                                    maximum=max_sovits_epoch,
-                                    step=1,
-                                    label=i18n("总训练轮数total_epoch，不建议太高"),
-                                    value=default_sovits_epoch,
-                                    interactive=True,
-                                )
-                            with gr.Row():
-                                text_low_lr_rate = gr.Slider(
-                                    minimum=0.2,
-                                    maximum=0.6,
-                                    step=0.05,
-                                    label=i18n("文本模块学习率权重"),
-                                    value=0.4,
-                                    visible=True if version not in v3v4set else False,
-                                )  # v3v4 not need
-                                lora_rank = gr.Radio(
-                                    label=i18n("LoRA秩"),
-                                    value="32",
-                                    choices=["16", "32", "64", "128"],
-                                    visible=True if version in v3v4set else False,
-                                )  # v1v2 not need
-                                save_every_epoch = gr.Slider(
-                                    minimum=1,
-                                    maximum=max_sovits_save_every_epoch,
-                                    step=1,
-                                    label=i18n("保存频率save_every_epoch"),
-                                    value=default_sovits_save_every_epoch,
-                                    interactive=True,
-                                )
-                        with gr.Column():
-                            with gr.Column():
-                                if_save_latest = gr.Checkbox(
-                                    label=i18n("是否仅保存最新的权重文件以节省硬盘空间"),
-                                    value=True,
-                                    interactive=True,
-                                    show_label=True,
-                                )
-                                if_save_every_weights = gr.Checkbox(
-                                    label=i18n("是否在每次保存时间点将最终小模型保存至weights文件夹"),
-                                    value=True,
-                                    interactive=True,
-                                    show_label=True,
-                                )
-                                if_grad_ckpt = gr.Checkbox(
-                                    label="v3是否开启梯度检查点节省显存占用",
-                                    value=False,
-                                    interactive=True if version in v3v4set else False,
-                                    show_label=True,
-                                    visible=False,
-                                )  # 只有V3s2可以用
-                            with gr.Row():
-                                gpu_numbers1Ba = gr.Textbox(
-                                    label=i18n("GPU卡号以-分割，每个卡号一个进程"),
-                                    value="%s" % (gpus),
-                                    interactive=True,
-                                )
-                    with gr.Row():
-                        with gr.Row():
                             button1Ba_open = gr.Button(
                                 value=process_info(process_name_sovits, "open"), variant="primary", visible=True
                             )
                             button1Ba_close = gr.Button(
                                 value=process_info(process_name_sovits, "close"), variant="primary", visible=False
                             )
-                        with gr.Row():
+                        with gr.Column():
                             info1Ba = gr.Textbox(label=process_info(process_name_sovits, "info"))
                 with gr.Accordion(label="1Bb-" + i18n("GPT 训练: 模型权重文件在 GPT_weights/")):
-                    with gr.Row():
-                        with gr.Column():
-                            with gr.Row():
-                                batch_size1Bb = gr.Slider(
-                                    minimum=1,
-                                    maximum=40,
-                                    step=1,
-                                    label=i18n("每张显卡的batch_size"),
-                                    value=default_batch_size_s1,
-                                    interactive=True,
-                                )
-                                total_epoch1Bb = gr.Slider(
-                                    minimum=2,
-                                    maximum=50,
-                                    step=1,
-                                    label=i18n("总训练轮数total_epoch"),
-                                    value=15,
-                                    interactive=True,
-                                )
-                            with gr.Row():
-                                save_every_epoch1Bb = gr.Slider(
-                                    minimum=1,
-                                    maximum=50,
-                                    step=1,
-                                    label=i18n("保存频率save_every_epoch"),
-                                    value=5,
-                                    interactive=True,
-                                )
-                                if_dpo = gr.Checkbox(
-                                    label=i18n("是否开启DPO训练选项(实验性)"),
-                                    value=False,
-                                    interactive=True,
-                                    show_label=True,
-                                )
-                        with gr.Column():
-                            with gr.Column():
-                                if_save_latest1Bb = gr.Checkbox(
-                                    label=i18n("是否仅保存最新的权重文件以节省硬盘空间"),
-                                    value=True,
-                                    interactive=True,
-                                    show_label=True,
-                                )
-                                if_save_every_weights1Bb = gr.Checkbox(
-                                    label=i18n("是否在每次保存时间点将最终小模型保存至weights文件夹"),
-                                    value=True,
-                                    interactive=True,
-                                    show_label=True,
-                                )
-                            with gr.Row():
-                                gpu_numbers1Bb = gr.Textbox(
-                                    label=i18n("GPU卡号以-分割，每个卡号一个进程"),
-                                    value="%s" % (gpus),
-                                    interactive=True,
-                                )
-                    with gr.Row():
-                        with gr.Row():
-                            button1Bb_open = gr.Button(
-                                value=process_info(process_name_gpt, "open"), variant="primary", visible=True
+                    with gr.Row(equal_height=True):
+                        batch_size1Bb = gr.Slider(
+                            minimum=1,
+                            maximum=40,
+                            step=1,
+                            label=i18n("每张显卡的batch_size"),
+                            value=default_batch_size_s1,
+                            interactive=True,
+                        )
+                        total_epoch1Bb = gr.Slider(
+                            minimum=2,
+                            maximum=50,
+                            step=1,
+                            label=i18n("总训练轮数total_epoch"),
+                            value=15,
+                            interactive=True,
+                        )
+                        with gr.Column(scale=2):
+                            if_save_latest1Bb = gr.Checkbox(
+                                label=i18n("是否仅保存最新的权重文件以节省硬盘空间"),
+                                value=True,
+                                interactive=True,
+                                show_label=True,
                             )
-                            button1Bb_close = gr.Button(
-                                value=process_info(process_name_gpt, "close"), variant="primary", visible=False
+                            if_save_every_weights1Bb = gr.Checkbox(
+                                label=i18n("是否在每次保存时间点将最终小模型保存至weights文件夹"),
+                                value=True,
+                                interactive=True,
+                                show_label=True,
                             )
-                        with gr.Row():
+                    with gr.Row(equal_height=True):
+                        # with gr.Column():
+                        save_every_epoch1Bb = gr.Slider(
+                            minimum=1,
+                            maximum=50,
+                            step=1,
+                            label=i18n("保存频率save_every_epoch"),
+                            value=5,
+                            interactive=True,
+                        )
+                        # with gr.Column():
+                        if_dpo = gr.Checkbox(
+                            label=i18n("是否开启DPO训练选项(实验性)"),
+                            value=False,
+                            interactive=True,
+                            show_label=True,
+                        )
+                        with gr.Column(scale=2):
+                            gpu_numbers1Bb = gr.Dropdown(
+                                label=i18n("GPU卡号"),
+                                choices=GPU_INDEX_LIST,
+                                value=GPU_INDEX_LIST,
+                                interactive=True,
+                                multiselect=True,
+                                allow_custom_value=False,
+                            )
+                    with gr.Row(equal_height=True):
+                        with gr.Column():
+                            with gr.Row(equal_height=True):
+                                button1Bb_open = gr.Button(
+                                    value=process_info(process_name_gpt, "open"), variant="primary", visible=True
+                                )
+                                button1Bb_close = gr.Button(
+                                    value=process_info(process_name_gpt, "close"), variant="primary", visible=False
+                                )
+                        with gr.Column():
                             info1Bb = gr.Textbox(label=process_info(process_name_gpt, "info"))
 
             button1Ba_close.click(close1Ba, [], [info1Ba, button1Ba_open, button1Ba_close])
@@ -1858,41 +1788,62 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                         "选择训练完存放在SoVITS_weights和GPT_weights下的模型。默认的几个是底模，体验5秒Zero Shot TTS不训练推理用。"
                     )
                 )
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     with gr.Column(scale=2):
-                        with gr.Row():
-                            GPT_dropdown = gr.Dropdown(
-                                label=i18n("GPT模型列表"),
-                                choices=GPT_names,
-                                value=GPT_names[-1],
-                                interactive=True,
-                            )
-                            SoVITS_dropdown = gr.Dropdown(
-                                label=i18n("SoVITS模型列表"),
-                                choices=SoVITS_names,
-                                value=SoVITS_names[0],
-                                interactive=True,
-                            )
+                        with gr.Row(equal_height=True):
+                            with gr.Column():
+                                GPT_dropdown = gr.Dropdown(
+                                    label=i18n("GPT模型列表"),
+                                    choices=GPT_names,
+                                    value=GPT_names[-1],
+                                    interactive=True,
+                                )
+                            with gr.Column():
+                                SoVITS_dropdown = gr.Dropdown(
+                                    label=i18n("SoVITS模型列表"),
+                                    choices=SoVITS_names,
+                                    value=SoVITS_names[0],
+                                    interactive=True,
+                                )
                     with gr.Column(scale=2):
-                        with gr.Row():
-                            gpu_number_1C = gr.Textbox(
-                                label=i18n("GPU卡号,只能填1个整数"), value=gpus, interactive=True
+                        with gr.Row(equal_height=True):
+                            gpu_number_1C = gr.Dropdown(
+                                label=i18n("GPU卡号"),
+                                choices=GPU_INDEX_LIST,
+                                value=infer_device.index,
+                                interactive=True,
+                                multiselect=True,
+                                allow_custom_value=False,
                             )
                             refresh_button = gr.Button(i18n("刷新模型路径"), variant="primary")
                     refresh_button.click(fn=change_choices, inputs=[], outputs=[SoVITS_dropdown, GPT_dropdown])
                 with gr.Row(equal_height=True):
-                    with gr.Row():
-                        batched_infer_enabled = gr.Checkbox(
-                            label=i18n("启用并行推理版本"), value=False, interactive=True, show_label=True
-                        )
+                    with gr.Row(equal_height=True):
+                        with gr.Column():
+                            batched_infer_enabled = gr.Checkbox(
+                                label=i18n("启用并行推理版本"), value=False, interactive=True, show_label=True
+                            )
+                        with gr.Column():
+                            backends_dropdown = gr.Dropdown(
+                                choices=backends_gradio,
+                                label=i18n("推理后端"),
+                                value=backends_gradio[-1][-1],
+                                interactive=True,
+                            )
+                    with gr.Row(equal_height=True):
+                        tts_info = gr.Textbox(label=process_info(process_name_tts, "info"))
                         open_tts = gr.Button(
                             value=process_info(process_name_tts, "open"), variant="primary", visible=True
                         )
                         close_tts = gr.Button(
                             value=process_info(process_name_tts, "close"), variant="primary", visible=False
                         )
-                    with gr.Column():
-                        tts_info = gr.Textbox(label=process_info(process_name_tts, "info"), scale=2)
+
+                    batched_infer_enabled.change(
+                        changeBackend,
+                        [batched_infer_enabled],
+                        [backends_dropdown],
+                    )
                     open_tts.click(
                         change_tts_inference,
                         [
@@ -1902,6 +1853,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                             GPT_dropdown,
                             SoVITS_dropdown,
                             batched_infer_enabled,
+                            backends_dropdown,
                         ],
                         [tts_info, open_tts, close_tts],
                     )
@@ -1914,6 +1866,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                             GPT_dropdown,
                             SoVITS_dropdown,
                             batched_infer_enabled,
+                            backends_dropdown,
                         ],
                         [tts_info, open_tts, close_tts],
                     )

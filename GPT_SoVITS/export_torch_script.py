@@ -1,28 +1,24 @@
 # modified from https://github.com/yangdongchao/SoundStorm/blob/master/soundstorm/s1/AR/models/t2s_model.py
 # reference: https://github.com/lifeiteng/vall-e
 import argparse
+import os
 from io import BytesIO
 from typing import Optional
-from my_utils import load_audio
+
+import kaldi as Kaldi
+import soundfile
 import torch
 import torchaudio
-
+from feature_extractor import cnhubert
+from inference_webui import get_phones_and_bert
+from my_utils import load_audio
+from sv import SV
 from torch import IntTensor, LongTensor, Tensor, nn
 from torch.nn import functional as F
-
 from transformers import AutoModelForMaskedLM, AutoTokenizer
-from feature_extractor import cnhubert
 
-from AR.models.t2s_lightning_module import Text2SemanticLightningModule
-from module.models_onnx import SynthesizerTrn
-
-from inference_webui import get_phones_and_bert
-
-from sv import SV
-import kaldi as Kaldi
-
-import os
-import soundfile
+from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
+from GPT_SoVITS.module.models_onnx import SynthesizerTrn
 
 default_config = {
     "embedding_dim": 512,
@@ -477,7 +473,7 @@ class T2SModel(nn.Module):
 
         # avoid dtype inconsistency when exporting
         bert = bert.to(dtype=self.bert_proj.weight.dtype)
-        
+
         x = x + self.bert_proj(bert.transpose(1, 2))
         x: torch.Tensor = self.ar_text_position(x)
 
@@ -737,7 +733,7 @@ def export_prov2(
     device="cpu",
     is_half=True,
 ):
-    if sv_cn_model == None:
+    if sv_cn_model is None:
         init_sv_cn(device, is_half)
 
     if not os.path.exists(output_path):
@@ -1041,8 +1037,9 @@ def test():
     soundfile.write("out.wav", audio.detach().cpu().numpy(), 32000)
 
 
-import text
 import json
+
+import text
 
 
 def export_symbel(version="v2"):

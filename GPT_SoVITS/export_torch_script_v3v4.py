@@ -1,4 +1,13 @@
+import logging
 import os
+
+import librosa
+import numpy as np
+import soundfile
+import torch
+import torch._dynamo.config
+import torchaudio
+import uvicorn
 from export_torch_script import (
     T2SModel,
     get_raw_t2s_model,
@@ -6,22 +15,12 @@ from export_torch_script import (
     spectrogram_torch,
 )
 from f5_tts.model.backbones.dit import DiT
-from inference_webui import get_phones_and_bert
-import librosa
-from module import commons
-from module.mel_processing import mel_spectrogram_torch
-from module.models_onnx import CFM, Generator, SynthesizerTrnV3
-import numpy as np
-import torch._dynamo.config
-import torchaudio
-import logging
-import uvicorn
-import torch
-import soundfile
+from inference_webui import get_phones_and_bert, get_spepc, norm_spec, resample, ssl_model
 from librosa.filters import mel as librosa_mel_fn
 
-
-from inference_webui import get_spepc, norm_spec, resample, ssl_model
+from GPT_SoVITS.module import commons
+from GPT_SoVITS.module.mel_processing import mel_spectrogram_torch
+from GPT_SoVITS.module.models_onnx import CFM, Generator, SynthesizerTrnV3
 
 logging.config.dictConfig(uvicorn.config.LOGGING_CONFIG)
 logger = logging.getLogger("uvicorn")
@@ -176,32 +175,33 @@ class ExportCFM(torch.nn.Module):
         return cfm_res, fea_ref, mel2
 
 
-mel_fn = lambda x: mel_spectrogram_torch(
-    x,
-    **{
-        "n_fft": 1024,
-        "win_size": 1024,
-        "hop_size": 256,
-        "num_mels": 100,
-        "sampling_rate": 24000,
-        "fmin": 0,
-        "fmax": None,
-        "center": False,
-    },
-)
-mel_fn_v4 = lambda x: mel_spectrogram_torch(
-    x,
-    **{
-        "n_fft": 1280,
-        "win_size": 1280,
-        "hop_size": 320,
-        "num_mels": 100,
-        "sampling_rate": 32000,
-        "fmin": 0,
-        "fmax": None,
-        "center": False,
-    },
-)
+def mel_fn(x):
+    return mel_spectrogram_torch(
+        y=x,
+        n_fft=1024,
+        num_mels=100,
+        sampling_rate=24000,
+        hop_size=256,
+        win_size=1024,
+        fmin=0,
+        fmax=None,
+        center=False,
+    )
+
+
+def mel_fn_v4(x):
+    return mel_spectrogram_torch(
+        y=x,
+        n_fft=1280,
+        num_mels=100,
+        sampling_rate=32000,
+        hop_size=320,
+        win_size=1280,
+        fmin=0,
+        fmax=None,
+        center=False,
+    )
+
 
 spec_min = -12
 spec_max = 2
@@ -511,7 +511,7 @@ def init_bigvgan():
     # remove weight norm in the model and set to eval mode
     bigvgan_model.remove_weight_norm()
     bigvgan_model = bigvgan_model.eval()
-    if is_half == True:
+    if is_half is True:
         bigvgan_model = bigvgan_model.half().to(device)
     else:
         bigvgan_model = bigvgan_model.to(device)
@@ -536,7 +536,7 @@ def init_hifigan():
         "%s/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/vocoder.pth" % (now_dir,), map_location="cpu"
     )
     print("loading vocoder", hifigan_model.load_state_dict(state_dict_g))
-    if is_half == True:
+    if is_half is True:
         hifigan_model = hifigan_model.half().to(device)
     else:
         hifigan_model = hifigan_model.to(device)
@@ -578,7 +578,7 @@ class DictToAttrRecursive(dict):
             raise AttributeError(f"Attribute {item} not found")
 
 
-from process_ckpt import get_sovits_version_from_path_fast, load_sovits_new
+from GPT_SoVITS.process_ckpt import get_sovits_version_from_path_fast, load_sovits_new
 
 v3v4set = {"v3", "v4"}
 
@@ -588,7 +588,7 @@ def get_sovits_weights(sovits_path):
     is_exist_s2gv3 = os.path.exists(path_sovits_v3)
 
     version, model_version, if_lora_v3 = get_sovits_version_from_path_fast(sovits_path)
-    if if_lora_v3 == True and is_exist_s2gv3 == False:
+    if if_lora_v3 is True and is_exist_s2gv3 is False:
         logger.info("SoVITS V3 底模缺失，无法加载相应 LoRA 权重")
 
     dict_s2 = load_sovits_new(sovits_path)
@@ -617,7 +617,7 @@ def get_sovits_weights(sovits_path):
     model_version = hps.model.version
     logger.info(f"模型版本: {model_version}")
 
-    if is_half == True:
+    if is_half is True:
         vq_model = vq_model.half().to(device)
     else:
         vq_model = vq_model.to(device)
@@ -729,11 +729,11 @@ def export_1(ref_wav_path, ref_wav_text, version="v3"):
     # ref_wav_path = "onnx/ad/ref.wav"
     speed = 1.0
     sample_steps = 8
-    dtype = torch.float16 if is_half == True else torch.float32
+    dtype = torch.float16 if is_half is True else torch.float32
     refer = get_spepc(hps, ref_wav_path).to(device).to(dtype)
     zero_wav = np.zeros(
         int(hps.data.sampling_rate * 0.3),
-        dtype=np.float16 if is_half == True else np.float32,
+        dtype=np.float16 if is_half is True else np.float32,
     )
 
     with torch.no_grad():
@@ -741,7 +741,7 @@ def export_1(ref_wav_path, ref_wav_text, version="v3"):
         wav16k = torch.from_numpy(wav16k)
         zero_wav_torch = torch.from_numpy(zero_wav)
 
-        if is_half == True:
+        if is_half is True:
             wav16k = wav16k.half().to(device)
             zero_wav_torch = zero_wav_torch.half().to(device)
         else:
@@ -940,11 +940,11 @@ def test_export(
     speed = 1.0
     sample_steps = 8
 
-    dtype = torch.float16 if is_half == True else torch.float32
+    dtype = torch.float16 if is_half is True else torch.float32
 
     zero_wav = np.zeros(
         int(16000 * 0.3),
-        dtype=np.float16 if is_half == True else np.float32,
+        dtype=np.float16 if is_half is True else np.float32,
     )
 
     with torch.no_grad():
@@ -952,7 +952,7 @@ def test_export(
         wav16k = torch.from_numpy(wav16k)
         zero_wav_torch = torch.from_numpy(zero_wav)
 
-        if is_half == True:
+        if is_half is True:
             wav16k = wav16k.half().to(device)
             zero_wav_torch = zero_wav_torch.half().to(device)
         else:
@@ -1058,11 +1058,11 @@ def test_export(
     speed = 1.0
     sample_steps = torch.LongTensor([16])
 
-    dtype = torch.float16 if is_half == True else torch.float32
+    dtype = torch.float16 if is_half is True else torch.float32
 
     zero_wav = np.zeros(
         int(out_sr * 0.3),
-        dtype=np.float16 if is_half == True else np.float32,
+        dtype=np.float16 if is_half is True else np.float32,
     )
 
     with torch.no_grad():
@@ -1070,7 +1070,7 @@ def test_export(
         wav16k = torch.from_numpy(wav16k)
         zero_wav_torch = torch.from_numpy(zero_wav)
 
-        if is_half == True:
+        if is_half is True:
             wav16k = wav16k.half().to(device)
             zero_wav_torch = zero_wav_torch.half().to(device)
         else:

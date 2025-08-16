@@ -295,7 +295,7 @@ class Roformer_Loader:
         state_dict = torch.load(model_path, map_location="cpu")
         model.load_state_dict(state_dict)
 
-        if is_half == False:
+        if is_half is False:
             self.model = model.to(device)
         else:
             self.model = model.half().to(device)

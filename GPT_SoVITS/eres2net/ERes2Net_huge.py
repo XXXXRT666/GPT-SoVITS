@@ -9,11 +9,12 @@ ERes2Net-huge is an upgraded version of ERes2Net that uses a larger number of pa
 recognition performance. Parameters expansion, baseWidth, and scale can be modified to obtain optimal performance.
 """
 
-import torch
 import math
+
+import pooling_layers as pooling_layers
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pooling_layers as pooling_layers
 from fusion import AFF
 
 
@@ -252,7 +253,7 @@ class ERes2Net(nn.Module):
         out4 = self.layer4(out3)
         fuse_out123_downsample = self.layer3_downsample(fuse_out123)
         fuse_out1234 = self.fuse_mode1234(out4, fuse_out123_downsample).flatten(start_dim=1, end_dim=2)  # bs,20480,T
-        if if_mean == False:
+        if if_mean is False:
             mean = fuse_out1234[0].transpose(1, 0)  # (T,20480),bs=T
         else:
             mean = fuse_out1234.mean(2)  # bs,20480

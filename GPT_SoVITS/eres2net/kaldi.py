@@ -663,7 +663,7 @@ def fbank(
         # avoid log of zero (which should be prevented anyway by dithering)
         mel_energies = torch.max(mel_energies, _get_epsilon(device, dtype)).log()
 
-    # if use_energy then add it as the last column for htk_compat == true else first column
+    # if use_energy then add it as the last column for htk_compat is True else first column
     if use_energy:
         signal_log_energy = signal_log_energy.unsqueeze(1)  # size (m, 1)
         # returns size (m, num_mel_bins + 1)
@@ -826,7 +826,7 @@ def mfcc(
         lifter_coeffs = _get_lifter_coeffs(num_ceps, cepstral_lifter).unsqueeze(0)
         feature *= lifter_coeffs.to(device=device, dtype=dtype)
 
-    # if use_energy then replace the last column for htk_compat == true else first column
+    # if use_energy then replace the last column for htk_compat is True else first column
     if use_energy:
         feature[:, 0] = signal_log_energy
 

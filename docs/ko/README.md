@@ -19,7 +19,6 @@
 [![Change Log](https://img.shields.io/badge/Change%20Log-View%20Updates-blue?style=for-the-badge&logo=googledocs&logoColor=white)](https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/en/Changelog_EN.md)
 [![License](https://img.shields.io/badge/LICENSE-MIT-green.svg?style=for-the-badge&logo=opensourceinitiative)](https://github.com/RVC-Boss/GPT-SoVITS/blob/main/LICENSE)
 
-
 [**English**](../../README.md) | [**中文简体**](../cn/README.md) | [**日本語**](../ja/README.md) | **한국어** | [**Türkçe**](../tr/README.md)
 
 </div>
@@ -228,13 +227,13 @@ V1으로 전환하려면, `go-webui-v1.bat`을 더블 클릭하거나 `go-webui-
 #### 기타
 
 ```bash
-python webui.py <언어(옵션)>
+PYTHONPATH=. python webui.py <언어(옵션)>
 ```
 
 V1으로 전환하려면,
 
 ```bash
-python webui.py v1 <언어(옵션)>
+PYTHONPATH=. python webui.py v1 <언어(옵션)>
 ```
 
 또는 WebUI에서 수동으로 버전을 전환하십시오.
@@ -265,7 +264,7 @@ python GPT_SoVITS/inference_webui.py <언어(옵션)>
 또는
 
 ```bash
-python webui.py
+PYTHONPATH=. python webui.py
 ```
 
 그런 다음 `1-GPT-SoVITS-TTS/1C-inference`에서 추론 webui를 엽니다.
@@ -312,7 +311,7 @@ v2 환경에서 v3 사용하기:
 
 3. v3 사전 훈련된 모델(s1v3.ckpt, s2Gv3.pth, 그리고 models--nvidia--bigvgan_v2_24khz_100band_256x 폴더)을 [huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main)에서 다운로드하여 `GPT_SoVITS/pretrained_models` 폴더에 넣습니다.
 
-   추가: 오디오 슈퍼 해상도 모델에 대해서는 [다운로드 방법](../../tools/AP_BWE_main/24kto48k/readme.txt)을 참고하세요.
+   추가: 오디오 슈퍼 해상도 모델에 대해서는 [다운로드 방법](../../tools/AP_BWE/24kto48k/readme.txt)을 참고하세요.
 
 ## V4 릴리스 노트
 

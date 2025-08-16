@@ -145,9 +145,20 @@ webui_port_subfix = 9871
 api_port = 9880
 
 
+def get_dtype(idx: int):
+    if not torch.cuda.is_available():
+        return torch.float32
+    capability = torch.cuda.get_device_capability(idx)
+    major, minor = capability
+    sm_version = major + minor / 10.0
+    if sm_version > 6.1:
+        return torch.float16
+    return torch.float32
+
+
 # Thanks to the contribution of @Karasukaigan and @XXXXRT666
 def get_device_dtype_sm(idx: int) -> tuple[torch.device, torch.dtype, float, float]:
-    cpu = torch.device("cpu")
+    cpu = torch.device("cpu:0")
     cuda = torch.device(f"cuda:{idx}")
     if not torch.cuda.is_available():
         return cpu, torch.float32, 0.0, 0.0
@@ -161,7 +172,7 @@ def get_device_dtype_sm(idx: int) -> tuple[torch.device, torch.dtype, float, flo
     is_16_series = bool(re.search(r"16\d{2}", name)) and sm_version == 7.5
     if mem_gb < 4 or sm_version < 5.3:
         return cpu, torch.float32, 0.0, 0.0
-    if sm_version == 6.1 or is_16_series == True:
+    if sm_version == 6.1 or is_16_series is True:
         return cuda, torch.float32, sm_version, mem_gb
     if sm_version > 6.1:
         return cuda, torch.float16, sm_version, mem_gb
@@ -190,8 +201,11 @@ if not GPU_INFOS:
     IS_GPU = False
     GPU_INFOS.append(CPU_INFO)
     GPU_INDEX.add(0)
+if torch.mps.is_available():
+    infer_device = torch.device("mps:0")
+else:
+    infer_device = max(tmp, key=lambda x: (x[2], x[3]))[0]
 
-infer_device = max(tmp, key=lambda x: (x[2], x[3]))[0]
 is_half = any(dtype == torch.float16 for _, dtype, _, _ in tmp)
 
 
@@ -216,3 +230,22 @@ class Config:
         self.webui_port_subfix = webui_port_subfix
 
         self.api_port = api_port
+
+
+def get_implement(device: torch.device):
+    if torch.cuda.is_available():
+        idx = device.index
+        capability = torch.cuda.get_device_capability(idx)
+        major, minor = capability
+        sm_version = major + minor / 10.0
+        if sm_version >= 7.5:
+            return "flash_attn"
+        else:
+            if sys.platform == "linux":
+                return "sage_attn"
+            else:
+                return "naive"
+    elif torch.mps.is_available():
+        return "mlx"
+    else:
+        return "naive"
