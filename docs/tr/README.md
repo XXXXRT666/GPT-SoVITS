@@ -25,7 +25,7 @@ Güçlü Birkaç Örnekli Ses Dönüştürme ve Metinden Konuşmaya Web Arayüz�
 
 ---
 
-## Özellikler:
+## Özellikler
 
 1. **Sıfır Örnekli Metinden Konuşmaya:** 5 saniyelik bir vokal örneği girin ve anında metinden konuşmaya dönüşümünü deneyimleyin.
 
@@ -39,7 +39,16 @@ Güçlü Birkaç Örnekli Ses Dönüştürme ve Metinden Konuşmaya Web Arayüz�
 
 Görünmeyen konuşmacılar birkaç örnekli ince ayar demosu:
 
-https://github.com/RVC-Boss/GPT-SoVITS/assets/129054828/05bee1fa-bdd8-4d85-9350-80c060ab47fb
+<https://github.com/RVC-Boss/GPT-SoVITS/assets/129054828/05bee1fa-bdd8-4d85-9350-80c060ab47fb>
+
+## çıkarım hızı
+
+| Device      | RTF   | Batch Size | Backend                     |
+| ----------- | ----- | ---------- | --------------------------- |
+| RTX 5090    | 0.05  | 1          | Flash Attn Varlen CUDAGraph |
+| Apple M4    | 0.21  | 1          | MLX Quantized Affined       |
+| RTX 4090    | 0.014 | 24         | Flash Attn Varlen CUDAGraph |
+| RTX 4060 Ti | 0.028 | 28         | Flash Attn Varlen CUDAGraph |
 
 **Kullanıcı Kılavuzu: [简体中文](https://www.yuque.com/baicaigongchang1145haoyuangong/ib3g1e) | [English](https://rentry.co/GPT-SoVITS-guide#/)**
 
@@ -47,15 +56,13 @@ https://github.com/RVC-Boss/GPT-SoVITS/assets/129054828/05bee1fa-bdd8-4d85-9350-
 
 ### Test Edilmiş Ortamlar
 
-| Python Version | PyTorch Version  | Device        |
-| -------------- | ---------------- | ------------- |
-| Python 3.10    | PyTorch 2.5.1    | CUDA 12.4     |
-| Python 3.11    | PyTorch 2.5.1    | CUDA 12.4     |
-| Python 3.11    | PyTorch 2.7.0    | CUDA 12.8     |
-| Python 3.9     | PyTorch 2.8.0dev | CUDA 12.8     |
-| Python 3.9     | PyTorch 2.5.1    | Apple silicon |
-| Python 3.11    | PyTorch 2.7.0    | Apple silicon |
-| Python 3.9     | PyTorch 2.2.2    | CPU           |
+| Python Version | PyTorch Version | Device        |
+| -------------- | --------------- | ------------- |
+| Python 3.10    | PyTorch 2.5.1   | CUDA 12.4     |
+| Python 3.11    | PyTorch 2.5.1   | CUDA 12.4     |
+| Python 3.11    | PyTorch 2.7.0   | CUDA 12.8     |
+| Python 3.11    | PyTorch 2.8.0   | Apple Silicon |
+| Python 3.10    | PyTorch 2.8.0   | CPU           |
 
 ### Windows
 
@@ -84,7 +91,7 @@ Aşağıdaki komutları çalıştırarak programı yükleyin:
 ```bash
 conda create -n GPTSoVits python=3.10
 conda activate GPTSoVits
-bash install.sh --device <MPS|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
 ```
 
 ### El ile Yükleme
@@ -105,13 +112,13 @@ pip install -r requirements.txt
 
 ```bash
 conda activate GPTSoVits
-conda install ffmpeg
+conda install ffmpeg=7 -c conda-forge
 ```
 
 ##### Ubuntu/Debian Kullanıcıları
 
 ```bash
-sudo apt install ffmpeg
+sudo apt install ffmpeg=7
 sudo apt install libsox-dev
 ```
 
@@ -232,14 +239,6 @@ V1'e geçmek istiyorsanız, `go-webui-v1.bat` dosyasına çift tıklayın veya `
 python webui.py <dil(isteğe bağlı)>
 ```
 
-V1'e geçmek istiyorsanız,
-
-```bash
-python webui.py v1 <dil(isteğe bağlı)>
-```
-
-veya WebUI'de manuel olarak sürüm değiştirin.
-
 ### İnce Ayar
 
 #### Yol Otomatik Doldurma artık destekleniyor
@@ -259,13 +258,13 @@ veya WebUI'de manuel olarak sürüm değiştirin.
 
 #### Diğerleri
 
-```bash
-python GPT_SoVITS/inference_webui.py <dil(isteğe bağlı)>
+```text
+PYTHONPATH=. python GPT_SoVITS/inference_webui.py <language(optional)> -b <backend> -p <port>
 ```
 
 VEYA
 
-```bash
+```text
 python webui.py
 ```
 
@@ -313,7 +312,7 @@ V2 ortamında V3 kullanımı:
 
 3. [huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main) üzerinden v3 önceden eğitilmiş modellerini (s1v3.ckpt, s2Gv3.pth ve models--nvidia--bigvgan_v2_24khz_100band_256x klasörünü) indirin ve `GPT_SoVITS/pretrained_models` dizinine yerleştirin.
 
-   ek: Ses Süper Çözünürlük modeli için [nasıl indirileceği](../../tools/AP_BWE_main/24kto48k/readme.txt) hakkında bilgi alabilirsiniz.
+   ek: Ses Süper Çözünürlük modeli için [nasıl indirileceği](../../tools/AP_BWE/24kto48k/readme.txt) hakkında bilgi alabilirsiniz.
 
 ## V4 Sürüm Notları
 

@@ -1,118 +1,313 @@
+import enum
+import gc
 import os
-
-inp_text = os.environ.get("inp_text")
-exp_name = os.environ.get("exp_name")
-i_part = os.environ.get("i_part")
-all_parts = os.environ.get("all_parts")
-if "_CUDA_VISIBLE_DEVICES" in os.environ:
-    os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["_CUDA_VISIBLE_DEVICES"]
-opt_dir = os.environ.get("opt_dir")
-pretrained_s2G = os.environ.get("pretrained_s2G")
-s2config_path = os.environ.get("s2config_path")
-
-if os.path.exists(pretrained_s2G):
-    ...
-else:
-    raise FileNotFoundError(pretrained_s2G)
-# version=os.environ.get("version","v2")
-size = os.path.getsize(pretrained_s2G)
-if size < 82978 * 1024:
-    version = "v1"
-elif size < 100 * 1024 * 1024:
-    version = "v2"
-elif size < 103520 * 1024:
-    version = "v1"
-elif size < 700 * 1024 * 1024:
-    version = "v2"
-else:
-    version = "v3"
-import torch
-
-is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
-import traceback
+import os.path as osp
+import platform
+import queue
 import sys
+import time
+from pathlib import Path
+from typing import List, Tuple
 
-now_dir = os.getcwd()
-sys.path.append(now_dir)
-import logging
-import utils
+import torch
+import torch.multiprocessing as tmp
+import typer
+from rich.progress import BarColumn, Progress, TimeRemainingColumn, TextColumn
+from torch.multiprocessing.spawn import spawn
 
-if version != "v3":
-    from module.models import SynthesizerTrn
-else:
-    from module.models import SynthesizerTrnV3 as SynthesizerTrn
-from tools.my_utils import clean_path
+from GPT_SoVITS.Accelerate.logger import console, logger, SpeedColumnIteration
+from GPT_SoVITS.module.models import SynthesizerTrn, SynthesizerTrnV3
+from GPT_SoVITS.process_ckpt import inspect_version
+from tools.my_utils import DictToAttrRecursive, clean_path
 
-logging.getLogger("numba").setLevel(logging.WARNING)
-# from config import pretrained_s2G
+torch.set_grad_enabled(False)
 
-# inp_text=sys.argv[1]
-# exp_name=sys.argv[2]
-# i_part=sys.argv[3]
-# all_parts=sys.argv[4]
-# os.environ["CUDA_VISIBLE_DEVICES"]=sys.argv[5]
-# opt_dir="/data/docker/liujing04/gpt-vits/fine_tune_dataset/%s"%exp_name
+tmp.set_start_method("spawn", force=True)
 
 
-hubert_dir = "%s/4-cnhubert" % (opt_dir)
-semantic_path = "%s/6-name2semantic-%s.tsv" % (opt_dir, i_part)
-if os.path.exists(semantic_path) == False:
+class Device(str, enum.Enum):
+    cpu = "cpu"
+    cuda = "cuda"
+    mps = "mps"
+
+
+app = typer.Typer(
+    context_settings={"help_option_names": ["-h", "--help"]},
+    add_completion=False,
+)
+
+
+def parse_inp_text_line(line: str) -> str:
+    wav_name, _, __, ___ = line.split("|", 3)
+    return wav_name
+
+
+def build_device_strings(device_type: str, device_ids: List[int], procs_per_device: int) -> List[str]:
+    devices: List[str] = []
+    for device_id in device_ids:
+        dstr = f"{device_type}:{device_id}" if device_type in {"cuda", "mps"} else "cpu"
+        devices.extend([dstr] * procs_per_device)
+    return devices
+
+
+def worker_entry(
+    rank: int,
+    device_strs: List[str],
+    tasks_q: "tmp.Queue[Tuple[int, str] | None]",
+    results_q: "tmp.Queue[Tuple[int, str]]",
+    pretrained_s2g: str,
+    opt_dir: str,
+    fp16: bool,
+):
+    device_str = device_strs[rank]
+    device = torch.device(device_str)
+
+    if device.type == "cuda":
+        assert torch.cuda.is_available()
+        torch.cuda.set_device(device.index)
+    elif device.type == "mps":
+        assert torch.mps.is_available()
+    elif device.type == "xpu":
+        assert torch.xpu.is_available()
+
+    hubert_dir = osp.join(opt_dir, "4-cnhubert")
     os.makedirs(opt_dir, exist_ok=True)
 
-    if torch.cuda.is_available():
-        device = "cuda"
-    # elif torch.backends.mps.is_available():
-    #     device = "mps"
-    else:
-        device = "cpu"
-    hps = utils.get_hparams_from_file(s2config_path)
-    vq_model = SynthesizerTrn(
-        hps.data.filter_length // 2 + 1,
-        hps.train.segment_size // hps.data.hop_length,
-        n_speakers=hps.data.n_speakers,
-        version=version,
-        **hps.model,
-    )
-    if is_half == True:
-        vq_model = vq_model.half().to(device)
-    else:
-        vq_model = vq_model.to(device)
-    vq_model.eval()
-    # utils.load_checkpoint(utils.latest_checkpoint_path(hps.s2_ckpt_dir, "G_*.pth"), vq_model, None, True)
-    # utils.load_checkpoint(pretrained_s2G, vq_model, None, True)
-    print(
-        vq_model.load_state_dict(
-            torch.load(pretrained_s2G, map_location="cpu", weights_only=False)["weight"], strict=False
-        )
-    )
+    if not osp.exists(hubert_dir):
+        raise FileNotFoundError(hubert_dir)
 
-    def name2go(wav_name, lines):
-        hubert_path = "%s/%s.pt" % (hubert_dir, wav_name)
-        if os.path.exists(hubert_path) == False:
-            return
-        ssl_content = torch.load(hubert_path, map_location="cpu")
-        if is_half == True:
+    version, _, _, hps_dict, dict_s2 = inspect_version(pretrained_s2g)
+    hps = DictToAttrRecursive(hps_dict)
+
+    if version in {"v3", "v4"}:
+        vq_model: SynthesizerTrn | SynthesizerTrnV3 = SynthesizerTrnV3(
+            hps.data.filter_length // 2 + 1,
+            hps.train.segment_size // hps.data.hop_length,
+            n_speakers=hps.data.n_speakers,
+            version=version,
+            **hps.model,
+        )
+    else:
+        vq_model = SynthesizerTrn(
+            hps.data.filter_length // 2 + 1,
+            hps.train.segment_size // hps.data.hop_length,
+            n_speakers=hps.data.n_speakers,
+            version=version,
+            **hps.model,
+        )
+
+    load_result = vq_model.load_state_dict(dict_s2["weight"])
+    if rank == 0:
+        console.print("")
+        console.print(load_result)
+
+    for name in list(vq_model._modules.keys()):
+        if name not in ["quantizer", "ssl_proj"]:
+            del vq_model._modules[name]
+    del dict_s2
+
+    if fp16:
+        vq_model = vq_model.to(device).half()
+    else:
+        vq_model.to(device)
+
+    match device.index:
+        case "cuda":
+            torch.cuda.empty_cache()
+        case "mps":
+            torch.mps.empty_cache()
+        case "xpu":
+            torch.xpu.empty_cache()
+    gc.collect()
+
+    def extract_semantic_from_hubert_pt(wav_basename: str) -> str | None:
+        hubert_path = osp.join(hubert_dir, f"{wav_basename}.pt")
+        if not osp.exists(hubert_path):
+            return None
+
+        ssl_content: torch.Tensor = torch.load(hubert_path, map_location="cpu")
+        if fp16:
             ssl_content = ssl_content.half().to(device)
         else:
             ssl_content = ssl_content.to(device)
+
         codes = vq_model.extract_latent(ssl_content)
-        semantic = " ".join([str(i) for i in codes[0, 0, :].tolist()])
-        lines.append("%s\t%s" % (wav_name, semantic))
+        vec = codes[0, 0, :].tolist()
 
-    with open(inp_text, "r", encoding="utf8") as f:
-        lines = f.read().strip("\n").split("\n")
+        return " ".join(str(i) for i in vec)
 
-    lines1 = []
-    for line in lines[int(i_part) :: int(all_parts)]:
-        # print(line)
+    i = 0
+    while True:
+        item = tasks_q.get()
+        if item is None:
+            break
+
+        idx, wav_name = item
+
+        i += 1
+        if i % 10 == 0:
+            match device.index:
+                case "cuda":
+                    torch.cuda.empty_cache()
+                case "mps":
+                    torch.mps.empty_cache()
+                case "xpu":
+                    torch.xpu.empty_cache()
+
         try:
-            # wav_name,text=line.split("\t")
-            wav_name, spk_name, language, text = line.split("|")
-            wav_name = clean_path(wav_name)
-            wav_name = os.path.basename(wav_name)
-            # name2go(name,lines1)
-            name2go(wav_name, lines1)
-        except:
-            print(line, traceback.format_exc())
-    with open(semantic_path, "w", encoding="utf8") as f:
-        f.write("\n".join(lines1))
+            name = clean_path(osp.basename(wav_name))
+            semantic = extract_semantic_from_hubert_pt(name)
+            if semantic is None:
+                results_q.put((idx, ""))
+            else:
+                results_q.put((idx, f"{name}\t{semantic}"))
+        except Exception as e:
+            del device_str, vq_model, hubert_dir, _, version, hps_dict, hps, item, idx, i, load_result
+            logger.exception(f"[W{rank}] Failed on: {wav_name}")
+            raise e
+
+    sys.exit(0)
+
+
+@app.command()
+def main(
+    inp_list: Path = typer.Option(
+        ...,
+        "--inp-list",
+        file_okay=True,
+        dir_okay=False,
+        exists=True,
+        readable=True,
+        show_default=False,
+        help="list file: wav|spk|lang|text",
+    ),
+    opt: Path = typer.Option(
+        ..., "--opt", file_okay=False, dir_okay=True, writable=True, show_default=False, help="Output Directory"
+    ),
+    pretrained_s2g: Path = typer.Option(
+        ...,
+        "--pretrained-s2g",
+        file_okay=True,
+        dir_okay=False,
+        exists=True,
+        readable=True,
+        show_default=False,
+        help="Path to pretrained s2G checkpoint",
+    ),
+    device: Device = typer.Option(Device.cpu, "--device", help="Compute device"),
+    device_id: str = typer.Option("0", "--device-id", help="CUDA_VISIBLE_DEVICES style, e.g. '0,1'"),
+    nproc: int = typer.Option(1, "--nproc", min=1, help="Processes per device"),
+    fp16: bool = typer.Option(True, is_flag=True, flag_value=True, help="Use FP16 on CUDA"),
+):
+    device_ids = [int(x) for x in device_id.split(",") if x.strip() != ""]
+    if device in {"cpu", "mps"} and device_ids != [0]:
+        raise ValueError(f"Invalid Device ID {device_ids}")
+    if nproc < 1:
+        raise ValueError(f"Invalid Num Process {nproc}")
+
+    os.makedirs(opt, exist_ok=True)
+    merged_path = osp.join(opt, "6-name2semantic.tsv")
+
+    with open(inp_list, "r", encoding="utf8") as f:
+        raw_lines = [ln for ln in f.read().splitlines() if ln.strip()]
+
+    tasks_all: List[Tuple[int, str]] = []
+    for idx, line in enumerate(raw_lines):
+        try:
+            wav_name = parse_inp_text_line(line)
+            tasks_all.append((idx, wav_name))
+        except Exception:
+            logger.exception(f"Skip line {idx}: {line}")
+
+    n_tasks = len(tasks_all)
+    if n_tasks == 0:
+        logger.warning("Empty list")
+        with open(merged_path, "w", encoding="utf8") as fout:
+            pass
+        return
+
+    device_strs = build_device_strings(device, device_ids, nproc)
+    world_size = len(device_strs)
+
+    tasks_q: "tmp.Queue[Tuple[int, str] | None]" = tmp.Queue()
+    results_q: "tmp.Queue[Tuple[int, str]]" = tmp.Queue()
+
+    for task in tasks_all:
+        tasks_q.put(task)
+    for _ in range(world_size):
+        tasks_q.put(None)
+
+    ordered: List[str] = [""] * n_tasks
+    completed = 0
+
+    with Progress(
+        TextColumn("[cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        SpeedColumnIteration(show_speed=True),
+        TimeRemainingColumn(elapsed_when_finished=True),
+        console=console,
+    ) as progress:
+        progress_task = progress.add_task("Extract Semantic Codes", total=n_tasks)
+
+        ctx = spawn(
+            worker_entry,
+            args=(device_strs, tasks_q, results_q, pretrained_s2g, opt, fp16),
+            nprocs=world_size,
+            join=False,
+            daemon=False,
+        )
+        assert ctx
+
+        while completed < n_tasks:
+            try:
+                idx, line = results_q.get(timeout=0.05)
+                if line:
+                    ordered[idx] = line
+                completed += 1
+                progress.update(progress_task, advance=1)
+            except queue.Empty:
+                pass
+
+            for p in ctx.processes:
+                assert p
+                if (p.exitcode is not None and p.exitcode != 0) or (not p.is_alive()):
+                    progress.live.stop()
+                    try:
+                        ctx.join()
+                    except Exception as e:
+                        console.print(e)
+                    finally:
+                        logger.critical(f"Worker PID {p.pid} crashed with exit code {p.exitcode}.")
+                        sys.exit(1)
+        ctx.join()
+
+    with open(merged_path, "w", encoding="utf8") as fout:
+        for line in ordered:
+            if line:
+                fout.write(line + "\n")
+
+    logger.info(f"Done: {merged_path}")
+
+
+def is_powershell_env(env: dict) -> bool:
+    return any(k in env for k in ("PSHOME", "POWERSHELL_DISTRIBUTION_CHANNEL", "PSModulePath"))
+
+
+def get_prog_name() -> str:
+    system = platform.system()
+    env = os.environ.copy()
+    script_rel = osp.join("GPT_SoVITS", "prepare_datasets", osp.basename(__file__))
+    if system == "Windows":
+        if is_powershell_env(env):
+            return rf"$env:PYTHONPATH='.'; python -s {script_rel}"
+        else:
+            return rf"set PYTHONPATH=. && python -s {script_rel}"
+    else:
+        return f"PYTHONPATH=. python -s {script_rel}"
+
+
+if __name__ == "__main__":
+    t = time.perf_counter()
+    app(prog_name=get_prog_name())
+    logger.info(f"Exec Time: {time.perf_counter() - t:.2f} secs")
