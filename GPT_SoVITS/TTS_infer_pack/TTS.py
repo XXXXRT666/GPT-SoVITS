@@ -974,7 +974,7 @@ class TTS:
         """
         ########## variables initialization ###########
         torch.set_grad_enabled(False)
-        ttfb_time = time.perf_counter()
+        ttft_time = time.perf_counter()
         self.stop_flag: bool = False
         text: str = inputs.get("text", "")
         text_lang: str = inputs.get("text_lang", "")
@@ -1491,10 +1491,10 @@ class TTS:
             console.print(f">> Infer Speed: {infer_speed_avg:.2f} Token/s")
             console.print(f">> RTF: {rtf_value:.2f}")
 
-            if ttfb_time > 2:
-                console.print(f">> TTFB: {ttfb_time:.3f} s")
+            if ttft_time > 2:
+                console.print(f">> TTFT: {ttft_time:.3f} s")
             else:
-                console.print(f">> TTFB: {ttfb_time * 1000:.3f} ms")
+                console.print(f">> TTFT: {ttft_time * 1000:.3f} ms")
 
             self.empty_cache()
 
