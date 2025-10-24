@@ -983,6 +983,7 @@ class TTS:
         """
         ########## variables initialization ###########
         torch.set_grad_enabled(False)
+        self.empty_cache()
         ttft_time = time.perf_counter()
         self.stop_flag: bool = False
         text: str = inputs.get("text", "")
@@ -1516,7 +1517,7 @@ class TTS:
         gc.collect()
 
         if self.configs.device.type == "cuda":
-            logger.info(str(torch.cuda.memory_allocated(self.configs.device.index) / 1024**3) + "GB")
+            logger.info("Curr: " + str(torch.cuda.memory_allocated(self.configs.device.index) / 1024**3) + " GB")
         elif self.configs.device.type == "mps":
             logger.info("Curr: " + str(torch.mps.current_allocated_memory() / 1024**3) + " GB")
             logger.info("Driver: " + str(torch.mps.driver_allocated_memory() / 1024**3) + " GB")
