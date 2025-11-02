@@ -2,26 +2,26 @@
 Modified From https://github.com/XXXXRT666/GPT-SoVITS
 """
 
-from typing import Dict, List, Tuple
-
 import flash_attn  # type: ignore
 import torch
 
 from ... import nn
-from ..structs import T2SSession
+from ..structs import KVCache, T2SSession
 from ..t2s_model_abc import (
     AttentionABC,
     CUDAGraphCacheABC,
     CUDAGraphStateABC,
     FeedForward,
     KVCacheNHD,
-    KVCacheProtocol,
     T2SDecoderABC,
     TransformerBlockABC,
     TransformerDecoderABC,
 )
 
+
 Tensor = torch.Tensor
+
+flash_attn.flash_attn_with_kvcache = torch.compiler.disable(flash_attn.flash_attn_with_kvcache)  # type: ignore
 
 
 class Attention(AttentionABC):
@@ -31,7 +31,9 @@ class Attention(AttentionABC):
         self.in_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=True)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
-    def __call__(self, x: Tensor, input_pos: Tensor, kv_cache: KVCacheProtocol, *args, **kwds) -> Tensor:
+        self.kv_class = KVCacheNHD
+
+    def __call__(self, x: Tensor, input_pos: Tensor, kv_cache: KVCache, *args, **kwds) -> Tensor:
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj(x).chunk(3, dim=-1)
@@ -40,8 +42,10 @@ class Attention(AttentionABC):
         k = k.view(bsz, seqlen, self.n_head, self.head_dim)
         v = v.view(bsz, seqlen, self.n_head, self.head_dim)
 
+        k_cache, v_cache = kv_cache
+
         attn: Tensor = flash_attn.flash_attn_with_kvcache(  # type: ignore
-            q, kv_cache.k_cache, kv_cache.v_cache, k, v, cache_seqlens=input_pos - 1
+            q, k_cache, v_cache, k, v, cache_seqlens=input_pos - 1
         )
 
         attn = attn.view(bsz, seqlen, self.hidden_dim)
@@ -83,7 +87,7 @@ class T2SDecoder(T2SDecoderABC):
     def __init__(
         self,
         config,
-        max_seq_length=1500,
+        max_seq_length=1024,
         max_batch_size=10,
     ) -> None:
         assert torch.cuda.is_available()
@@ -92,20 +96,23 @@ class T2SDecoder(T2SDecoderABC):
         self.bert_proj = nn.Linear(1024, self.embedding_dim)
         self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h: TransformerDecoderABC = TransformerDecoder(
-            self.hidden_dim, self.n_layer, self.n_head, self.ffn_dim, self.vocab_size, max_seq_length, max_batch_size
+            self.hidden_dim,
+            self.n_layer,
+            self.n_head,
+            self.ffn_dim,
+            self.vocab_size,
+            max_seq_length,
+            max_batch_size,
         )
 
         self.kv_class = KVCacheNHD
 
         self.graph_cache_class = CUDAGraphCache
 
-    def compile(self, *args, **kwds):
-        pass
-
     def post_forward(self, idx: int, session: T2SSession) -> None:
         return super().post_forward(idx, session)
 
-    def pre_forward(self, session: T2SSession) -> Tuple[List, Dict]:
+    def pre_forward(self, session: T2SSession) -> tuple[list, dict]:
         return super().pre_forward(session)
 
 
@@ -136,7 +143,7 @@ class CUDAGraphCache(CUDAGraphCacheABC):
     def __init__(
         self,
         decoder,
-        cache_size: int = 5,
+        cache_size: int = 3,
     ) -> None:
         super().__init__(decoder, cache_size)
 

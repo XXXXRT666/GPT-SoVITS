@@ -17,7 +17,6 @@
 import contextlib
 import logging
 from collections import defaultdict
-from typing import List, Tuple
 
 import torch
 from torch import Tensor
@@ -36,7 +35,7 @@ class BatchedOptimizer(Optimizer):
     """
 
     def __init__(self, params, defaults):
-        super(BatchedOptimizer, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     @contextlib.contextmanager
     def batched_params(self, param_group, group_params_names):
@@ -75,7 +74,7 @@ class BatchedOptimizer(Optimizer):
         batches_names = defaultdict(list)  # `batches` maps from tuple (dtype_as_str,*shape) to list of str
 
         assert len(param_group) == len(group_params_names)
-        for p, named_p in zip(param_group, group_params_names):
+        for p, named_p in zip(param_group, group_params_names, strict=False):
             key = (str(p.dtype), *p.shape)
             batches[key].append(p)
             batches_names[key].append(named_p)
@@ -92,7 +91,7 @@ class BatchedOptimizer(Optimizer):
         # one for each batch in `batches`.
         tuples = []
 
-        for batch, batch_names in zip(batches, batches_names):
+        for batch, batch_names in zip(batches, batches_names, strict=False):
             p = batch[0]
             # we arbitrarily store the state in the
             # state corresponding to the 1st parameter in the
@@ -106,7 +105,7 @@ class BatchedOptimizer(Optimizer):
 
         yield tuples  # <-- calling code will do the actual optimization here!
 
-        for (stacked_params, _state, _names), batch in zip(tuples, batches):
+        for (stacked_params, _state, _names), batch in zip(tuples, batches, strict=False):
             for i, p in enumerate(batch):  # batch is list of Parameter
                 p.copy_(stacked_params[i])
 
@@ -186,13 +185,13 @@ class ScaledAdam(BatchedOptimizer):
             clipping_update_period=clipping_update_period,
         )
 
-        super(ScaledAdam, self).__init__(params, defaults)
+        super().__init__(params, defaults)
         assert len(self.param_groups) == len(parameters_names)
         self.parameters_names = parameters_names
         self.show_dominant_parameters = show_dominant_parameters
 
     def __setstate__(self, state):
-        super(ScaledAdam, self).__setstate__(state)
+        super().__setstate__(state)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -207,9 +206,7 @@ class ScaledAdam(BatchedOptimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        batch = True
-
-        for group, group_params_names in zip(self.param_groups, self.parameters_names):
+        for group, group_params_names in zip(self.param_groups, self.parameters_names, strict=False):
             with self.batched_params(group["params"], group_params_names) as batches:
                 # batches is list of pairs (stacked_param, state).  stacked_param is like
                 # a regular parameter, and will have a .grad, but the 1st dim corresponds to
@@ -277,7 +274,7 @@ class ScaledAdam(BatchedOptimizer):
         # exp_avg_sq is the weighted sum of scaled gradients. as in Adam.
         state["exp_avg_sq"] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    def _get_clipping_scale(self, group: dict, tuples: List[Tuple[Tensor, dict, List[str]]]) -> float:
+    def _get_clipping_scale(self, group: dict, tuples: list[tuple[Tensor, dict, list[str]]]) -> float:
         """
         Returns a scalar factor <= 1.0 that dictates gradient clipping, i.e. we will scale the gradients
         by this amount before applying the rest of the update.
@@ -336,7 +333,7 @@ class ScaledAdam(BatchedOptimizer):
                 first_state["num_clipped"] * 100.0 / clipping_update_period if "num_clipped" in first_state else 0.0
             )
             first_state["num_clipped"] = 0
-            quartiles = " ".join(["%.3e" % x for x in quartiles])
+            quartiles = " ".join([f"{x:.3e}" for x in quartiles])
             logging.info(
                 f"Clipping_scale={clipping_scale}, grad-norm quartiles {quartiles}, threshold={threshold:.3e}, percent-clipped={percent_clipped:.1f}"
             )
@@ -361,7 +358,7 @@ class ScaledAdam(BatchedOptimizer):
                     self._show_gradient_dominating_parameter(tuples, tot_sumsq)
             return ans
 
-    def _show_gradient_dominating_parameter(self, tuples: List[Tuple[Tensor, dict, List[str]]], tot_sumsq: Tensor):
+    def _show_gradient_dominating_parameter(self, tuples: list[tuple[Tensor, dict, list[str]]], tot_sumsq: Tensor):
         """
         Show information of parameter which dominating tot_sumsq.
 
@@ -392,6 +389,7 @@ class ScaledAdam(BatchedOptimizer):
                 batch_sumsq_orig,
                 batch_rms_orig,
                 batch_grad,
+                strict=False,
             ):
                 proportion_orig = sumsq_orig / tot_sumsq
                 all_sumsq_orig[name] = (proportion_orig, sumsq_orig, rms, grad)
@@ -434,7 +432,7 @@ class ScaledAdam(BatchedOptimizer):
                        as a batch)
                   state: state-dict for p, to look up the optimizer state
         """
-        lr = group["lr"]
+        group["lr"]
         size_update_period = group["size_update_period"]
         beta1 = group["betas"][0]
 
@@ -496,7 +494,7 @@ class ScaledAdam(BatchedOptimizer):
         param_max_rms = group["param_max_rms"]
         eps = group["eps"]
         step = state["step"]
-        batch_size = p.shape[0]
+        p.shape[0]
 
         size_update_period = scale_grads.shape[0]
         # correct beta2 for the size update period: we will have
@@ -548,7 +546,7 @@ class ScaledAdam(BatchedOptimizer):
         beta1, beta2 = group["betas"]
         eps = group["eps"]
         param_min_rms = group["param_min_rms"]
-        step = state["step"]
+        state["step"]
 
         exp_avg_sq = state["exp_avg_sq"]
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=(1 - beta2))

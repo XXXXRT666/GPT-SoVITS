@@ -7,6 +7,7 @@ import gradio as gr
 import regex as re
 import torch
 
+
 pretrained_sovits_name = {
     "v1": "GPT_SoVITS/pretrained_models/s2G488k.pth",
     "v2": "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth",
@@ -121,8 +122,6 @@ def change_choices(i18n):
 # 推理用的指定模型
 sovits_path = ""
 gpt_path = ""
-is_half_str = os.environ.get("is_half", "True")
-is_half = True if is_half_str.lower() == "true" else False
 is_share_str = os.environ.get("is_share", "False")
 is_share = True if is_share_str.lower() == "true" else False
 
@@ -219,6 +218,7 @@ else:
     infer_device = max(tmp, key=lambda x: (x[2], x[3]))[0]
 
 is_half = any(dtype == torch.float16 for _, dtype, _, _ in tmp)
+infer_dtype = get_dtype(infer_device.index)
 
 
 class Config:

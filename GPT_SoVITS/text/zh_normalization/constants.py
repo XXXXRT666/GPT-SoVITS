@@ -16,6 +16,7 @@ import string
 
 from pypinyin.constants import SUPPORT_UCS4
 
+
 # 全角半角转换
 # 英文字符全角 -> 半角映射表 (num: 52)
 F2H_ASCII_LETTERS = {ord(char) + 65248: ord(char) for char in string.ascii_letters}

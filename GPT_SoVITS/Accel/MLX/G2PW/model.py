@@ -6,6 +6,7 @@ import mlx.nn as nn
 import torch
 from transformers import BertConfig
 
+
 Array = mx.array
 Tensor = torch.Tensor
 

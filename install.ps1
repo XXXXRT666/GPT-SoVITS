@@ -1,8 +1,43 @@
+<#
+.SYNOPSIS
+Windows Installer for GPT-SoVITS
+
+.PARAMETER Device
+Device backend. Default: CU128
+
+.PARAMETER Source
+Download source. Default: HF
+
+.PARAMETER Sync
+Sync the uv.lock into the conda environment instead of installing from it
+
+.PARAMETER DownloadUVR5
+Enable UVR5 download.
+
+.PARAMETER Help
+Show help message.
+#>
+
+[CmdletBinding()]
 Param (
-    [Parameter(Mandatory=$true)][ValidateSet("CU126", "CU128", "CPU")][string]$Device,
-    [Parameter(Mandatory=$true)][ValidateSet("HF", "HF-Mirror", "ModelScope")][string]$Source,
-    [switch]$DownloadUVR5
+    [Parameter()][ValidateSet("CU126", "CU128", "CPU")]
+    [string]$Device = "CU128",
+
+    [Parameter()][ValidateSet("HF", "HF-Mirror", "ModelScope")]
+    [string]$Source = "HF",
+
+    [switch]$Sync,
+
+    [switch]$DownloadUVR5,
+
+    [Alias("h", "help")]
+    [switch]$ShowHelp
 )
+
+if ($ShowHelp) {
+    Get-Help $MyInvocation.MyCommand.Path -Full
+    exit
+}
 
 $global:ErrorActionPreference = 'Stop'
 
@@ -83,18 +118,45 @@ function Invoke-Conda {
     }
 }
 
-function Invoke-Pip {
+function Invoke-PIP {
     param (
         [Parameter(ValueFromRemainingArguments = $true)]
         [string[]]$Args
     )
     
-    $output = & pip install @Args 2>&1
+    $output = & uv pip install @Args --python "$((Get-Command python).Source)" 2>&1
     $exitCode = $LASTEXITCODE
     
     if ($exitCode -ne 0) {
         $errorMessages = @()
         Write-Host "Pip Install $Args Failed" -ForegroundColor Red
+        foreach ($item in $output) {
+            if ($item -is [System.Management.Automation.ErrorRecord]) {
+                $msg = $item.Exception.Message
+                Write-Host "$msg" -ForegroundColor Red
+                $errorMessages += $msg
+            }
+            else {
+                Write-Host $item
+                $errorMessages += $item
+            }
+        }
+        throw [System.Exception]::new(($errorMessages -join "`n"))
+    }
+}
+
+function Invoke-Command {
+    param (
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Args
+    )
+    
+    $output = & @Args 2>&1
+    $exitCode = $LASTEXITCODE
+    
+    if ($exitCode -ne 0) {
+        $errorMessages = @()
+        Write-Host "Command $Args Failed" -ForegroundColor Red
         foreach ($item in $output) {
             if ($item -is [System.Management.Automation.ErrorRecord]) {
                 $msg = $item.Exception.Message
@@ -143,12 +205,14 @@ function Invoke-Unzip {
     Remove-Item $ZipPath -Force
 }
 
-chcp 65001
+if ($IsWindows) {
+    chcp 65001
+}
 Set-Location $PSScriptRoot
 
-Write-Info "Installing FFmpeg & CMake..."
-Invoke-Conda  ffmpeg=7 cmake vc14_runtime
-Write-Success "FFmpeg & CMake Installed"
+Write-Info "Installing FFmpeg & CMake and Some Other Tools..."
+Invoke-Conda  ffmpeg cmake vc14_runtime uv
+Write-Success "FFmpeg, CMake, VC14 Runtime, uv Installed"
 
 $PretrainedURL  = ""
 $UVR5URL        = ""
@@ -190,10 +254,10 @@ if (-not (Test-Path "GPT_SoVITS/pretrained_models/sv")) {
 }
 
 if ($DownloadUVR5) {
-    if (-not (Test-Path "tools/uvr5/uvr5_weights")) {
+    if (-not (Test-Path "gsv_tools/uvr5/uvr5_weights")) {
         Write-Info "Downloading UVR5 Models..."
         Invoke-Download -Uri $UVR5URL -OutFile "uvr5_weights.zip"
-        Invoke-Unzip "uvr5_weights.zip" "tools/uvr5"
+        Invoke-Unzip "uvr5_weights.zip" "gsv_tools/uvr5"
         Write-Success "UVR5 Models Downloaded"
     } else {
         Write-Info "UVR5 Models Exists"
@@ -210,12 +274,12 @@ switch ($Device) {
             Write-Warning "CUDA 12.8 Is Not Supported By Current Driver"
         }
         Write-Info "Installing PyTorch For CUDA 12.8..."
-        Invoke-Pip torch torchao torchaudio torchcodec --index-url "https://download.pytorch.org/whl/cu128"
+        Invoke-PIP ".[cu128]"
         Invoke-Conda cuda-nvcc=12.8
-        Invoke-Pip psutil ninja packaging wheel "setuptools>=42"
         Write-Info "Installing Flash Attn..."
-        Invoke-Pip flash-attn -i https://xxxxrt666.github.io/PIP-Index/ --no-build-isolation
+        Invoke-PIP ".[flash-attn]"
         Write-Success "Flash Attn Installed"
+        $Extra = "cu128"
     }
     "CU126" {
         $cudaLine = nvidia-smi | Select-String "CUDA Version"
@@ -225,23 +289,33 @@ switch ($Device) {
             Write-Warning "CUDA 12.6 Is Not Supported By Current Driver"
         }
         Write-Info "Installing PyTorch For CUDA 12.6..."
-        Invoke-Pip torch torchao torchaudio torchcodec --index-url "https://download.pytorch.org/whl/cu126"
+        Invoke-PIP ".[cu126]"
         Invoke-Conda cuda-nvcc=12.6
-        Invoke-Pip psutil ninja packaging wheel "setuptools>=42"
         Write-Info "Installing Flash Attn..."
-        Invoke-Pip flash-attn -i https://xxxxrt666.github.io/PIP-Index/ --no-build-isolation
+        Invoke-PIP ".[flash-attn]"
         Write-Success "Flash Attn Installed"
+        $Extra = "cu126"
     }
     "CPU" {
         Write-Info "Installing PyTorch For CPU..."
-        Invoke-Pip torch torchao torchaudio torchcodec --index-url "https://download.pytorch.org/whl/cpu"
+        Invoke-PIP ".[cpu]"
+        $Extra = "cpu"
     }
 }
+
 Write-Success "PyTorch Installed"
 
 Write-Info "Installing Python Dependencies From requirements.txt..."
-Invoke-Pip -r extra-req.txt --no-deps
-Invoke-Pip -r requirements.txt
+Invoke-Command uv export --extra=main --extra="$Extra" -o pylock.toml
+
+if ($Sync) {
+    Write-Info "Syncing UV Environment..."
+    Invoke-Command uv pip sync pylock.toml --no-break-system-packages --preview-features pylock
+} else {
+    Invoke-Command uv pip install -r pylock.toml --preview-features pylock
+}
+
+Invoke-PIP faster-whisper --no-deps
 Write-Success "Python Dependencies Installed"
 
 Write-Info "Downloading NLTK Data..."

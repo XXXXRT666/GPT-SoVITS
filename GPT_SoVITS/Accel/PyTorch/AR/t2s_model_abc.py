@@ -6,26 +6,22 @@ from __future__ import annotations
 
 import math
 import os
-import pickle
-import platform
 import time
 from abc import ABC, abstractmethod
+from collections.abc import MutableSequence
 from contextlib import nullcontext
-from pathlib import Path
 from queue import Queue
-from typing import Literal, MutableSequence
+from typing import Literal
 
 import torch
-import torch._inductor.config
 import torch.nn.functional as F
 from torch.cuda.graphs import CUDAGraph
 from torch.profiler import ExecutionTraceObserver, ProfilerAction, tensorboard_trace_handler
 
-from tools.my_utils import get_machine_id
-
 from .. import nn
 from .quantization import replace_all_linear_with_fp8
-from .structs import KVCacheProtocol, T2SDecoderProtocol, T2SSession
+from .structs import KVCache, KVCacheProtocol, T2SDecoderProtocol, T2SSession
+
 
 Tensor = torch.Tensor
 
@@ -48,7 +44,7 @@ class TokenEmbedding(nn.Module):
         return self.word_embeddings.weight
 
     def embedding(self, index: int) -> Tensor:
-        return self.word_embeddings.weight[index : index + 1]
+        return self.word_embeddings.weight[index]
 
     def __call__(self, x: Tensor):
         x = self.word_embeddings(x)
@@ -62,7 +58,7 @@ class SinePositionalEmbedding(nn.Module):
         scale: bool = False,
         alpha: bool = False,
         max_batch_size: int = 10,
-        max_seq_length: int = 1500,
+        max_seq_length: int = 1024,
     ):
         super().__init__()
         self.embedding_dim = embedding_dim
@@ -118,155 +114,98 @@ class SinePositionalEmbedding(nn.Module):
         return x * self.x_scale + self.alpha * pe_values
 
 
-class KVCacheABC(nn.Module, ABC, KVCacheProtocol):
-    def __init__(self, batch_size: int, max_seq_length: int, n_heads: int, head_dim: int) -> None:
-        super().__init__()
+class KVCacheNHD(KVCacheProtocol):
+    @staticmethod
+    def empty(kv_cache: KVCache):
+        k_cache, v_cache = kv_cache
+        k_cache.zero_()
+        v_cache.zero_()
 
-        self.n_head = n_heads
-        self.head_dim = head_dim
-        self.batch_size = batch_size
-        self.max_seq_length = max_seq_length
-
-        self.k_cache: Tensor
-        self.v_cache: Tensor
-
-    def empty(self):
-        self.k_cache.zero_()
-        self.v_cache.zero_()
-
-    @abstractmethod
-    def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor, *args, **kwds) -> tuple[Tensor, Tensor]: ...
-
-    @abstractmethod
-    def prefill_kv(self, k_val: Tensor, v_val: Tensor) -> None: ...
-
-    def sync_cache(self, kv_cache: KVCacheProtocol):
-        self.k_cache.copy_(kv_cache.k_cache)
-        self.v_cache.copy_(kv_cache.v_cache)
-
-
-class KVCacheNHD(KVCacheABC):
-    def __init__(self, batch_size, max_seq_length, n_heads, head_dim):
-        super().__init__(batch_size, max_seq_length, n_heads, head_dim)
-
-        assert batch_size > 0
-        cache_shape = (batch_size, max_seq_length, n_heads, head_dim)
-
-        self.register_buffer("k_cache", torch.zeros(size=cache_shape), persistent=False)
-        self.register_buffer("v_cache", torch.zeros(size=cache_shape), persistent=False)
-
-    def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor):
+    @staticmethod
+    def update(input_pos: Tensor, k_val: Tensor, v_val: Tensor, kv_cache: KVCache):
         # input_pos: [B, ], k_val: [B, 1, H, D]
 
-        index = (
-            (input_pos - 1)
-            .unsqueeze(-1)
-            .unsqueeze(-1)
-            .unsqueeze(-1)
-            .expand(
-                -1,
-                -1,
-                self.n_head,
-                self.head_dim,
-            )
-            .to(torch.int64)
-        )  # (bs, 1, num_head, head_dim)
+        index = (input_pos - 1).view(-1, 1, 1, 1).expand_as(k_val).to(torch.int64)  # (bs, 1, num_head, head_dim)
 
-        k_out = self.k_cache
-        v_out = self.v_cache
+        k_out, v_out = kv_cache
         k_out.scatter_(1, index, k_val)
         v_out.scatter_(1, index, v_val)
 
         return k_out, v_out
 
-    def empty(self):
-        self.k_cache.zero_()
-        self.v_cache.zero_()
-
-    def prefill_kv(self, k_val: Tensor, v_val: Tensor):
+    @staticmethod
+    def prefill_kv(k_val: Tensor, v_val: Tensor, kv_cache: KVCache):
         # input_pos: int, k_val: [B, S, H, D]
 
-        self.k_cache[:, : k_val.shape[1]] = k_val
-        self.v_cache[:, : v_val.shape[1]] = v_val
+        k_cache, v_cache = kv_cache
+        k_cache[:, : k_val.shape[1]] = k_val
+        v_cache[:, : v_val.shape[1]] = v_val
+
+    @staticmethod
+    def init_cache(
+        batch_size: int, max_seq_length: int, n_heads: int, head_dim: int, device: torch.device, dtype: torch.dtype
+    ) -> KVCache:
+        cache_shape = (batch_size, max_seq_length, n_heads, head_dim)
+
+        return (
+            torch.zeros(cache_shape, dtype=dtype, device=device),
+            torch.zeros(cache_shape, dtype=dtype, device=device),
+        )
+
+    @staticmethod
+    def sync_cache(tgt: KVCache, src: KVCache) -> None:
+        k_tgt, v_tgt = tgt
+        k_src, v_src = src
+
+        k_tgt.copy_(k_src)
+        v_tgt.copy_(v_src)
 
 
-class KVCacheHND(KVCacheABC):
-    def __init__(self, batch_size, max_seq_length, n_heads, head_dim):
-        super().__init__(batch_size, max_seq_length, n_heads, head_dim)
+class KVCacheHND(KVCacheProtocol):
+    @staticmethod
+    def empty(kv_cache: KVCache):
+        k_cache, v_cache = kv_cache
+        k_cache.zero_()
+        v_cache.zero_()
 
-        cache_shape = (batch_size, n_heads, max_seq_length, head_dim)
-
-        self.register_buffer("k_cache", torch.zeros(size=cache_shape), persistent=False)
-        self.register_buffer("v_cache", torch.zeros(size=cache_shape), persistent=False)
-
-    def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor):
+    @staticmethod
+    def update(input_pos: Tensor, k_val: Tensor, v_val: Tensor, kv_cache: KVCache):
         # input_pos: [B, ], k_val: [B, H, 1, D]
 
-        index = (
-            (input_pos - 1)
-            .unsqueeze(-1)
-            .unsqueeze(-1)
-            .unsqueeze(-1)
-            .expand(
-                -1,
-                self.n_head,
-                -1,
-                self.head_dim,
-            )
-            .to(torch.int64)
-        )  # (bs, num_head, 1, head_dim)
+        index = (input_pos - 1).view(-1, 1, 1, 1).expand_as(k_val).to(torch.int64)  # (bs, num_head, 1, head_dim)
 
-        k_out = self.k_cache
-        v_out = self.v_cache
+        k_out, v_out = kv_cache
         k_out.scatter_(2, index, k_val)
         v_out.scatter_(2, index, v_val)
 
         return k_out, v_out
 
-    def empty(self):
-        self.k_cache.zero_()
-        self.v_cache.zero_()
-
-    def prefill_kv(self, k_val: Tensor, v_val: Tensor):
+    @staticmethod
+    def prefill_kv(k_val: Tensor, v_val: Tensor, kv_cache: KVCache):
         # input_pos: int, k_val: [B, S, H, D]
 
-        self.k_cache[..., : k_val.shape[1], :] = k_val.transpose(1, 2)
-        self.v_cache[..., : v_val.shape[1], :] = v_val.transpose(1, 2)
+        k_cache, v_cache = kv_cache
+        k_cache[..., : k_val.shape[1], :] = k_val.transpose(1, 2)
+        v_cache[..., : v_val.shape[1], :] = v_val.transpose(1, 2)
 
-
-class KVCacheHNDVarlen(KVCacheABC):
-    def __init__(self, batch_size, max_seq_length, n_heads, head_dim):
-        super().__init__(batch_size, max_seq_length, n_heads, head_dim)
-
+    @staticmethod
+    def init_cache(
+        batch_size: int, max_seq_length: int, n_heads: int, head_dim: int, device: torch.device, dtype: torch.dtype
+    ) -> KVCache:
         cache_shape = (batch_size, n_heads, max_seq_length, head_dim)
-        self.cache_idx: Tensor
 
-        self.register_buffer("cache_idx", torch.arange(batch_size), persistent=False)
-        self.register_buffer("k_cache", torch.zeros(size=cache_shape), persistent=False)
-        self.register_buffer("v_cache", torch.zeros(size=cache_shape), persistent=False)
+        return (
+            torch.zeros(cache_shape, dtype=dtype, device=device),
+            torch.zeros(cache_shape, dtype=dtype, device=device),
+        )
 
-    def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor):
-        # input_pos: [B, ], k_val: [B, H, 1, D]
+    @staticmethod
+    def sync_cache(tgt: KVCache, src: KVCache) -> None:
+        k_tgt, v_tgt = tgt
+        k_src, v_src = src
 
-        k_out = self.k_cache
-        v_out = self.v_cache
-
-        ip0 = input_pos - 1
-
-        k_out[self.cache_idx, :, ip0, None] = k_val
-        v_out[self.cache_idx, :, ip0, None] = v_val
-
-        return k_out, v_out
-
-    def empty(self):
-        self.k_cache.zero_()
-        self.v_cache.zero_()
-
-    def prefill_kv(self, k_val: Tensor, v_val: Tensor):
-        # input_pos: int, k_val: [B, S, H, D]
-
-        self.k_cache[..., : k_val.shape[1], :] = k_val.transpose(1, 2)
-        self.v_cache[..., : v_val.shape[1], :] = v_val.transpose(1, 2)
+        k_tgt.copy_(k_src)
+        v_tgt.copy_(v_src)
 
 
 class AttentionABC(nn.Module, ABC):
@@ -284,6 +223,8 @@ class AttentionABC(nn.Module, ABC):
         self.in_proj: nn.Linear
         self.out_proj: nn.Linear
 
+        self.kv_class: KVCacheProtocol
+
         self._register_load_state_dict_pre_hook(self.load_hook)
 
     def load_hook(self, state_dict: dict[str, Tensor], prefix, *args):
@@ -293,16 +234,16 @@ class AttentionABC(nn.Module, ABC):
             state_dict[new_key] = state_dict.pop(key)
 
     @abstractmethod
-    def __call__(self, x: Tensor, input_pos: Tensor, kv_cache: KVCacheProtocol, *args, **kwds) -> Tensor: ...
+    def __call__(self, x: Tensor, input_pos: Tensor, kv_cache: KVCache, *args, **kwds) -> Tensor: ...
 
-    def prefill(self, x: Tensor, kv_cache: KVCacheProtocol, attn_mask: Tensor) -> Tensor:
+    def prefill(self, x: Tensor, kv_cache: KVCache, attn_mask: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj(x).chunk(3, dim=-1)
 
         q, k, v = map(lambda x: x.contiguous().view(bsz, seqlen, self.n_head, self.head_dim), (q, k, v))
 
-        kv_cache.prefill_kv(k, v)
+        self.kv_class.prefill_kv(k, v, kv_cache)
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
@@ -350,7 +291,7 @@ class TransformerBlockABC(nn.Module, ABC):
             )
             state_dict[new_key] = state_dict.pop(key)
 
-    def __call__(self, x: Tensor, input_pos: Tensor, kv_cache: KVCacheProtocol, *args, **kwds):
+    def __call__(self, x: Tensor, input_pos: Tensor, kv_cache: KVCache, *args, **kwds):
         h = self.attention_norm(
             x
             + self.attention(
@@ -367,7 +308,7 @@ class TransformerBlockABC(nn.Module, ABC):
     def prefill(
         self,
         x: Tensor,
-        kv_cache: KVCacheProtocol,
+        kv_cache: KVCache,
         attn_mask: Tensor,
     ) -> Tensor:
         h = self.attention_norm(
@@ -409,13 +350,13 @@ class TransformerDecoderABC(nn.Module, ABC):
         self.max_seq_length = max_seq_length
         self.max_batch_size = max_batch_size
 
-    def __call__(self, x: Tensor, input_pos: Tensor, kv_caches: MutableSequence[KVCacheProtocol], *args, **kwds):
-        for layer, kv_cache in zip(self.layers, kv_caches):
+    def __call__(self, x: Tensor, input_pos: Tensor, kv_caches: MutableSequence[KVCache], *args, **kwds):
+        for layer, kv_cache in zip(self.layers, kv_caches, strict=False):
             x = layer(x, input_pos, kv_cache, *args, **kwds)
         return x
 
-    def prefill(self, x: Tensor, kv_caches: MutableSequence[KVCacheProtocol], attn_mask: Tensor):
-        for layer, kv_cache in zip(self.layers, kv_caches):
+    def prefill(self, x: Tensor, kv_caches: MutableSequence[KVCache], attn_mask: Tensor):
+        for layer, kv_cache in zip(self.layers, kv_caches, strict=False):
             x = layer.prefill(x, kv_cache, attn_mask)
         return x
 
@@ -424,7 +365,7 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
     def __init__(
         self,
         config: dict,
-        max_seq_length: int = 1500,
+        max_seq_length: int = 1024,
         max_batch_size: int = 10,
     ) -> None:
         super().__init__()
@@ -457,10 +398,9 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
         self.ar_predict_layer: nn.Linear
         self.h: TransformerDecoderABC
 
-        self.kv_class: type[KVCacheABC]
+        self.kv_class: type[KVCacheProtocol]
 
         self.GraphCache: CUDAGraphCacheABC | None
-        self.compiled: bool = False
 
         self.ar_text_embedding = TokenEmbedding(self.embedding_dim, self.phoneme_vocab_size)
         self.ar_text_position = SinePositionalEmbedding(
@@ -492,16 +432,23 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
             new_key = key[len("model.") :]
             state_dict[new_key] = state_dict.pop(key)
 
-    def init_cache(self, bsz: int = 0) -> MutableSequence[KVCacheProtocol]:
+    def init_cache(self, bsz: int = 0) -> MutableSequence[KVCache]:
         bsz = bsz or self.h.max_batch_size
         assert bsz <= self.h.max_batch_size
         seq_lens = self.h.max_seq_length
         dtype = self.bert_proj.bias.dtype
-        kvclass = self.kv_class
 
-        return nn.ModuleList(
-            [kvclass(bsz, seq_lens, self.n_head, self.head_dim) for _ in range(self.n_layer)],
-        ).to(self.device, dtype)  # type: ignore
+        return [
+            self.kv_class.init_cache(
+                bsz,
+                seq_lens,
+                self.n_head,
+                self.head_dim,
+                self.device,
+                dtype,
+            )
+            for _ in range(self.n_layer)
+        ]
 
     def embed(
         self,
@@ -519,7 +466,7 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
         y_emb = self.ar_audio_embedding(y)
         y_pos = self.ar_audio_position.prefill(y_emb)
 
-        for bs, (x_, len_, bert_feature) in enumerate(zip(x, x_len, bert_features)):
+        for bs, (x_, len_, bert_feature) in enumerate(zip(x, x_len, bert_features, strict=False)):
             x_emb = self.ar_text_embedding(x_)
             bert = self.bert_proj(bert_feature)
             x_emb = x_emb + bert
@@ -529,65 +476,8 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
 
         return xy_pos
 
-    def compile(self, *args, **kwds):
-        if (
-            torch.cuda.is_available()
-            and platform.system() != "Windows"
-            or platform.system() == "macOS"
-            and self.compiled is False
-        ):
-            cache_path = Path.cwd() / "compile_cache"
-            if cache_path.exists() is False:
-                cache_path.mkdir(parents=True, exist_ok=True)
-            else:
-                assert cache_path.is_dir()
-                cache_file = (
-                    cache_path
-                    / f"t2s_decoder_{self.n_layer}_{self.hidden_dim}_{self.n_head}_{self.ffn_dim}_{self.phoneme_vocab_size}_{get_machine_id()}_{torch.__version__}.GSV"
-                )
-                if cache_file.exists():
-                    try:
-                        with open(cache_file, "rb") as f:
-                            cache_data = pickle.load(f)
-                        torch.compiler.load_cache_artifacts(cache_data)
-                    except Exception as e:
-                        print(f"Failed to resotore compile cache from {cache_file}: {e}")
-
-            # Experimental features to reduce compilation times, will be on by default in future
-            torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
-            torch._inductor.config.coordinate_descent_tuning = True
-            torch._inductor.config.triton.unique_kernel_names = True
-            torch._inductor.config.fx_graph_cache = True
-            torch._inductor.config.triton.cudagraph_trees = True
-            torch._inductor.config.triton.cudagraph_support_input_mutation = True
-            self.h.compile(fullgraph=True, mode="reduce-overhead")
-            self.compiled = True
-
-    def save_compile_cache(self):
-        if torch.cuda.is_available() and platform.system() != "Windows" or platform.system() == "macOS":
-            cache_path = Path.cwd() / "compile_cache"
-            if cache_path.exists() is False:
-                cache_path.mkdir(parents=True, exist_ok=True)
-            else:
-                assert cache_path.is_dir()
-                cache_file = (
-                    cache_path
-                    / f"t2s_decoder_{self.n_layer}_{self.hidden_dim}_{self.n_head}_{self.ffn_dim}_{self.phoneme_vocab_size}_{get_machine_id()}_{torch.__version__}.GSV"
-                )
-                if cache_file.exists():
-                    return
-
-                try:
-                    cache = torch.compiler.save_cache_artifacts()
-                    assert cache
-                    cache_data = cache[0]
-                    with open(cache_file, "wb") as f:
-                        pickle.dump(cache_data, f)
-                except Exception as e:
-                    print(f"Failed to save compile cache to {cache_file}: {e}")
-
     def capture(
-        self, input_pos: Tensor, x: Tensor, x_dec: Tensor, kv_caches: MutableSequence[KVCacheProtocol], *args, **kwds
+        self, input_pos: Tensor, x: Tensor, x_dec: Tensor, kv_caches: MutableSequence[KVCache], *args, **kwds
     ) -> CUDAGraph:
         assert torch.cuda.is_available()
         s = torch.cuda.Stream()
@@ -657,7 +547,8 @@ class CUDAGraphStateABC(ABC):
         self.stream: torch.cuda.Stream | None = None
 
         self.xy_pos = torch.rand(size=(self.bsz, 1, self.embedding_dim), device=self.device).to(self.dtype)
-        self.kv_cache: MutableSequence[KVCacheProtocol] = decoder.init_cache(bsz)
+        self.kv_cache: MutableSequence[KVCache] = decoder.init_cache(bsz)
+        self.kvclass = decoder.kv_class
         self.xy_dec = self.xy_pos.clone()
         self.input_pos = torch.tensor([10] * self.bsz, device=self.device).to(torch.int32)
 
@@ -675,8 +566,8 @@ class CUDAGraphStateABC(ABC):
         session.xy_dec_ = self.xy_dec
         session.input_pos = self.input_pos.copy_(session.input_pos)
 
-        for cache, cache_ in zip(self.kv_cache, session.kv_cache):
-            cache.sync_cache(cache_)
+        for cache_t, cache_s in zip(self.kv_cache, session.kv_cache, strict=False):
+            self.kvclass.sync_cache(cache_t, cache_s)
 
         return self
 
@@ -684,7 +575,7 @@ class CUDAGraphStateABC(ABC):
 class CUDAGraphCacheABC(ABC):
     is_applicable: bool
 
-    def __init__(self, decoder: T2SDecoderABC, cache_size: int = 5) -> None:
+    def __init__(self, decoder: T2SDecoderABC, cache_size: int = 3) -> None:
         self.decoder = decoder
         self.max_batch_size = decoder.max_batch_size
         self.cache_size = cache_size

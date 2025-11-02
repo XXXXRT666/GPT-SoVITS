@@ -3,6 +3,7 @@ from typing import Protocol
 
 import mlx.core as mx
 
+
 Array = mx.array
 
 
@@ -54,8 +55,7 @@ def apply_top_p(logits: Array, top_p: float):
     sorted_indices_to_remove = cum_probs > top_p
     sorted_indices_to_remove[:, -1] = False
     indices_to_remove = mx.zeros_like(logits).astype(mx.bool_)
-    batch_indices = mx.arange(logits.shape[0])[:, None]
-    indices_to_remove[batch_indices, sorted_indices] = sorted_indices_to_remove
+    indices_to_remove = mx.put_along_axis(indices_to_remove, sorted_indices, sorted_indices_to_remove, axis=1)
     logits = mx.where(indices_to_remove, -mx.inf, logits)
     return logits
 

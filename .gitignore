@@ -1,27 +1,20 @@
 .DS_Store
 .vscode
-__pycache__
 *.pyc
-env
 runtime
-.idea
 output
 logs
 SoVITS_weights*/
 GPT_weights*/
 TEMP
-weight.json
-ffmpeg*
-ffprobe*
-cfg.json
-speakers.json
 ref_audios
-tools/AP_BWE/24kto48k/*
-!tools/AP_BWE/24kto48k/readme.txt
+gsv_tools/AP_BWE/24kto48k/*
+!gsv_tools/AP_BWE/24kto48k/readme.txt
 onnx_export
 compile_cache
 profiler
 tts_infer.yaml
+pylock.toml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -190,7 +183,7 @@ cython_debug/
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+.idea/
 
 # Ruff stuff:
 .ruff_cache/

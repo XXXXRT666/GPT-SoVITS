@@ -3,12 +3,14 @@
 import itertools
 import math
 import random
+from collections.abc import Iterator
 from random import shuffle
-from typing import Iterator, Optional, TypeVar
+from typing import TypeVar
 
 import torch
 import torch.distributed as dist
 from torch.utils.data import Dataset, Sampler
+
 
 __all__ = [
     "DistributedBucketSampler",
@@ -29,8 +31,8 @@ class DistributedBucketSampler(Sampler[T_co]):
     def __init__(
         self,
         dataset: Dataset,
-        num_replicas: Optional[int] = None,
-        rank: Optional[int] = None,
+        num_replicas: int | None = None,
+        rank: int | None = None,
         shuffle: bool = True,
         seed: int = 0,
         drop_last: bool = False,
@@ -47,7 +49,7 @@ class DistributedBucketSampler(Sampler[T_co]):
             if torch.cuda.device_count() > 1:
                 torch.cuda.set_device(rank)
         if rank >= num_replicas or rank < 0:
-            raise ValueError("Invalid rank {}, rank should be in the interval [0, {}]".format(rank, num_replicas - 1))
+            raise ValueError(f"Invalid rank {rank}, rank should be in the interval [0, {num_replicas - 1}]")
         self.dataset = dataset
         self.num_replicas = num_replicas
         self.rank = rank

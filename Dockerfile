@@ -28,9 +28,13 @@ ENV TARGETPLATFORM=${TARGETPLATFORM}
 
 RUN bash Docker/miniconda_install.sh
 
-COPY extra-req.txt /workspace/GPT-SoVITS/
+COPY LICENSE /workspace/GPT-SoVITS/
 
-COPY requirements.txt /workspace/GPT-SoVITS/
+COPY README.md /workspace/GPT-SoVITS/
+
+COPY requirements /workspace/GPT-SoVITS/
+
+COPY pyproject.toml /workspace/GPT-SoVITS/
 
 COPY install.sh /workspace/GPT-SoVITS/
 
@@ -52,9 +56,9 @@ COPY . /workspace/GPT-SoVITS
 
 CMD ["/bin/bash", "-c", "\
   rm -rf /workspace/GPT-SoVITS/GPT_SoVITS/pretrained_models && \
-  rm -rf /workspace/GPT-SoVITS/tools/asr/models && \
-  rm -rf /workspace/GPT-SoVITS/tools/uvr5/uvr5_weights && \
+  rm -rf /workspace/GPT-SoVITS/gsv_tools/asr/models && \
+  rm -rf /workspace/GPT-SoVITS/gsv_tools/uvr5/uvr5_weights && \
   ln -s /workspace/models/pretrained_models /workspace/GPT-SoVITS/GPT_SoVITS/pretrained_models && \
-  ln -s /workspace/models/asr_models /workspace/GPT-SoVITS/tools/asr/models && \
-  ln -s /workspace/models/uvr5_weights /workspace/GPT-SoVITS/tools/uvr5/uvr5_weights && \
+  ln -s /workspace/models/asr_models /workspace/GPT-SoVITS/gsv_tools/asr/models && \
+  ln -s /workspace/models/uvr5_weights /workspace/GPT-SoVITS/gsv_tools/uvr5/uvr5_weights && \
   exec bash"]

@@ -22,7 +22,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 import GPT_SoVITS.utils as utils
 from GPT_SoVITS.Accel import console, logger
-from GPT_SoVITS.Accel.logger import SpeedColumnIteration
 from GPT_SoVITS.module import commons
 from GPT_SoVITS.module.data_utils import (
     DistributedBucketSampler,
@@ -33,6 +32,8 @@ from GPT_SoVITS.module.data_utils import (
 )
 from GPT_SoVITS.module.models import SynthesizerTrnV3
 from GPT_SoVITS.process_ckpt import save_ckpt
+from gsv_tools.logger import SpeedColumnIteration
+
 
 hps = utils.get_hparams(stage=2)
 
@@ -248,7 +249,7 @@ def run(rank, n_gpus, hps):
                 completed=int(epoch_str) - 1,
             )
         else:
-            epoch_task = step_task = None
+            epoch_task = None
 
         for epoch in range(epoch_str, hps.train.epochs + 1):
             if rank == 0:
@@ -367,7 +368,7 @@ def train_and_evaluate(
                 if global_step % hps.train.log_interval == 0:
                     lr = optim_g.param_groups[0]["lr"]
                     losses = [cfm_loss]
-                    logger.info("Train Epoch: {} [{:.0f}%]".format(epoch, 100.0 * batch_idx / len(train_loader)))
+                    logger.info(f"Train Epoch: {epoch} [{100.0 * batch_idx / len(train_loader):.0f}%]")
                     logger.info([x.item() for x in losses] + [global_step, lr])
 
                     scalar_dict = {"loss/g/total": loss_gen_all, "learning_rate": lr, "grad_norm_g": grad_norm_g}

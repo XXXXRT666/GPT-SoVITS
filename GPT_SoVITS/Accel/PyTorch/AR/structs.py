@@ -4,24 +4,28 @@ Modified From https://github.com/XXXXRT666/GPT-SoVITS
 
 from __future__ import annotations
 
+from collections.abc import MutableSequence
 from dataclasses import dataclass
-from typing import Literal, MutableSequence, Optional, Protocol
+from typing import Literal, Protocol, TypeAlias
 
 import torch
 
 from .sample_funcs import SampleProtocol, sample_naive
 
+
 Tensor = torch.Tensor
+device = torch.device
+dtype = torch.dtype
 
 
 @dataclass
 class T2SResult:
     result: list[Tensor] | None = None
-    infer_speed: tuple[float, float] = (0.0, 0.0)
+    infer_speed: tuple[float, float] = (0.0, 0.0)  # Speed, Time
     total_tokens: int = 0
     status: Literal["Success", "Error"] = "Success"
-    exception: Optional[Exception] = None
-    traceback: Optional[str] = None
+    exception: Exception | None = None
+    traceback: str | None = None
 
 
 @dataclass
@@ -40,19 +44,26 @@ class T2SRequest:
     debug: bool = False
 
 
+KVCache: TypeAlias = tuple[Tensor, ...]
+
+
 class KVCacheProtocol(Protocol):
-    k_cache: Tensor
-    v_cache: Tensor
+    @staticmethod
+    def empty(kv_cache: KVCache) -> None: ...
 
-    def __init__(self, batch_size: int, max_seq_length: int, n_heads: int, head_dim: int) -> None: ...
+    @staticmethod
+    def update(input_pos: Tensor, k_val: Tensor, v_val: Tensor, kv_cache: KVCache) -> KVCache: ...
 
-    def empty(self) -> None: ...
+    @staticmethod
+    def prefill_kv(k_val: Tensor, v_val: Tensor, kv_cache: KVCache) -> None: ...
 
-    def update(self, input_pos: Tensor, k_val: Tensor, v_val: Tensor, *args, **kwds) -> tuple[Tensor, Tensor]: ...
+    @staticmethod
+    def init_cache(
+        batch_size: int, max_seq_length: int, n_heads: int, head_dim: int, device: device, dtype: dtype
+    ) -> KVCache: ...
 
-    def prefill_kv(self, k_val: Tensor, v_val: Tensor) -> None: ...
-
-    def sync_cache(self, kv_cache: KVCacheProtocol) -> None: ...
+    @staticmethod
+    def sync_cache(tgt: KVCache, src: KVCache) -> None: ...
 
 
 class T2SDecoderProtocol(Protocol):
@@ -77,7 +88,7 @@ class T2SSession:
         self,
         decoder: T2SDecoderProtocol,
         request: T2SRequest,
-        sapmle_func: type[SampleProtocol] = sample_naive,
+        sample_func: type[SampleProtocol] = sample_naive,
         device: torch.device = torch.device("cpu"),
         dtype: torch.dtype = torch.float32,
     ):
@@ -94,8 +105,8 @@ class T2SSession:
             request.prompts = request.prompts.to(device, torch.int32)
 
             # Cache
-            self.kv_cache: MutableSequence[KVCacheProtocol]
-            self.sample = sapmle_func()
+            self.kv_cache: MutableSequence[KVCache]
+            self.sample = sample_func()
 
             # Forward args
             self.x = [i.to(device) for i in request.x]
@@ -111,8 +122,8 @@ class T2SSession:
             self.input_pos.squeeze_(0)
 
             # CUDA Graph
-            self.stream: Optional[torch.cuda.Stream] = None
-            self.graph: Optional[torch.cuda.CUDAGraph] = None
+            self.stream: torch.cuda.Stream | None = None
+            self.graph: torch.cuda.CUDAGraph | None = None
             self.xy_pos_: Tensor
             self.xy_dec_: Tensor
 

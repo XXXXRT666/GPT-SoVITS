@@ -11,15 +11,16 @@ from ..t2s_model_abc import (
     TransformerDecoderABC,
 )
 
+
 Array = mx.array
 
 
 class Attention(AttentionABC):
     def __init__(self, n_head: int, hidden_dim: int, max_seq_length: int):
         super().__init__(n_head, hidden_dim, max_seq_length)
-        self.kc_class = KVCacheHND
+        self.kv_class = KVCacheHND
 
-    def __call__(self, x: Array, input_pos: Array, max_idx: int, kv_cache: KVCache, cache_idx: Array, attn_mask: Array):
+    def __call__(self, x: Array, input_pos: Array, max_idx: int, kv_cache: KVCache, attn_mask: Array):
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj(x).split(3, axis=-1)
@@ -28,7 +29,7 @@ class Attention(AttentionABC):
 
         q, k, v = map(lambda x: x.swapaxes(1, 2), (q, k, v))
 
-        kv_cache = self.kc_class.update_cache(input_pos, k, v, kv_cache, cache_idx)
+        kv_cache = self.kv_class.update_cache(input_pos, k, v, kv_cache)
 
         q, k, v = map(lambda x: x[..., :max_idx, :], (q, *kv_cache))
 
@@ -86,7 +87,7 @@ class T2SDecoder(T2SDecoderABC):
     def __init__(
         self,
         config: dict,
-        max_seq_length: int = 1500,
+        max_seq_length: int = 1024,
         max_batch_size: int = 10,
     ) -> None:
         super().__init__(config, max_seq_length, max_batch_size)

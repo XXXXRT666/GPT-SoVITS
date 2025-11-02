@@ -136,13 +136,13 @@ Write-Host "[INFO] Download pretrained_models..."
 DownloadAndUnzip $PRETRAINED_URL "GPT_SoVITS"
 
 Write-Host "[INFO] Download UVR5 model..."
-DownloadAndUnzip $UVR5_URL "tools\uvr5"
+DownloadAndUnzip $UVR5_URL "gsv_tools\uvr5"
 
 # Write-Host "[INFO] Downloading funasr..."
 # $funasrUrl = "https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/funasr.zip"
 # $funasrZip = "$tmpDir\funasr.zip"
 # Invoke-WebRequest -Uri $funasrUrl -OutFile $funasrZip
-# Expand-Archive -Path $funasrZip -DestinationPath "$srcDir\tools\asr\models" -Force
+# Expand-Archive -Path $funasrZip -DestinationPath "$srcDir\gsv_tools\asr\models" -Force
 # Remove-Item $funasrZip
 
 
@@ -166,6 +166,18 @@ switch ($cuda) {
         exit 1
     }
 }
+
+$codec_ver = (& ".\runtime\python.exe" -m pip show torchcodec 2>$null | Select-String "Version:" | ForEach-Object {
+    ($_ -split ":\s*")[1]
+}) -replace "\+.*", ""
+
+$audio_ver = (& ".\runtime\python.exe" -m pip show torchaudio 2>$null | Select-String "Version:" | ForEach-Object {
+    ($_ -split ":\s*")[1]
+}) -replace "\+.*", ""
+
+& ".\runtime\python.exe" -m pip uninstall -y torchcodec torchaudio  --quiet
+
+& ".\runtime\python.exe" -m pip install --quiet --no-deps "torchcodec==$codec_ver" "torchaudio==$audio_ver" 
 
 Write-Host "[INFO] Installing dependencies..."
 & ".\runtime\python.exe" -m pip install -r extra-req.txt --no-deps --no-warn-script-location

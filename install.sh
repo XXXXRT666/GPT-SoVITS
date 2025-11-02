@@ -41,8 +41,8 @@ run_conda_quiet() {
 
 run_pip_quiet() {
     local output
-    output=$(pip install "$@" 2>&1) || {
-        echo -e "${ERROR}Pip install failed:\n$output"
+    output=$(uv pip install "$@" --python "$(which python)" 2>&1) || {
+        echo -e "${ERROR}UV PIP install failed:\n$output"
         exit 1
     }
 }
@@ -56,17 +56,40 @@ run_wget_quiet() {
     fi
 }
 
+run_quiet() {
+    local output
+    output=$("$@" 2>&1) || {
+        echo -e "${ERROR}Command failed:\n$output"
+        exit 1
+    }
+}
+
 if ! command -v conda &>/dev/null; then
     echo -e "${ERROR}Conda Not Found"
     exit 1
 fi
 
-USE_CUDA=false
+UPDATE=false
+USE_CUDA=true
+USE_MLX=true
 USE_ROCM=false
 USE_CPU=false
+CUDA=128
+EXTRA=cpu
+Sync=false
 WORKFLOW=${WORKFLOW:-"false"}
 
-USE_HF=false
+if [ "$(uname)" != "Darwin" ]; then
+    USE_CUDA=true
+    CUDA=128
+    EXTRA=cu128
+else
+    USE_MLX=true
+    EXTRA=mlx
+    USE_CUDA=false
+fi
+
+USE_HF=true
 USE_HF_MIRROR=false
 USE_MODELSCOPE=false
 DOWNLOAD_UVR5=false
@@ -75,14 +98,16 @@ print_help() {
     echo "Usage: bash install.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --device   CU126|CU128|ROCM|MLX|CPU    Specify the Device (REQUIRED)"
-    echo "  --source   HF|HF-Mirror|ModelScope     Specify the model source (REQUIRED)"
-    echo "  --download-uvr5                        Enable downloading the UVR5 model"
-    echo "  -h, --help                             Show this help message and exit"
+    echo "  -D, --device   CU126|CU128|ROCM|MLX|CPU    Specify the Device (Optional, default: CU128 on Linux, MLX on macOS)"
+    echo "  -S, --source   HF|HF-Mirror|ModelScope     Specify the model source (Optional, default: HF)"
+    echo "  -U, --update                               Update the GPT-SoVITS repository and UV Lock before installation"
+    echo "  --sync                                     Sync the uv.lock into the conda environment instead of installing from it"
+    echo "  --download-uvr5                            Enable downloading the UVR5 model"
+    echo "  -h, --help                                 Show this help message and exit"
     echo ""
     echo "Examples:"
-    echo "  bash install.sh --device CU128 --source HF --download-uvr5"
-    echo "  bash install.sh --device MLX --source ModelScope"
+    echo "  bash install.sh --update"
+    echo "  bash install.sh --device MLX --source HF --download-uvr5"
 }
 
 if ! python3 -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)"; then
@@ -90,57 +115,69 @@ if ! python3 -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)"; 
     exit 1
 fi
 
-# Show help if no arguments provided
-if [[ $# -eq 0 ]]; then
-    print_help
-    exit 0
-fi
-
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-    --source)
+    -s | -S | --source | --Source)
         case "$2" in
         HF)
             USE_HF=true
             ;;
         HF-Mirror)
             USE_HF_MIRROR=true
+            USE_HF=false
             ;;
         ModelScope)
             USE_MODELSCOPE=true
+            USE_HF=false
             ;;
         *)
-            echo -e "${ERROR}Invalid Download Source: $2"
-            echo -e "${ERROR}Choose From: [HF, HF-Mirror, ModelScope]"
-            exit 1
+            USE_HF=true
+            echo -e "${WARNING}Invalid or Empty Download Source: $2"
+            echo -e "${WARNING}Fallback to: HF"
             ;;
         esac
         shift 2
         ;;
-    --device)
+    -d | -D | --device | --Device)
         case "$2" in
         CU126)
             CUDA=126
             USE_CUDA=true
+            EXTRA=cu126
             ;;
         CU128)
             CUDA=128
             USE_CUDA=true
+            EXTRA=cu128
             ;;
         ROCM)
             USE_ROCM=true
+            USE_CUDA=false
+            USE_MLX=false
+            EXTRA=rocm
             ;;
         MLX)
             USE_MLX=true
+            USE_CUDA=false
+            EXTRA=mlx
             ;;
         CPU)
             USE_CPU=true
+            USE_CUDA=false
+            USE_MLX=false
+            EXTRA=cpu
             ;;
         *)
-            echo -e "${ERROR}Invalid Device: $2"
-            echo -e "${ERROR}Choose From: [CU126, CU128, ROCM, MLX, CPU]"
-            exit 1
+            echo -e "${WARNING}Invalid or Empty Device: $2"
+            if [ "$(uname)" != "Darwin" ]; then
+                USE_CUDA=true
+                CUDA=128
+                echo -e "${WARNING}Fallback to: CU128"
+            else
+                USE_MLX=true
+                echo -e "${WARNING}Fallback to: MLX"
+            fi
             ;;
         esac
         shift 2
@@ -149,18 +186,29 @@ while [[ $# -gt 0 ]]; do
         DOWNLOAD_UVR5=true
         shift
         ;;
+    -u | -U | --update | --Update)
+        UPDATE=true
+        shift
+        ;;
+    --sync | --Sync)
+        Sync=true
+        shift
+        ;;
     -h | --help)
         print_help
         exit 0
         ;;
-    *)
-        echo -e "${ERROR}Unknown Argument: $1"
-        echo ""
-        print_help
-        exit 1
-        ;;
     esac
 done
+
+if [ "$UPDATE" = true ]; then
+    echo -e "${INFO}Updating GPT-SoVITS Repository..."
+    git pull origin main || {
+        echo -e "${ERROR}Git Pull Failed"
+        exit 1
+    }
+    echo -e "${SUCCESS}Repository Updated"
+fi
 
 if ! $USE_CUDA && ! $USE_ROCM && ! $USE_MLX && ! $USE_CPU; then
     echo -e "${ERROR}Device is REQUIRED"
@@ -179,7 +227,6 @@ fi
 case "$(uname -m)" in
 x86_64 | amd64) SYSROOT_PKG="sysroot_linux-64>=2.28" ;;
 aarch64 | arm64) SYSROOT_PKG="sysroot_linux-aarch64>=2.28" ;;
-ppc64le) SYSROOT_PKG="sysroot_linux-ppc64le>=2.28" ;;
 *)
     echo "Unsupported architecture: $(uname -m)"
     exit 1
@@ -192,7 +239,7 @@ if [ "$(uname)" != "Darwin" ]; then
     gcc_major_version=$(command -v gcc >/dev/null 2>&1 && gcc -dumpversion | cut -d. -f1 || echo 0)
     if [ "$gcc_major_version" -lt 11 ]; then
         echo -e "${INFO}Installing GCC & G++..."
-        run_conda_quiet gcc=11 gxx=11
+        run_conda_quiet gcc gxx binutils
         run_conda_quiet "$SYSROOT_PKG"
         echo -e "${SUCCESS}GCC & G++ Installed..."
     else
@@ -226,13 +273,9 @@ else
     fi
 fi
 
-echo -e "${INFO}Installing FFmpeg & CMake..."
-run_conda_quiet ffmpeg cmake make
-echo -e "${SUCCESS}FFmpeg & CMake Installed"
-
-echo -e "${INFO}Installing unzip..."
-run_conda_quiet unzip
-echo -e "${SUCCESS}unzip Installed"
+echo -e "${INFO}Installing FFmpeg & CMake and Some Other Tools..."
+run_conda_quiet ffmpeg cmake make pkg-config uv unzip
+echo -e "${SUCCESS}FFmpeg, CMake, Make, UnZip, pkg-config, uv Installed"
 
 if [ "$USE_HF" = "true" ]; then
     echo -e "${INFO}Download Model From HuggingFace"
@@ -268,7 +311,7 @@ else
 fi
 
 if [ "$DOWNLOAD_UVR5" = "true" ]; then
-    if find -L "tools/uvr5/uvr5_weights" -mindepth 1 ! -name '.gitignore' | grep -q .; then
+    if find -L "gsv_tools/uvr5/uvr5_weights" -mindepth 1 ! -name '.gitignore' | grep -q .; then
         echo -e"${INFO}UVR5 Models Exists"
         echo -e "${INFO}Skip Downloading UVR5 Models"
     else
@@ -276,7 +319,7 @@ if [ "$DOWNLOAD_UVR5" = "true" ]; then
         rm -rf uvr5_weights.zip
         run_wget_quiet "$UVR5_URL"
 
-        unzip -q -o uvr5_weights.zip -d tools/uvr5
+        unzip -q -o uvr5_weights.zip -d gsv_tools/uvr5
         rm -rf uvr5_weights.zip
         echo -e "${SUCCESS}UVR5 Models Downloaded"
     fi
@@ -310,6 +353,12 @@ if [ "$USE_ROCM" = true ] && [ "$WORKFLOW" = false ]; then
     fi
 fi
 
+if [ "$UPDATE" = true ]; then
+    echo -e "${INFO}Updating UV Lock..."
+    uv lock -U
+    echo -e "${SUCCESS}UV Environment Updated"
+fi
+
 if [ "$USE_CUDA" = true ] && [ "$WORKFLOW" = false ]; then
     CUDAVERSION=$(nvidia-smi | grep "CUDA Version" | sed -E 's/.*CUDA Version: ([0-9]+\.[0-9]+).*/\1/')
     echo -e "${INFO}Maximum CUDA Version Supported By Current Driver: $CUDAVERSION"
@@ -318,37 +367,29 @@ if [ "$USE_CUDA" = true ] && [ "$WORKFLOW" = false ]; then
             echo -e "${WARNING}CUDA 12.8 Is Not Supported By Current Driver"
         fi
         echo -e "${INFO}Installing PyTorch For CUDA 12.8..."
-        run_pip_quiet torch torchao torchaudio torchcodec --index-url "https://download.pytorch.org/whl/cu128"
+        run_pip_quiet ".[cu128]"
         run_conda_quiet cuda-nvcc=12.8
     elif [ "$CUDA" = 126 ]; then
         if awk "BEGIN {exit !($CUDAVERSION < 12.0)}"; then
             echo -e "${WARNING}CUDA 12.6 Is Not Supported By Current Driver"
         fi
         echo -e "${INFO}Installing PyTorch For CUDA 12.6..."
-        run_pip_quiet torch torchao torchaudio torchcodec --index-url "https://download.pytorch.org/whl/cu126"
+        run_pip_quiet ".[cu126]"
         run_conda_quiet cuda-nvcc=12.6
     fi
-    codec_ver=$(python -m pip show torchcodec 2>/dev/null | awk '/Version:/ {print $2}' | sed 's/+.*//')
-    audio_ver=$(python -m pip show torchaudio 2>/dev/null | awk '/Version:/ {print $2}' | sed 's/+.*//')
-
-    pip uninstall -y torchcodec torchaudio --quiet
-
-    run_pip_quiet "torchcodec==$codec_ver torchaudio==$audio_ver"
 
     echo -e "${INFO}Installing Flash Attn"
-    run_pip_quiet psutil ninja packaging wheel "setuptools>=42"
-    run_pip_quiet flash-attn -i https://xxxxrt666.github.io/PIP-Index/ --no-build-isolation
+    run_pip_quiet ".[flash-attn]"
     echo -e "${SUCCESS}Flash Attn Installed"
 elif [ "$USE_MLX" = true ] && [ "$WORKFLOW" = false ]; then
-    echo -e "${INFO}Installing MLX & PyTorch For MPS..."
-    run_pip_quiet torch torchao torchaudio torchcodec --index-url "https://download.pytorch.org/whl/cpu"
-    run_pip_quiet mlx
+    echo -e "${INFO}Installing MLX & PyTorch..."
+    run_pip_quiet ".[mlx]"
 elif [ "$USE_ROCM" = true ] && [ "$WORKFLOW" = false ]; then
     echo -e "${INFO}Installing PyTorch For ROCm 6.2..."
-    run_pip_quiet torch torchao torchaudio torchcodec --index-url "https://download.pytorch.org/whl/rocm6.2"
+    run_pip_quiet ".[rocm64]"
 elif [ "$USE_CPU" = true ] && [ "$WORKFLOW" = false ]; then
     echo -e "${INFO}Installing PyTorch For CPU..."
-    run_pip_quiet torch torchao torchaudio torchcodec --index-url "https://download.pytorch.org/whl/cpu"
+    run_pip_quiet ".[cpu]"
 elif [ "$WORKFLOW" = false ]; then
     echo -e "${ERROR}Unknown Err"
     exit 1
@@ -357,9 +398,16 @@ echo -e "${SUCCESS}PyTorch Installed"
 
 echo -e "${INFO}Installing Python Dependencies From requirements.txt..."
 
-run_pip_quiet -r extra-req.txt --no-deps
+run_quiet uv export --extra=main --extra="$EXTRA" -o pylock.toml
 
-run_pip_quiet -r requirements.txt
+if [ "$Sync" = true ]; then
+    echo -e "${INFO}Syncing UV Environment..."
+    run_quiet uv pip sync pylock.toml --no-break-system-packages --preview-features pylock --no-binary av
+else
+    run_quiet uv pip install -r pylock.toml --preview-features pylock --no-binary av
+fi
+
+run_pip_quiet faster-whisper --no-deps
 
 echo -e "${SUCCESS}Python Dependencies Installed"
 

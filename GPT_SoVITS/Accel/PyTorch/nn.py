@@ -8,14 +8,13 @@ from typing import Any
 import torch.nn
 from torch.nn import (
     functional as functional,
-)
-from torch.nn import (
     utils as utils,
 )
 from torch.nn.modules import *  # type: ignore # noqa: F403
 from torch.nn.parameter import (
     Parameter as Parameter,
 )
+
 
 Tensor = torch.Tensor
 
@@ -36,7 +35,7 @@ class Module(torch.nn.Module):
         if cls.__dict__.get("__call__", None) is None:
             return
 
-        setattr(cls, "forward", cls.__dict__["__call__"])
+        cls.forward = cls.__dict__["__call__"]
         delattr(cls, "__call__")
 
     @property

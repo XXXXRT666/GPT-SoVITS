@@ -6,7 +6,6 @@ import sys
 import time
 import warnings
 from pathlib import Path
-from typing import List
 
 import torch
 import torch.multiprocessing as tmp
@@ -15,9 +14,10 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from torch.multiprocessing.spawn import spawn
 from transformers import BertForMaskedLM, BertTokenizerFast
 
-from GPT_SoVITS.Accel.logger import SpeedColumnIteration, console, logger
 from GPT_SoVITS.text.cleaner import clean_text
-from tools.my_utils import clean_path
+from gsv_tools.logger import SpeedColumnIteration, console, logger
+from gsv_tools.my_utils import clean_path
+
 
 torch.set_grad_enabled(False)
 
@@ -74,7 +74,7 @@ def build_device_strings(device_type: str, device_ids: list[int], procs_per_devi
 
 def worker_entry(
     rank: int,
-    device_strs: List[str],
+    device_strs: list[str],
     tasks_q: "tmp.Queue[tuple[int, str, str, str] | None]",
     results_q: "tmp.Queue[tuple[int, tuple[str, str, list[int] | None, str]]]",
     bert_pretrained_dir: str,
@@ -213,7 +213,7 @@ def main(
     os.makedirs(opt, exist_ok=True)
     merged_path = osp.join(opt, "2-name2text.txt")
 
-    with open(inp_list, "r", encoding="utf8") as f:
+    with open(inp_list, encoding="utf8") as f:
         lines = [ln for ln in f.read().splitlines() if ln.strip()]
 
     tasks_all: list[tuple[int, str, str, str]] = []
@@ -234,8 +234,8 @@ def main(
     device_strs = build_device_strings(device, device_ids, nproc)
     world_size = len(device_strs)
 
-    tasks_q: "tmp.Queue[tuple[int, str, str, str] | None]" = tmp.Queue()
-    results_q: "tmp.Queue[tuple[int, tuple[str, str, list[int] | None, str]]]" = tmp.Queue()
+    tasks_q: tmp.Queue[tuple[int, str, str, str] | None] = tmp.Queue()
+    results_q: tmp.Queue[tuple[int, tuple[str, str, list[int] | None, str]]] = tmp.Queue()
 
     for task in tasks_all:
         tasks_q.put(task)

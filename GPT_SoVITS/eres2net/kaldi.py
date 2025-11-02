@@ -1,9 +1,9 @@
 import math
-from typing import Tuple
 
 import torch
 import torchaudio
 from torch import Tensor
+
 
 __all__ = [
     "get_mel_banks",
@@ -130,18 +130,16 @@ def _get_waveform_and_window_properties(
     frame_length: float,
     round_to_power_of_two: bool,
     preemphasis_coefficient: float,
-) -> Tuple[Tensor, int, int, int]:
+) -> tuple[Tensor, int, int, int]:
     r"""Gets the waveform and window properties"""
     channel = max(channel, 0)
-    assert channel < waveform.size(0), "Invalid channel {} for size {}".format(channel, waveform.size(0))
+    assert channel < waveform.size(0), f"Invalid channel {channel} for size {waveform.size(0)}"
     waveform = waveform[channel, :]  # size (n)
     window_shift = int(sample_frequency * frame_shift * MILLISECONDS_TO_SECONDS)
     window_size = int(sample_frequency * frame_length * MILLISECONDS_TO_SECONDS)
     padded_window_size = _next_power_of_2(window_size) if round_to_power_of_two else window_size
 
-    assert 2 <= window_size <= len(waveform), "choose a window size {} that is [2, {}]".format(
-        window_size, len(waveform)
-    )
+    assert 2 <= window_size <= len(waveform), f"choose a window size {window_size} that is [2, {len(waveform)}]"
     assert 0 < window_shift, "`window_shift` must be greater than 0"
     assert padded_window_size % 2 == 0, (
         "the padded `window_size` must be divisible by two. use `round_to_power_of_two` or change `frame_length`"
@@ -164,7 +162,7 @@ def _get_window(
     dither: float,
     remove_dc_offset: bool,
     preemphasis_coefficient: float,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     r"""Gets a window and its log energy
 
     Returns:
@@ -444,7 +442,7 @@ def get_mel_banks(
     vtln_warp_factor: float,
     device=None,
     dtype=None,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     """
     Returns:
         (Tensor, Tensor): The tuple consists of ``bins`` (which is
@@ -460,7 +458,7 @@ def get_mel_banks(
         high_freq += nyquist
 
     assert (0.0 <= low_freq < nyquist) and (0.0 < high_freq <= nyquist) and (low_freq < high_freq), (
-        "Bad values in options: low-freq {} and high-freq {} vs. nyquist {}".format(low_freq, high_freq, nyquist)
+        f"Bad values in options: low-freq {low_freq} and high-freq {high_freq} vs. nyquist {nyquist}"
     )
 
     # fft-bin width [think of it as Nyquist-freq / half-window-length]
@@ -477,8 +475,8 @@ def get_mel_banks(
 
     assert vtln_warp_factor == 1.0 or (
         (low_freq < vtln_low < high_freq) and (0.0 < vtln_high < high_freq) and (vtln_low < vtln_high)
-    ), "Bad values in options: vtln-low {} and vtln-high {}, versus low-freq {} and high-freq {}".format(
-        vtln_low, vtln_high, low_freq, high_freq
+    ), (
+        f"Bad values in options: vtln-low {vtln_low} and vtln-high {vtln_high}, versus low-freq {low_freq} and high-freq {high_freq}"
     )
 
     bin = torch.arange(num_bins).unsqueeze(1)
@@ -625,18 +623,7 @@ def fbank(
     # size (num_mel_bins, padded_window_size // 2)
     # print(num_mel_bins, padded_window_size, sample_frequency, low_freq, high_freq, vtln_low, vtln_high, vtln_warp)
 
-    cache_key = "%s-%s-%s-%s-%s-%s-%s-%s-%s-%s" % (
-        num_mel_bins,
-        padded_window_size,
-        sample_frequency,
-        low_freq,
-        high_freq,
-        vtln_low,
-        vtln_high,
-        vtln_warp,
-        device,
-        dtype,
-    )
+    cache_key = f"{num_mel_bins}-{padded_window_size}-{sample_frequency}-{low_freq}-{high_freq}-{vtln_low}-{vtln_high}-{vtln_warp}-{device}-{dtype}"
     if cache_key not in cache:
         mel_energies = get_mel_banks(
             num_mel_bins,

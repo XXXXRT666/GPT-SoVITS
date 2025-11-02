@@ -1,14 +1,20 @@
+"""
+Modified From https://github.com/XXXXRT666/GPT-SoVITS
+"""
+
 from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
-from typing import Literal, MutableSequence, Type
+from collections.abc import MutableSequence
+from typing import Literal
 
 import mlx.core as mx
 import mlx.nn as nn
 from mlx.core import Dtype
 
 from .structs_mlx import KVCache, KVCacheProtocol, T2SDecoderProtocol, T2SSessionMLX
+
 
 Array = mx.array
 
@@ -31,7 +37,7 @@ class TokenEmbedding(nn.Module):
         return self.word_embeddings.weight
 
     def embedding(self, index: int):
-        return self.word_embeddings.weight[index : index + 1]
+        return self.word_embeddings.weight[index]
 
     def __call__(self, x: Array):
         x = self.word_embeddings(x)
@@ -44,7 +50,7 @@ class SinePositionalEmbedding(nn.Module):
         embedding_dim: int,
         scale: bool = False,
         max_batch_size: int = 10,
-        max_seq_length: int = 1500,
+        max_seq_length: int = 1024,
     ):
         super().__init__()
         self.embedding_dim = embedding_dim
@@ -124,14 +130,14 @@ class KVCacheHND(KVCacheProtocol):
         v_cache[:] = 0
 
     @staticmethod
-    def update_cache(input_pos, k_val, v_val, kv_cache, cache_idx):
+    def update_cache(input_pos, k_val, v_val, kv_cache):
         # input_pos: [B, ], k_val: [B, H, 1, D]
         assert len(kv_cache) == 2
         k_out, v_out = kv_cache
         ip0 = input_pos - 1
 
-        k_out[cache_idx, :, ip0, None] = k_val
-        v_out[cache_idx, :, ip0, None] = v_val
+        k_out[:] = mx.put_along_axis(k_out, ip0.reshape(-1, 1, 1, 1), k_val, axis=2)
+        v_out[:] = mx.put_along_axis(v_out, ip0.reshape(-1, 1, 1, 1), v_val, axis=2)
 
         return k_out, v_out
 
@@ -168,12 +174,10 @@ class AttentionABC(ABC, nn.Module):
 
         self.scale = 1 / math.sqrt(self.head_dim)
 
-        self.kc_class: KVCacheProtocol
+        self.kv_class: KVCacheProtocol
 
     @abstractmethod
-    def __call__(
-        self, x: Array, input_pos: Array, max_idx: int, kv_cache: KVCache, cache_idx: Array, attn_mask: Array
-    ) -> Array: ...
+    def __call__(self, x: Array, input_pos: Array, max_idx: int, kv_cache: KVCache, attn_mask: Array) -> Array: ...
 
     def prefill(self, x: Array, kv_cache: KVCache, attn_mask: Array):
         bsz, seqlen, _ = x.shape
@@ -186,7 +190,7 @@ class AttentionABC(ABC, nn.Module):
         k = k.reshape(bsz, seqlen, self.n_head, -1).transpose(0, 2, 1, 3)
         v = v.reshape(bsz, seqlen, self.n_head, -1).transpose(0, 2, 1, 3)
 
-        self.kc_class.prefill_kv(k, v, kv_cache)
+        self.kv_class.prefill_kv(k, v, kv_cache)
 
         attn = mx.fast.scaled_dot_product_attention(q, k, v, mask=attn_mask, scale=self.scale)
 
@@ -223,7 +227,7 @@ class TransformerBlockABC(nn.Module):
         self.attention_norm = nn.LayerNorm(self.hidden_dim)
         self.ffn_norm = nn.LayerNorm(self.hidden_dim)
 
-    def __call__(self, x: Array, input_pos: Array, max_idx: int, kv_cache: KVCache, cache_idx: Array, attn_mask: Array):
+    def __call__(self, x: Array, input_pos: Array, max_idx: int, kv_cache: KVCache, attn_mask: Array):
         h = self.attention_norm(
             x
             + self.attention(
@@ -231,7 +235,6 @@ class TransformerBlockABC(nn.Module):
                 input_pos,
                 max_idx,
                 kv_cache,
-                cache_idx,
                 attn_mask,
             )
         )
@@ -287,17 +290,15 @@ class TransformerDecoderABC(nn.Module):
         input_pos: Array,
         max_idx: int,
         kv_caches: MutableSequence[KVCache],
-        cache_idx: Array,
         *args,
         **kwds,
     ):
-        for layer, kv_cache in zip(self.layers, kv_caches):
+        for layer, kv_cache in zip(self.layers, kv_caches, strict=False):
             x = layer(
                 x,
                 input_pos,
                 max_idx,
                 kv_cache,
-                cache_idx,
                 *args,
                 **kwds,
             )
@@ -305,7 +306,7 @@ class TransformerDecoderABC(nn.Module):
         return x
 
     def prefill(self, x: Array, mask: Array, kv_caches: MutableSequence[KVCache]):
-        for layer, kv_cache in zip(self.layers, kv_caches):
+        for layer, kv_cache in zip(self.layers, kv_caches, strict=False):
             x = layer.prefill(
                 x,
                 mask,
@@ -318,7 +319,7 @@ class T2SDecoderABC(nn.Module, T2SDecoderProtocol):
     def __init__(
         self,
         config: dict,
-        max_seq_length: int = 1500,
+        max_seq_length: int = 1024,
         max_batch_size: int = 10,
     ) -> None:
         super().__init__()
@@ -366,7 +367,7 @@ class T2SDecoderABC(nn.Module, T2SDecoderProtocol):
             max_seq_length=max_seq_length,
         )
 
-        self.kv_class: Type[KVCacheProtocol]
+        self.kv_class: type[KVCacheProtocol]
 
         self.bits: int = -1
         self.group_size: int = -1
@@ -399,7 +400,7 @@ class T2SDecoderABC(nn.Module, T2SDecoderProtocol):
         y_emb = self.ar_audio_embedding(y)
         y_pos = self.ar_audio_position.prefill(y_emb)
 
-        for bs, (x_, len_, bert_feature) in enumerate(zip(x, x_len, bert_features)):
+        for bs, (x_, len_, bert_feature) in enumerate(zip(x, x_len, bert_features, strict=False)):
             x_emb = self.ar_text_embedding(x_)
             bert = self.bert_proj(bert_feature)
             x_emb = x_emb + bert

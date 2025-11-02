@@ -61,7 +61,7 @@ def tokenize_and_map(tokenizer, text: str):
 
     tokens = []
     index_map_from_token_to_text = []
-    for word, (word_start, word_end) in zip(words, word2text):
+    for word, (word_start, word_end) in zip(words, word2text, strict=False):
         word_tokens = tokenizer.tokenize(word)
 
         if len(word_tokens) == 0 or word_tokens == ["[UNK]"]:

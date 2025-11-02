@@ -71,13 +71,11 @@
 
 ### 测试通过的环境
 
-| Python Version | PyTorch Version | Device        |
-| -------------- | --------------- | ------------- |
-| Python 3.10    | PyTorch 2.5.1   | CUDA 12.4     |
-| Python 3.11    | PyTorch 2.5.1   | CUDA 12.4     |
-| Python 3.11    | PyTorch 2.7.0   | CUDA 12.8     |
-| Python 3.11    | PyTorch 2.8.0   | Apple Silicon |
-| Python 3.10    | PyTorch 2.8.0   | CPU           |
+| Python Version | PyTorch Version |    Device     |
+| :------------: | :-------------: | :-----------: |
+|  Python 3.11   |  PyTorch 2.9.0  |   CUDA 12.8   |
+|  Python 3.11   |  PyTorch 2.9.0  | Apple Silicon |
+|  Python 3.10   |  PyTorch 2.8.0  |      CPU      |
 
 </div>
 
@@ -87,10 +85,10 @@
 
 **中国地区的用户可以[在此处下载整合包](https://www.yuque.com/baicaigongchang1145haoyuangong/ib3g1e/dkxgpiy9zb96hob4#KTvnO).**
 
-```pwsh
+```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-pwsh -F install.ps1 --Device <CU126|CU128|CPU> --Source <HF|HF-Mirror|ModelScope> [--DownloadUVR5]
+pwsh -F install.ps1 --help
 ```
 
 ### Linux
@@ -98,7 +96,7 @@ pwsh -F install.ps1 --Device <CU126|CU128|CPU> --Source <HF|HF-Mirror|ModelScope
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 ### macOS
@@ -110,7 +108,7 @@ bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScop
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 <div align="center">
@@ -124,37 +122,11 @@ bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--downloa
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
+conda install uv ffmpeg -c conda-forge
 
-pip install -r extra-req.txt --no-deps
-pip install -r requirements.txt
-```
-
-#### 安装 FFmpeg
-
-##### Conda 用户
-
-```bash
-conda activate GPTSoVITS
-conda install ffmpeg -c conda-forge
-```
-
-##### Ubuntu/Debian 用户
-
-```bash
-sudo apt install ffmpeg
-sudo apt install libsox-dev
-```
-
-##### Windows 用户
-
-下载并将 [ffmpeg.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffmpeg.exe) 和 [ffprobe.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffprobe.exe) 放置在 GPT-SoVITS 根目录下
-
-安装 [Visual Studio 2017](https://aka.ms/vs/17/release/vc_redist.x86.exe) 环境
-
-##### MacOS 用户
-
-```bash
-brew install ffmpeg
+uv export --extra main -o pylock.toml -q --extra [mlx|cu126|cu128|rocm|cpu]
+uv pip sync pylock.toml --no-break-system-packages --preview-features pylock
+uv pip install ".[flash-attn]"
 ```
 
 <div align="center">
@@ -225,15 +197,15 @@ docker exec -it <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|GPT-SoVITS-CU126|GP
 
 2. 从 [G2PWModel.zip(HF)](https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/G2PWModel.zip)| [G2PWModel.zip(ModelScope)](https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/G2PWModel.zip) 下载模型, 解压并重命名为 `G2PWModel`, 然后将其放置在 `GPT_SoVITS/text` 目录中. (仅限中文 TTS)
 
-3. 对于 UVR5 (人声/伴奏分离和混响移除, 额外功能), 从 [UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) 下载模型, 并将其放置在 `tools/uvr5/uvr5_weights` 目录中.
+3. 对于 UVR5 (人声/伴奏分离和混响移除, 额外功能), 从 [UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) 下载模型, 并将其放置在 `gsv_tools/uvr5/uvr5_weights` 目录中.
 
-   - 如果你在 UVR5 中使用 `bs_roformer` 或 `mel_band_roformer`模型, 你可以手动下载模型和相应的配置文件, 并将它们放在 `tools/UVR5/UVR5_weights` 中.**重命名模型文件和配置文件, 确保除后缀外**, 模型和配置文件具有相同且对应的名称.此外, 模型和配置文件名**必须包含"roformer"**, 才能被识别为 roformer 类的模型.
+   - 如果你在 UVR5 中使用 `bs_roformer` 或 `mel_band_roformer`模型, 你可以手动下载模型和相应的配置文件, 并将它们放在 `gsv_tools/uvr5/UVR5_weights` 中.**重命名模型文件和配置文件, 确保除后缀外**, 模型和配置文件具有相同且对应的名称.此外, 模型和配置文件名**必须包含"roformer"**, 才能被识别为 roformer 类的模型.
 
    - 建议在模型名称和配置文件名中**直接指定模型类型**, 例如`mel_mand_roformer`、`bs_roformer`.如果未指定, 将从配置文中比对特征, 以确定它是哪种类型的模型.例如, 模型`bs_roformer_ep_368_sdr_12.9628.ckpt` 和对应的配置文件`bs_roformer_ep_368_sdr_12.9628.yaml` 是一对.`kim_mel_band_roformer.ckpt` 和 `kim_mel_band_roformer.yaml` 也是一对.
 
-4. 对于中文 ASR (额外功能), 从 [Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files)、[Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files) 和 [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) 下载模型, 并将它们放置在 `tools/asr/models` 目录中.
+4. 对于中文 ASR (额外功能), 从 [Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files)、[Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files) 和 [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) 下载模型, 并将它们放置在 `gsv_tools/asr/models` 目录中.
 
-5. 对于英语或日语 ASR (额外功能), 从 [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) 下载模型, 并将其放置在 `tools/asr/models` 目录中.此外, [其他模型](https://huggingface.co/Systran) 可能具有类似效果且占用更少的磁盘空间.
+5. 对于英语或日语 ASR (额外功能), 从 [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) 下载模型, 并将其放置在 `gsv_tools/asr/models` 目录中.此外, [其他模型](https://huggingface.co/Systran) 可能具有类似效果且占用更少的磁盘空间.
 
 <div align="center">
 
@@ -412,7 +384,7 @@ python webui.py
 使用命令行打开 UVR5 的 WebUI
 
 ```bash
-python tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
+python gsv_tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
 ```
 
 这是使用命令行完成数据集的音频切分的方式
@@ -430,7 +402,7 @@ python audio_slicer.py \
 这是使用命令行完成数据集 ASR 处理的方式 (仅限中文)
 
 ```bash
-python tools/asr/funasr_asr.py -i <input> -o <output>
+python gsv_tools/asr/funasr_asr.py -i <input> -o <output>
 ```
 
 通过 Faster_Whisper 进行 ASR 处理 (除中文之外的 ASR 标记)
@@ -438,7 +410,7 @@ python tools/asr/funasr_asr.py -i <input> -o <output>
 (没有进度条, GPU 性能可能会导致时间延迟)
 
 ```bash
-python ./tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p <precision>
+python ./gsv_tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p <precision>
 ```
 
 启用自定义列表保存路径
@@ -459,7 +431,7 @@ python ./tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p 
 - [TransferTTS](https://github.com/hcy71o/TransferTTS/blob/master/models.py#L556)
 - [contentvec](https://github.com/auspicious3000/contentvec/)
 - [hifi-gan](https://github.com/jik876/hifi-gan)
-- [fish-speech](https://github.com/fishaudio/fish-speech/blob/main/tools/llama/generate.py#L41)
+- [fish-speech](https://github.com/fishaudio/fish-speech/blob/f5243096380be703b640d387ab959623eefad756/fish_speech/models/text2semantic/inference.py#L81)
 - [f5-TTS](https://github.com/SWivid/F5-TTS/blob/main/src/f5_tts/model/backbones/dit.py)
 - [shortcut flow matching](https://github.com/kvfrans/shortcut-models/blob/main/targets_shortcut.py)
 

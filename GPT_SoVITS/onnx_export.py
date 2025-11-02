@@ -9,8 +9,9 @@ from torch import nn
 
 from GPT_SoVITS.AR.models.t2s_lightning_module_onnx import Text2SemanticLightningModule
 from GPT_SoVITS.feature_extractor import cnhubert
-from GPT_SoVITS.module.models_onnx import SynthesizerTrn, symbols_v1, symbols_v2
+from GPT_SoVITS.module.models_onnx import SynthesizerTrn
 from GPT_SoVITS.text import cleaned_text_to_sequence
+
 
 cnhubert_base_path = "GPT_SoVITS/pretrained_models/chinese-hubert-base"
 cnhubert.cnhubert_base_path = cnhubert_base_path
@@ -59,7 +60,7 @@ class DictToAttrRecursive(dict):
     def __setattr__(self, key, value):
         if isinstance(value, dict):
             value = DictToAttrRecursive(value)
-        super(DictToAttrRecursive, self).__setitem__(key, value)
+        super().__setitem__(key, value)
         super().__setattr__(key, value)
 
     def __delattr__(self, item):
@@ -362,9 +363,9 @@ def export(vits_path, gpt_path, project_name, vits_model="v2"):
         soundfile.write("out.wav", a, vits.hps.data.sampling_rate)
 
     if vits_model == "v1":
-        symbols = symbols_v1
+        pass
     else:
-        symbols = symbols_v2
+        pass
 
     MoeVSConf = {
         "Folder": f"{project_name}",
@@ -379,7 +380,7 @@ def export(vits_path, gpt_path, project_name, vits_model="v2"):
         "AddBlank": False,
     }
 
-    MoeVSConfJson = json.dumps(MoeVSConf)
+    json.dumps(MoeVSConf)
     with open(f"onnx/{project_name}.json", "w") as MoeVsConfFile:
         json.dump(MoeVSConf, MoeVsConfFile, indent=4)
 

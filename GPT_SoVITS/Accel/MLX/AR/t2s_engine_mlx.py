@@ -7,23 +7,27 @@ import mlx.core as mx
 import torch
 from rich.progress import BarColumn, Progress, TextColumn
 
-from ...logger import SpeedColumnToken, Timer, console, logger
+from gsv_tools.logger import SpeedColumnToken, Timer, console, logger
+
 from ...PyTorch.AR.structs import T2SEngineProtocol, T2SRequest, T2SResult
 from .backends import mlx_static, mlx_varlen
 from .structs_mlx import T2SSessionMLX
 from .t2s_model_abc import T2SDecoderABC
 
+
 Array = mx.array
 Tensor = torch.Tensor
 
-timer = Timer()
+timer = Timer("T2S Engine MLX")
+
+cpu = mx.Device(mx.cpu)
 
 
 class T2SEngine(T2SEngineProtocol):
     def __init__(
         self,
         decoder_model: T2SDecoderABC,
-        device: mx.Device | torch.device = mx.Device(mx.cpu),
+        device: mx.Device | torch.device = cpu,
         dtype: torch.dtype | mx.Dtype = torch.float32,
         *args,
         **kwds,
@@ -32,7 +36,7 @@ class T2SEngine(T2SEngineProtocol):
             case _ if isinstance(device, torch.device):
                 match device.type:
                     case "cpu":
-                        self.device = mx.Device(mx.gpu)
+                        self.device = cpu
                     case "cuda" | "mps":
                         self.device = mx.Device(mx.gpu)
                     case _:
@@ -81,7 +85,7 @@ class T2SEngine(T2SEngineProtocol):
                 transient=True,
             ) as progress,
         ):
-            max_token = min(1500 - int(session.input_pos.max()), 1000) * session.bsz
+            max_token = min(1024 - int(session.input_pos.max()), 640) * session.bsz
 
             task = progress.add_task("T2S Decoding", total=max_token)
             for idx in range(max_token):
@@ -102,7 +106,7 @@ class T2SEngine(T2SEngineProtocol):
                     args, kwds = decoder.pre_forward(session)
 
                     if debug:
-                        mx.eval(session.input_pos, session.xy_pos, session.kv_cache, args, kwds, batch_idx)
+                        mx.eval(session.input_pos, session.xy_pos, session.kv_cache, args, kwds)
 
                     if debug and idx == 50 and os.environ.get("MTL_CAPTURE_ENABLED") == "1":
                         os.makedirs("./profiler/mlx", exist_ok=True)
@@ -114,7 +118,6 @@ class T2SEngine(T2SEngineProtocol):
                             session.input_pos,
                             int(session.input_pos.max()),
                             session.kv_cache,
-                            batch_idx,
                             *args,
                             **kwds,
                         )
@@ -171,7 +174,8 @@ class T2SEngine(T2SEngineProtocol):
 
                 if mx.all(session.completed).item():
                     logger.info(
-                        f"T2S Decoding EOS {session.prefill_len.tolist().__str__().strip('[]')} -> {[i.shape[-1] for i in session.y_results].__str__().strip('[]')}"
+                        f"T2S Decoding EOS {session.prefill_len.tolist().__str__().strip('[]')} -> "
+                        f"{[i.shape[-1] for i in session.y_results].__str__().strip('[]')}"
                     )
                     logger.info(f"Infer Speed: {(idx + 1) * session.bsz / (time.perf_counter() - t1):.2f} token/s")
                     infer_time = time.perf_counter() - t1
@@ -242,6 +246,7 @@ class T2SEngine(T2SEngineProtocol):
         max_batch_size: int = 1,
         backend: str = "MLX-Varlen",
         quantize_mode: Literal["Affine", "MXFP4"] | None = None,
+        compile: bool = False,
     ) -> T2SDecoderABC:
         logger.info(f"Loading Text2Semantic Weights from {weights_path} with {backend} Backend")
         dict_s1 = torch.load(weights_path, map_location="cpu", weights_only=True, mmap=True)

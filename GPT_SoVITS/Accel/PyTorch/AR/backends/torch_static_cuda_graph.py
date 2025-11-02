@@ -2,7 +2,7 @@ import torch
 from torch.nn import functional as F
 
 from ... import nn
-from ..structs import KVCacheProtocol, T2SSession
+from ..structs import KVCache, T2SSession
 from ..t2s_model_abc import (
     AttentionABC,
     CUDAGraphCacheABC,
@@ -13,6 +13,7 @@ from ..t2s_model_abc import (
     TransformerBlockABC,
     TransformerDecoderABC,
 )
+
 
 Tensor = torch.Tensor
 
@@ -25,7 +26,9 @@ class Attention(AttentionABC):
         self.in_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=True)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
-    def __call__(self, x: Tensor, input_pos: Tensor, kv_cache: KVCacheProtocol, attn_mask: Tensor):
+        self.kv_class = KVCacheHND
+
+    def __call__(self, x: Tensor, input_pos: Tensor, kv_cache: KVCache, attn_mask: Tensor):
         bsz, seqlen, _ = x.shape
 
         q, k, v = self.in_proj(x).chunk(3, dim=-1)
@@ -36,7 +39,7 @@ class Attention(AttentionABC):
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
-        k, v = kv_cache.update(input_pos, k, v)
+        k, v = self.kv_class.update(input_pos, k, v, kv_cache)
 
         attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
 
@@ -79,7 +82,7 @@ class T2SDecoder(T2SDecoderABC):
     def __init__(
         self,
         config,
-        max_seq_length=1500,
+        max_seq_length=1024,
         max_batch_size=10,
     ) -> None:
         super().__init__(config, max_seq_length, max_batch_size)
@@ -87,7 +90,13 @@ class T2SDecoder(T2SDecoderABC):
         self.bert_proj = nn.Linear(1024, self.embedding_dim)
         self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h: TransformerDecoderABC = TransformerDecoder(
-            self.hidden_dim, self.n_layer, self.n_head, self.ffn_dim, self.vocab_size, max_seq_length, max_batch_size
+            self.hidden_dim,
+            self.n_layer,
+            self.n_head,
+            self.ffn_dim,
+            self.vocab_size,
+            max_seq_length,
+            max_batch_size,
         )
 
         self.kv_class = KVCacheHND
@@ -156,7 +165,7 @@ class CUDAGraphCache(CUDAGraphCacheABC):
     def __init__(
         self,
         decoder,
-        cache_size: int = 5,
+        cache_size: int = 3,
     ) -> None:
         super().__init__(decoder, cache_size)
 

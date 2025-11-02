@@ -9,13 +9,19 @@ from typing import Literal
 import torch
 from rich.progress import BarColumn, Progress, TextColumn
 
-from ...logger import SpeedColumnToken, console, logger, timer
+from gsv_tools.logger import SpeedColumnToken, Timer, console, logger
+
 from .structs import T2SEngineProtocol, T2SRequest, T2SResult, T2SSession
 from .t2s_model_abc import (
     CUDAGraphCacheABC,
     T2SDecoderABC,
     TorchProfiler,
 )
+
+
+timer = Timer("T2S Engine Torch")
+
+cpu = torch.device("cpu")
 
 
 def synchronize_device(device: torch.device) -> None:
@@ -36,20 +42,19 @@ class T2SEngine(T2SEngineProtocol):
     def __init__(
         self,
         decoder_model: T2SDecoderABC,
-        device: torch.device = torch.device("cpu"),
+        device: torch.device = cpu,
         dtype: torch.dtype = torch.float32,
-        cache_size: int = 5,
+        cache_size: int = 3,
         *args,
         **kwds,
     ) -> None:
         assert device.type in {"cpu", "cuda", "mps", "xpu", "mtia"}
         assert dtype in {torch.float16, torch.bfloat16, torch.float32}
 
-        self.device = device if device.type != "mps" else torch.device("cpu")
+        self.device = device if device.type != "mps" else cpu
         self.dtype = dtype
 
         self.decoder_model: T2SDecoderABC = decoder_model.to(self.device, self.dtype)
-        # self.decoder_model.compile()
 
         self.graphcache: CUDAGraphCacheABC = decoder_model.graph_cache_class(self.decoder_model, cache_size)
 
@@ -81,7 +86,7 @@ class T2SEngine(T2SEngineProtocol):
                 ) as progress,
             ):
                 torch_profiler.start()
-                max_token = min(int(1500 - session.input_pos.max()), 1000) * bsz
+                max_token = min(int(1024 - session.input_pos.max()), 640) * bsz
                 task = progress.add_task("T2S Decoding", total=max_token)
 
                 try:
@@ -157,20 +162,21 @@ class T2SEngine(T2SEngineProtocol):
                                 EOS_mask = (argmax_token == decoder.EOS) | (sample_token == decoder.EOS)
 
                                 newly_done_mask = EOS_mask & (~session.completed)
-                                newly_done_indices = newly_done_mask.nonzero()
+                                newly_done_indices = batch_idx[newly_done_mask]
 
                                 if newly_done_indices.numel() > 0:
                                     for i in newly_done_indices:
-                                        session.y_results[i] = session.y[
-                                            i, session.y_len : session.y_len + idx
-                                        ].squeeze(0)
+                                        session.y_results[i] = session.y[i, session.y_len : session.y_len + idx].view(
+                                            -1
+                                        )
                                         session.completed[newly_done_indices] = True
                                 if debug:
                                     synchronize_device(session.device)
 
                             if torch.all(session.completed).item():
                                 logger.info(
-                                    f"T2S Decoding EOS {session.prefill_len.tolist().__str__().strip('[]')} -> {[i.size(-1) for i in session.y_results].__str__().strip('[]')}"
+                                    f"T2S Decoding EOS {session.prefill_len.tolist().__str__().strip('[]')} -> "
+                                    f"{[i.size(-1) for i in session.y_results].__str__().strip('[]')}"
                                 )
                                 logger.info(f"Infer Speed: {(idx + 1) * bsz / (time.perf_counter() - t1):.2f} token/s")
                                 infer_time = time.perf_counter() - t1
@@ -180,9 +186,9 @@ class T2SEngine(T2SEngineProtocol):
                             if (request.early_stop_num != -1 and idx >= request.early_stop_num) or idx == max_token - 1:
                                 for i in range(bsz):
                                     if not session.completed[i].item():
-                                        session.y_results[i] = session.y[
-                                            [i], session.y_len : session.y_len + idx
-                                        ].squeeze(0)
+                                        session.y_results[i] = session.y[[i], session.y_len : session.y_len + idx].view(
+                                            -1
+                                        )
                                         session.completed[i] = True
                                     logger.error("Bad Full Prediction")
                                     infer_time = time.perf_counter() - t1
@@ -241,9 +247,6 @@ class T2SEngine(T2SEngineProtocol):
             )
         except Exception as e:
             t2s_result = T2SResult(status="Error", exception=e, traceback=traceback.format_exc())
-        if self.decoder_model.compiled:
-            self.decoder_model.save_compile_cache()
-            self.compiled = None
         return t2s_result
 
     @staticmethod

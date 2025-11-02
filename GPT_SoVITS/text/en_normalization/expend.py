@@ -5,6 +5,7 @@ import unicodedata
 
 import inflect
 
+
 # 后缀计量单位替换表
 measurement_map = {
     "m": ["meter", "meters"],
@@ -126,13 +127,13 @@ def _expand_pounds(m):
     if pounds and pence:
         pound_unit = "pound" if pounds == 1 else "pounds"
         penny_unit = "penny" if pence == 1 else "pence"
-        return "%s %s and %s %s" % (pounds, pound_unit, pence, penny_unit)
+        return f"{pounds} {pound_unit} and {pence} {penny_unit}"
     elif pounds:
         pound_unit = "pound" if pounds == 1 else "pounds"
-        return "%s %s" % (pounds, pound_unit)
+        return f"{pounds} {pound_unit}"
     elif pence:
         penny_unit = "penny" if pence == 1 else "pence"
-        return "%s %s" % (pence, penny_unit)
+        return f"{pence} {penny_unit}"
     else:
         return "zero pounds"
 
@@ -153,13 +154,13 @@ def _expand_dollars(m):
     if dollars and cents:
         dollar_unit = "dollar" if dollars == 1 else "dollars"
         cent_unit = "cent" if cents == 1 else "cents"
-        return "%s %s and %s %s" % (dollars, dollar_unit, cents, cent_unit)
+        return f"{dollars} {dollar_unit} and {cents} {cent_unit}"
     elif dollars:
         dollar_unit = "dollar" if dollars == 1 else "dollars"
-        return "%s %s" % (dollars, dollar_unit)
+        return f"{dollars} {dollar_unit}"
     elif cents:
         cent_unit = "cent" if cents == 1 else "cents"
-        return "%s %s" % (cents, cent_unit)
+        return f"{cents} {cent_unit}"
     else:
         return "zero dollars"
 
@@ -308,7 +309,7 @@ def normalize(text):
     )  # Strip accents
 
     text = re.sub("%", " percent", text)
-    text = re.sub("[^ A-Za-z'.,?!\-]", "", text)
+    text = re.sub(r"[^ A-Za-z'.,?!\-]", "", text)
     text = re.sub(r"(?i)i\.e\.", "that is", text)
     text = re.sub(r"(?i)e\.g\.", "for example", text)
     # 增加纯大写单词拆分

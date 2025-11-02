@@ -6,8 +6,9 @@ import torch.nn as nn
 from transformers import (
     HubertModel,
     Wav2Vec2FeatureExtractor,
+    logging as tf_logging,
 )
-from transformers import logging as tf_logging
+
 
 tf_logging.set_verbosity_error()
 

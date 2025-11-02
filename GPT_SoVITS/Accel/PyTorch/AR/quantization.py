@@ -4,6 +4,7 @@ import torch
 
 from .. import nn
 
+
 Tensor = torch.Tensor
 
 
@@ -50,8 +51,8 @@ def convert_fp8_linear(
         if isinstance(sub, nn.Linear):
             if getattr(sub, "_fp8", False):
                 continue
-            setattr(sub, "forward", apply_fn)
-            setattr(sub, "_fp8", True)
+            sub.forward = apply_fn
+            sub._fp8 = True
     return module
 
 

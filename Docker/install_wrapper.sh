@@ -12,15 +12,13 @@ source "$HOME/miniconda3/etc/profile.d/conda.sh"
 
 mkdir -p GPT_SoVITS
 
-mkdir -p GPT_SoVITS/text
-
 ln -s /workspace/models/pretrained_models /workspace/GPT-SoVITS/GPT_SoVITS/pretrained_models
 
 bash install.sh --device "CU${CUDA_VERSION//./}" --source HF
 
-pip cache purge
+uv pip cache clean
 
-pip show torch
+uv pip show torch
 
 rm -rf /tmp/* /var/tmp/*
 

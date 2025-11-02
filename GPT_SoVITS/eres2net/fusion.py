@@ -7,7 +7,7 @@ import torch.nn as nn
 
 class AFF(nn.Module):
     def __init__(self, channels=64, r=4):
-        super(AFF, self).__init__()
+        super().__init__()
         inter_channels = int(channels // r)
 
         self.local_att = nn.Sequential(

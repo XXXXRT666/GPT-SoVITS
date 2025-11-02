@@ -2,16 +2,16 @@ import sageattention  # type: ignore
 import torch
 
 from ... import nn
-from ..structs import T2SSession
+from ..structs import KVCache, T2SSession
 from ..t2s_model_abc import (
     AttentionABC,
     FeedForward,
     KVCacheHND,
-    KVCacheProtocol,
     T2SDecoderABC,
     TransformerBlockABC,
     TransformerDecoderABC,
 )
+
 
 Tensor = torch.Tensor
 
@@ -24,11 +24,13 @@ class Attention(AttentionABC):
         self.in_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=True)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
+        self.kv_class = KVCacheHND
+
     def __call__(
         self,
         x: Tensor,
         input_pos: Tensor,
-        kv_cache: KVCacheProtocol,
+        kv_cache: KVCache,
         cu_seqlens_q: Tensor,
         cu_seqlens_kv: Tensor,
     ) -> Tensor:
@@ -42,7 +44,7 @@ class Attention(AttentionABC):
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
-        k, v = kv_cache.update(input_pos, k, v)
+        k, v = self.kv_class.update(input_pos, k, v, kv_cache)
 
         attn: Tensor = sageattention.sageattn_varlen(
             q,
@@ -94,7 +96,7 @@ class T2SDecoder(T2SDecoderABC):
     def __init__(
         self,
         config,
-        max_seq_length=1500,
+        max_seq_length=1024,
         max_batch_size=10,
     ) -> None:
         super().__init__(config, max_seq_length, max_batch_size)
@@ -106,9 +108,6 @@ class T2SDecoder(T2SDecoderABC):
         )
 
         self.kv_class = KVCacheHND
-
-    def compile(self, *args, **kwds):
-        pass
 
     def pre_forward(self, session: T2SSession) -> tuple[list[Tensor], dict[str, Tensor]]:
         return list(), dict(cu_seqlens_q=session.cu_seqlens_q, cu_seqlens_kv=session.cu_seqlens_kv)

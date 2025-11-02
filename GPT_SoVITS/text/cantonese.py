@@ -164,13 +164,13 @@ def jyuping_to_initials_finals_tones(jyuping_syllables):
 
     ###魔改为辅音+带音调的元音
     phones = []
-    for a, b in zip(initials_finals, tones):
+    for a, b in zip(initials_finals, tones, strict=False):
         if b not in [-1, 0]:  ###防止粤语和普通话重合开头加Y，如果是标点，不加。
-            todo = "%s%s" % (a, b)
+            todo = f"{a}{b}"
         else:
             todo = a
         if todo not in punctuation_set:
-            todo = "Y%s" % todo
+            todo = f"Y{todo}"
         phones.append(todo)
 
     # return initials_finals, tones, word2ph

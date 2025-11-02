@@ -71,10 +71,8 @@
 
 | Python Version | PyTorch Version |    Device     |
 | :------------: | :-------------: | :-----------: |
-|  Python 3.10   |  PyTorch 2.5.1  |   CUDA 12.4   |
-|  Python 3.11   |  PyTorch 2.5.1  |   CUDA 12.4   |
-|  Python 3.11   |  PyTorch 2.7.0  |   CUDA 12.8   |
-|  Python 3.11   |  PyTorch 2.8.0  | Apple Silicon |
+|  Python 3.11   |  PyTorch 2.9.0  |   CUDA 12.8   |
+|  Python 3.11   |  PyTorch 2.9.0  | Apple Silicon |
 |  Python 3.10   |  PyTorch 2.8.0  |      CPU      |
 
 </div>
@@ -83,12 +81,20 @@
 
 Windows ユーザー: (Windows 10 以降でテスト済み)、[統合パッケージをダウンロード](https://huggingface.co/lj1995/GPT-SoVITS-windows-package/resolve/main/GPT-SoVITS-v3lora-20250228.7z?download=true)し、解凍後に _go-webui.bat_ をダブルクリックすると、GPT-SoVITS-WebUI が起動します.
 
+or:
+
+```bash
+conda create -n GPTSoVITS python=3.10
+conda activate GPTSoVITS
+pwsh -F install.ps1 --help
+```
+
 ### Linux
 
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 ### macOS
@@ -100,7 +106,7 @@ bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScop
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 <div align="center">
@@ -114,32 +120,12 @@ bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--downloa
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
+conda install uv ffmpeg -c conda-forge
 
-pip install -r extra-req.txt --no-deps
-pip install -r requirements.txt
+uv export --extra main -o pylock.toml -q --extra [mlx|cu126|cu128|rocm|cpu]
+uv pip sync pylock.toml --no-break-system-packages --preview-features pylock
+uv pip install ".[flash-attn]"
 ```
-
-#### FFmpeg をインストールします
-
-##### Conda ユーザー
-
-```bash
-conda activate GPTSoVITS
-conda install ffmpeg -c conda-forge
-```
-
-##### Ubuntu/Debian ユーザー
-
-```bash
-sudo apt install ffmpeg
-sudo apt install libsox-dev
-```
-
-##### Windows ユーザー
-
-[ffmpeg.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffmpeg.exe) と [ffprobe.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffprobe.exe) をダウンロードし、GPT-SoVITS のルートフォルダに置きます
-
-[Visual Studio 2017](https://aka.ms/vs/17/release/vc_redist.x86.exe) 環境をインストールしてください
 
 ##### MacOS ユーザー
 
@@ -213,15 +199,15 @@ docker exec -it <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|GPT-SoVITS-CU126|GP
 
 2. [G2PWModel.zip(HF)](https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/G2PWModel.zip)| [G2PWModel.zip(ModelScope)](https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/G2PWModel.zip) からモデルをダウンロードし、解凍して `G2PWModel` にリネームし、`GPT_SoVITS/text` ディレクトリに配置してください. (中国語 TTS のみ)
 
-3. UVR5 (ボーカル/伴奏 (BGM 等) 分離 & リバーブ除去の追加機能) の場合は、[UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) からモデルをダウンロードし、`tools/uvr5/uvr5_weights` ディレクトリに配置してください.
+3. UVR5 (ボーカル/伴奏 (BGM 等) 分離 & リバーブ除去の追加機能) の場合は、[UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) からモデルをダウンロードし、`gsv_tools/uvr5/uvr5_weights` ディレクトリに配置してください.
 
-   - UVR5 で bs_roformer または mel_band_roformer モデルを使用する場合、モデルと対応する設定ファイルを手動でダウンロードし、`tools/UVR5/UVR5_weights`フォルダに配置することができます.**モデルファイルと設定ファイルの名前は、拡張子を除いて同じであることを確認してください**.さらに、モデルと設定ファイルの名前には**「roformer」が含まれている必要があります**.これにより、roformer クラスのモデルとして認識されます.
+   - UVR5 で bs_roformer または mel_band_roformer モデルを使用する場合、モデルと対応する設定ファイルを手動でダウンロードし、`gsv_tools/uvr5/UVR5_weights`フォルダに配置することができます.**モデルファイルと設定ファイルの名前は、拡張子を除いて同じであることを確認してください**.さらに、モデルと設定ファイルの名前には**「roformer」が含まれている必要があります**.これにより、roformer クラスのモデルとして認識されます.
 
    - モデル名と設定ファイル名には、**直接モデルタイプを指定することをお勧めします**.例: mel_mand_roformer、bs_roformer.指定しない場合、設定文から特徴を照合して、モデルの種類を特定します.例えば、モデル`bs_roformer_ep_368_sdr_12.9628.ckpt`と対応する設定ファイル`bs_roformer_ep_368_sdr_12.9628.yaml`はペアです.同様に、`kim_mel_band_roformer.ckpt`と`kim_mel_band_roformer.yaml`もペアです.
 
-4. 中国語 ASR (追加機能) の場合は、[Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files)、[Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files)、および [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) からモデルをダウンロードし、`tools/asr/models` ディレクトリに配置してください.
+4. 中国語 ASR (追加機能) の場合は、[Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files)、[Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files)、および [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) からモデルをダウンロードし、`gsv_tools/asr/models` ディレクトリに配置してください.
 
-5. 英語または日本語の ASR (追加機能) を使用する場合は、[Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) からモデルをダウンロードし、`tools/asr/models` ディレクトリに配置してください.また、[他のモデル](https://huggingface.co/Systran) は、より小さいサイズで高クオリティな可能性があります.
+5. 英語または日本語の ASR (追加機能) を使用する場合は、[Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) からモデルをダウンロードし、`gsv_tools/asr/models` ディレクトリに配置してください.また、[他のモデル](https://huggingface.co/Systran) は、より小さいサイズで高クオリティな可能性があります.
 
 <div align="center">
 
@@ -398,7 +384,7 @@ V1/V2/V3/V4 環境から V2Pro への移行方法:
 コマンド ラインを使用して UVR5 の WebUI を開きます
 
 ```bash
-python tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
+python gsv_tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
 ```
 
 <!-- ブラウザを開けない場合は、以下の形式に従って UVR 処理を行ってください.これはオーディオ処理に mdxnet を使用しています.
@@ -421,7 +407,7 @@ python audio_slicer.py \
 コマンドラインを使用してデータセット ASR 処理を行う方法です (中国語のみ)
 
 ```bash
-python tools/asr/funasr_asr.py -i <input> -o <output>
+python gsv_tools/asr/funasr_asr.py -i <input> -o <output>
 ```
 
 ASR 処理は Faster_Whisper を通じて実行されます(中国語を除く ASR マーキング)
@@ -429,7 +415,7 @@ ASR 処理は Faster_Whisper を通じて実行されます(中国語を除く A
 (進行状況バーは表示されません.GPU のパフォーマンスにより時間遅延が発生する可能性があります)
 
 ```bash
-python ./tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p <precision>
+python ./gsv_tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p <precision>
 ```
 
 カスタムリストの保存パスが有効になっています
@@ -450,7 +436,7 @@ python ./tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p 
 - [TransferTTS](https://github.com/hcy71o/TransferTTS/blob/master/models.py#L556)
 - [contentvec](https://github.com/auspicious3000/contentvec/)
 - [hifi-gan](https://github.com/jik876/hifi-gan)
-- [fish-speech](https://github.com/fishaudio/fish-speech/blob/main/tools/llama/generate.py#L41)
+- [fish-speech](https://github.com/fishaudio/fish-speech/blob/f5243096380be703b640d387ab959623eefad756/fish_speech/models/text2semantic/inference.py#L81)
 - [f5-TTS](https://github.com/SWivid/F5-TTS/blob/main/src/f5_tts/model/backbones/dit.py)
 - [shortcut flow matching](https://github.com/kvfrans/shortcut-models/blob/main/targets_shortcut.py)
 

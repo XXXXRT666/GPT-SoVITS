@@ -1,8 +1,9 @@
 # modified from https://github.com/lifeiteng/vall-e/blob/main/valle/modules/transformer.py
 import copy
 import numbers
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Union
 
 import torch
 from torch import Tensor, nn
@@ -11,12 +12,13 @@ from torch.nn import functional as F
 from .activation import MultiheadAttention
 from .scaling import BalancedDoubleSwish
 
-_shape_t = Union[int, List[int], torch.Size]
+
+_shape_t = Union[int, list[int], torch.Size]
 
 
 class LayerNorm(nn.Module):
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
-    normalized_shape: Tuple[int, ...]
+    normalized_shape: tuple[int, ...]
     eps: float
     elementwise_affine: bool
 
@@ -29,7 +31,7 @@ class LayerNorm(nn.Module):
         dtype=None,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
-        super(LayerNorm, self).__init__()
+        super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
             normalized_shape = (normalized_shape,)  # type: ignore[assignment]
@@ -79,7 +81,7 @@ class IdentityNorm(nn.Module):
         device=None,
         dtype=None,
     ) -> None:
-        super(IdentityNorm, self).__init__()
+        super().__init__()
 
     def forward(self, input: Tensor, embedding: Any = None) -> Tensor:
         if isinstance(input, tuple):
@@ -111,7 +113,7 @@ class TransformerEncoder(nn.Module):
     __constants__ = ["norm"]
 
     def __init__(self, encoder_layer, num_layers, norm=None):
-        super(TransformerEncoder, self).__init__()
+        super().__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
@@ -119,8 +121,8 @@ class TransformerEncoder(nn.Module):
     def forward(
         self,
         src: Tensor,
-        mask: Optional[Tensor] = None,
-        src_key_padding_mask: Optional[Tensor] = None,
+        mask: Tensor | None = None,
+        src_key_padding_mask: Tensor | None = None,
         return_layer_states: bool = False,
         cache=None,
     ) -> Tensor | tuple[list[Tensor], Tensor]:
@@ -176,7 +178,7 @@ class TransformerEncoderLayer(nn.Module):
         nhead: int,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
         batch_first: bool = False,
         norm_first: bool = False,
         device=None,
@@ -190,7 +192,7 @@ class TransformerEncoderLayer(nn.Module):
         adaptive_layer_norm=False,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
-        super(TransformerEncoderLayer, self).__init__()
+        super().__init__()
         # print(233333333333,d_model,nhead)
         # import os
         # os._exit(2333333)
@@ -245,15 +247,15 @@ class TransformerEncoderLayer(nn.Module):
             self.norm2 = norm2
 
     def __setstate__(self, state):
-        super(TransformerEncoderLayer, self).__setstate__(state)
+        super().__setstate__(state)
         if not hasattr(self, "activation"):
             self.activation = F.relu
 
     def forward(
         self,
         src: Tensor,
-        src_mask: Optional[Tensor] = None,
-        src_key_padding_mask: Optional[Tensor] = None,
+        src_mask: Tensor | None = None,
+        src_key_padding_mask: Tensor | None = None,
         cache=None,
     ) -> Tensor | tuple[Tensor, Any]:
         r"""Pass the input through the encoder layer.
@@ -300,8 +302,8 @@ class TransformerEncoderLayer(nn.Module):
     def _sa_block(
         self,
         x: Tensor,
-        attn_mask: Optional[Tensor],
-        key_padding_mask: Optional[Tensor],
+        attn_mask: Tensor | None,
+        key_padding_mask: Tensor | None,
         cache=None,
     ) -> Tensor:
         # print(x.shape,attn_mask.shape,key_padding_mask)
@@ -329,7 +331,7 @@ class AdaptiveLayerNorm(nn.Module):
     r"""Adaptive Layer Normalization"""
 
     def __init__(self, d_model, norm) -> None:
-        super(AdaptiveLayerNorm, self).__init__()
+        super().__init__()
         self.project_layer = nn.Linear(d_model, 2 * d_model)
         self.norm = norm
         self.d_model = d_model

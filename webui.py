@@ -3,6 +3,7 @@ import json
 import os
 import platform
 import shutil
+import time
 import traceback
 from functools import partial
 from multiprocessing import cpu_count
@@ -47,11 +48,12 @@ from GPT_SoVITS.Accel import (
     quantization_methods_mlx,
     quantization_methods_torch,
 )
-from tools import my_utils
-from tools.asr.config import asr_dict
-from tools.assets import css, js, top_html
-from tools.i18n.i18n import I18nAuto, scan_language_list
-from tools.my_utils import check_details, check_for_existance
+from gsv_tools import my_utils
+from gsv_tools.asr.config import asr_dict
+from gsv_tools.assets import css, js, top_html
+from gsv_tools.i18n.i18n import I18nAuto, scan_language_list
+from gsv_tools.my_utils import check_details, check_for_existance
+
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["version"] = version = "v2Pro"
@@ -258,12 +260,7 @@ def change_label(path_list):
     if p_label is None:
         check_for_existance([path_list])
         path_list = my_utils.clean_path(path_list)
-        cmd = '"%s" -s tools/subfix_webui.py --load_list "%s" --webui_port %s --is_share %s' % (
-            python_exec,
-            path_list,
-            webui_port_subfix,
-            is_share,
-        )
+        cmd = f'"{python_exec}" -s gsv_tools/subfix_webui.py --load_list "{path_list}" --webui_port {webui_port_subfix} --is_share {is_share}'
         yield (
             process_info(process_name_subfix, "opened"),
             gr.update(visible=False),
@@ -287,13 +284,7 @@ process_name_uvr5 = i18n("人声分离WebUI")
 def change_uvr5():
     global p_uvr5
     if p_uvr5 is None:
-        cmd = '"%s" -s tools/uvr5/webui.py "%s" %s %s %s' % (
-            python_exec,
-            infer_device,
-            is_half,
-            webui_port_uvr5,
-            is_share,
-        )
+        cmd = f'"{python_exec}" -s gsv_tools/uvr5/webui.py "{infer_device}" {is_half} {webui_port_uvr5} {is_share}'
         yield (
             process_info(process_name_uvr5, "opened"),
             gr.update(visible=False),
@@ -388,7 +379,7 @@ def open_asr(asr_inp_dir, asr_opt_dir, asr_model, asr_model_size, asr_lang, asr_
         asr_inp_dir = my_utils.clean_path(asr_inp_dir)
         asr_opt_dir = my_utils.clean_path(asr_opt_dir)
         check_for_existance([asr_inp_dir])
-        cmd = f'"{python_exec}" -s tools/asr/{asr_dict[asr_model]["path"]}'
+        cmd = f'"{python_exec}" -s gsv_tools/asr/{asr_dict[asr_model]["path"]}'
         cmd += f' -i "{asr_inp_dir}"'
         cmd += f' -o "{asr_opt_dir}"'
         cmd += f" -s {asr_model_size}"
@@ -515,7 +506,10 @@ def open1Ba(
                 "--config",
                 tmp_config_path,
             ]
+
         console.print(" ".join(cmd))
+
+        t_sovits_train = time.perf_counter()
 
         p = Popen(cmd, env=env)
         p_train_SoVITS = p
@@ -530,6 +524,8 @@ def open1Ba(
 
         code = p.wait()
         p_train_SoVITS = None
+
+        console.print(f"SoVITS Training took {time.perf_counter() - t_sovits_train:.2f} seconds")
 
         if code == 0:
             yield (
@@ -635,6 +631,8 @@ def open1Bb(
 
         console.print(" ".join(cmd))
 
+        t_gpt_train = time.perf_counter()
+
         p = Popen(cmd, env=env)
         p_train_GPT = p
 
@@ -648,6 +646,8 @@ def open1Bb(
 
         code = p.wait()
         p_train_GPT = None
+
+        console.print(f"GPT Training took {time.perf_counter() - t_gpt_train:.2f} seconds")
 
         if code == 0:
             yield (
@@ -731,20 +731,7 @@ def open_slice(inp, opt_root, threshold, min_length, min_interval, hop_size, max
         return
     if ps_slice == []:
         for i_part in range(n_parts):
-            cmd = '"%s" -s tools/slice_audio.py "%s" "%s" %s %s %s %s %s %s %s %s %s' % (
-                python_exec,
-                inp,
-                opt_root,
-                threshold,
-                min_length,
-                min_interval,
-                hop_size,
-                max_sil_kept,
-                _max,
-                alpha,
-                i_part,
-                n_parts,
-            )
+            cmd = f'"{python_exec}" -s gsv_tools/slice_audio.py "{inp}" "{opt_root}" {threshold} {min_length} {min_interval} {hop_size} {max_sil_kept} {_max} {alpha} {i_part} {n_parts}'
             console.print(cmd)
             p = Popen(cmd, shell=True)
             ps_slice.append(p)
@@ -805,6 +792,7 @@ def open1a(
     nproc: int = 1,
 ):
     global ps1a
+    t_1a = time.perf_counter()
     inp_text = my_utils.clean_path(inp_text)
     inp_wav_dir = my_utils.clean_path(inp_wav_dir)
     if check_for_existance([inp_text, inp_wav_dir], is_dataset_processing=True):
@@ -825,7 +813,7 @@ def open1a(
             "--device", infer_device.type,
             "--device-id", str(gpu_numbers).strip("[]").replace(" ",""),
             "--nproc", str(nproc),
-        ] 
+        ]
         # fmt: on
 
         if is_half:
@@ -844,6 +832,8 @@ def open1a(
 
         code = p.wait()
         ps1a = None
+
+        console.print(f"Step 1A took {time.perf_counter() - t_1a:.2f} seconds")
 
         if code == 0:
             yield (
@@ -894,6 +884,7 @@ def open1b(
     nproc: int = 1,
 ):
     global ps1b
+    t_1b = time.perf_counter()
     inp_text = my_utils.clean_path(inp_text)
     inp_wav_dir = my_utils.clean_path(inp_wav_dir)
     if check_for_existance([inp_text, inp_wav_dir], is_dataset_processing=True):
@@ -913,7 +904,7 @@ def open1b(
             "--device", infer_device.type,
             "--device-id", str(gpu_numbers).strip("[]").replace(" ",""),
             "--nproc", str(nproc),
-        ] 
+        ]
         # fmt: on
 
         if inp_wav_dir:
@@ -940,6 +931,8 @@ def open1b(
 
         code = p.wait()
         ps1b = None
+
+        console.print(f"Step 1B took {time.perf_counter() - t_1b:.2f} seconds")
 
         if code == 0:
             yield (
@@ -988,6 +981,7 @@ def open1c(
     nproc: int = 1,
 ):
     global ps1c
+    t_1c = time.perf_counter()
     inp_text = my_utils.clean_path(inp_text)
     check_for_existance([inp_text], is_dataset_processing=True)
     exp_name = exp_name.rstrip(" ")
@@ -1005,7 +999,7 @@ def open1c(
             "--device", infer_device.type,
             "--device-id", str(gpu_numbers).strip("[]").replace(" ",""),
             "--nproc", str(nproc),
-        ] 
+        ]
         # fmt: on
 
         if is_half:
@@ -1026,6 +1020,8 @@ def open1c(
 
         code = p.wait()
         ps1c = None
+
+        console.print(f"Step 1C took {time.perf_counter() - t_1c:.2f} seconds")
 
         if code == 0:
             yield (
@@ -1081,6 +1077,8 @@ def open1abc(
     nproc: int = 1,
 ):
     global ps1abc
+
+    t_1abc = time.perf_counter()
     inp_text = my_utils.clean_path(inp_text)
     inp_wav_dir = my_utils.clean_path(inp_wav_dir)
     if check_for_existance([inp_text, inp_wav_dir], is_dataset_processing=True):
@@ -1102,7 +1100,7 @@ def open1abc(
             "--device", infer_device.type,
             "--device-id", str(gpu_numbers_1).strip("[]").replace(" ",""),
             "--nproc", str(nproc),
-        ] 
+        ]
         # fmt: on
 
         if is_half:
@@ -1147,7 +1145,7 @@ def open1abc(
             "--device", infer_device.type,
             "--device-id", str(gpu_numbers_2).strip("[]").replace(" ",""),
             "--nproc", str(nproc),
-        ]  
+        ]
         # fmt: on
 
         if inp_wav_dir:
@@ -1198,7 +1196,7 @@ def open1abc(
             "--device", infer_device.type,
             "--device-id", str(gpu_numbers_3).strip("[]").replace(" ",""),
             "--nproc", str(nproc),
-        ] 
+        ]
         # fmt: on
 
         if is_half:
@@ -1218,6 +1216,8 @@ def open1abc(
 
         code = p.wait()
         ps1abc[2] = None
+
+        console.print(f"Step 1ABC took {time.perf_counter() - t_1abc:.2f} seconds")
 
         if code == 0:
             yield (

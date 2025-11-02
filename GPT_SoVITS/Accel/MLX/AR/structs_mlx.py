@@ -4,8 +4,9 @@ Modified From https://github.com/XXXXRT666/GPT-SoVITS
 
 from __future__ import annotations
 
+from collections.abc import MutableSequence
 from dataclasses import dataclass
-from typing import List, MutableSequence, Protocol, TypeAlias
+from typing import Protocol, TypeAlias
 
 import mlx.core as mx
 import torch
@@ -13,16 +14,17 @@ import torch
 from ...PyTorch.AR.structs import T2SRequest
 from .sample_funcs_mlx import SampleProtocolMLX, sample_naive
 
+
 Tensor = torch.Tensor
 Array = mx.array
 
 
 @dataclass(slots=True)
 class T2SRequestMLX:
-    x: List[Array]
+    x: list[Array]
     x_lens: Array
     prompts: Array
-    bert_feature: List[Array]
+    bert_feature: list[Array]
     valid_length: int
     top_k: int = 5
     top_p: float = 1
@@ -53,7 +55,7 @@ class T2SRequestMLX:
         )
 
 
-KVCache: TypeAlias = tuple[Array, Array]
+KVCache: TypeAlias = tuple[Array, ...]
 
 
 class KVCacheProtocol(Protocol):
@@ -61,15 +63,13 @@ class KVCacheProtocol(Protocol):
     def empty(kv_cache: KVCache) -> None: ...
 
     @staticmethod
-    def update_cache(input_pos: Array, k_val: Array, v_val: Array, kv_cache: KVCache, cache_idx: Array) -> KVCache: ...
+    def update_cache(input_pos: Array, k_val: Array, v_val: Array, kv_cache: KVCache) -> KVCache: ...
 
     @staticmethod
     def prefill_kv(k_val: Array, v_val: Array, kv_cache: KVCache) -> None: ...
 
     @staticmethod
-    def init_cache(
-        batch_size: int, max_seq_length: int, n_heads: int, head_dim: int, dtype: mx.Dtype, *args, **kwds
-    ) -> KVCache: ...
+    def init_cache(batch_size: int, max_seq_length: int, n_heads: int, head_dim: int, dtype: mx.Dtype) -> KVCache: ...
 
 
 class T2SDecoderProtocol(Protocol):
@@ -80,13 +80,16 @@ class T2SDecoderProtocol(Protocol):
     def embed(self, x: list[Array], y: Array, bert_features: list[Array]) -> Array: ...
 
 
+cpu = mx.Device(mx.cpu)
+
+
 class T2SSessionMLX:
     def __init__(
         self,
         decoder: T2SDecoderProtocol,
         request_torch: T2SRequest,
         sample_func: type[SampleProtocolMLX] = sample_naive,
-        device: mx.Device = mx.Device(mx.cpu),
+        device: mx.Device = cpu,
         dtype: mx.Dtype = mx.float32,
     ):
         with mx.stream(device):
@@ -122,7 +125,7 @@ class T2SSessionMLX:
 
             # EOS
             self.completed = mx.array([False] * len(self.x)).astype(mx.bool_)
-            self.y_results: List[Array] = [None] * len(self.x)  # type: ignore
+            self.y_results: list[Array] = [None] * len(self.x)  # type: ignore
 
             self.xy_pos = decoder.embed(self.x, request.prompts, self.bert_feature)
 

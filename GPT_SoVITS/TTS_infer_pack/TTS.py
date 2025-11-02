@@ -1,4 +1,3 @@
-import asyncio
 import gc
 import math
 import os
@@ -6,6 +5,7 @@ import random
 import time
 import warnings
 from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,7 @@ from tqdm import tqdm
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 import GPT_SoVITS.text.g2pw.converter
+from config import infer_device, infer_dtype
 from GPT_SoVITS.Accel import MLX, PyTorch, T2SEngineProtocol, T2SRequest, backends, console, logger
 from GPT_SoVITS.BigVGAN.bigvgan import BigVGAN
 from GPT_SoVITS.feature_extractor.cnhubert import CNHubert
@@ -30,11 +31,51 @@ from GPT_SoVITS.process_ckpt import inspect_version
 from GPT_SoVITS.sv import SV
 from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import splits
 from GPT_SoVITS.TTS_infer_pack.TextPreprocessor import TextPreprocessor
-from tools.audio_sr import AP_BWE
-from tools.i18n.i18n import I18nAuto
-from tools.my_utils import DictToAttrRecursive
+from gsv_tools.audio_sr import AP_BWE
+from gsv_tools.i18n.i18n import I18nAuto
+from gsv_tools.logger import format_sig
+from gsv_tools.my_utils import DictToAttrRecursive
 
-resample_transform_dict = {}
+
+def construct_mapping_with_device_dtype(loader, node, deep=False):
+    mapping = yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+    for k, v in list(mapping.items()):
+        if k == "device" and isinstance(v, str):
+            mapping[k] = torch.device(v)
+        elif k == "dtype" and isinstance(v, str):
+            if v == "float32":
+                mapping[k] = torch.float32
+            elif v == "float16":
+                mapping[k] = torch.float16
+            elif v == "bfloat16":
+                mapping[k] = torch.bfloat16
+            else:
+                raise ValueError(f"Unsupported dtype string: {v}")
+
+    return mapping
+
+
+yaml.SafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    construct_mapping_with_device_dtype,
+)
+
+
+def device_representer(dumper, data):
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+
+def dtype_representer(dumper, data):
+    text = str(data)  # 'torch.float16'
+    text = text.replace("torch.", "")  # 'float16'
+    return dumper.represent_scalar("tag:yaml.org,2002:str", text)
+
+
+yaml.SafeDumper.add_representer(torch.device, device_representer)
+yaml.SafeDumper.add_representer(torch.dtype, dtype_representer)
+yaml.SafeDumper.ignore_aliases = lambda self, data: True
+
 v3v4set = {"v3", "v4"}
 
 warnings.filterwarnings(
@@ -46,12 +87,14 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 
+@lru_cache
+def get_resample_transform(sr0: int, sr1: int):
+    return torchaudio.transforms.Resample(sr0, sr1)
+
+
 def resample(audio_tensor, sr0, sr1, device):
-    global resample_transform_dict
-    key = "%s-%s-%s" % (sr0, sr1, str(device))
-    if key not in resample_transform_dict:
-        resample_transform_dict[key] = torchaudio.transforms.Resample(sr0, sr1).to(device)
-    return resample_transform_dict[key](audio_tensor)
+    resample_transform = get_resample_transform(sr0, sr1).to(device)
+    return resample_transform(audio_tensor)
 
 
 language = os.environ.get("language", "Auto")
@@ -107,40 +150,40 @@ class NO_PROMPT_ERROR(Exception):
 custom:
   bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
   cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
-  device: cpu
-  is_half: false
+  device: cpu:0
+  dtype: float32
   t2s_weights_path: GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt
   vits_weights_path: GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth
   version: v2
 v1:
   bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
   cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
-  device: cpu
-  is_half: false
+  device: cpu:0
+  dtype: float32
   t2s_weights_path: GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt
   vits_weights_path: GPT_SoVITS/pretrained_models/s2G488k.pth
   version: v1
 v2:
   bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
   cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
-  device: cpu
-  is_half: false
+  device: cpu:0
+  dtype: float32
   t2s_weights_path: GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt
   vits_weights_path: GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth
   version: v2
 v3:
   bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
   cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
-  device: cpu
-  is_half: false
+  device: cpu:0
+  dtype: float32
   t2s_weights_path: GPT_SoVITS/pretrained_models/s1v3.ckpt
   vits_weights_path: GPT_SoVITS/pretrained_models/s2Gv3.pth
   version: v3
 v4:
   bert_base_path: GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
   cnhuhbert_base_path: GPT_SoVITS/pretrained_models/chinese-hubert-base
-  device: cpu
-  is_half: false
+  device: cpu:0
+  dtype: float32
   t2s_weights_path: GPT_SoVITS/pretrained_models/s1v3.ckpt
   version: v4
   vits_weights_path: GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth
@@ -167,8 +210,8 @@ def set_seed(seed: int):
 class TTS_Config:
     default_configs = {
         "v1": {
-            "device": "cpu",
-            "is_half": False,
+            "device": infer_device,
+            "dtype": infer_dtype,
             "version": "v1",
             "t2s_weights_path": "GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt",
             "vits_weights_path": "GPT_SoVITS/pretrained_models/s2G488k.pth",
@@ -176,8 +219,8 @@ class TTS_Config:
             "bert_base_path": "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
         },
         "v2": {
-            "device": "cpu",
-            "is_half": False,
+            "device": infer_device,
+            "dtype": infer_dtype,
             "version": "v2",
             "t2s_weights_path": "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt",
             "vits_weights_path": "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth",
@@ -185,8 +228,8 @@ class TTS_Config:
             "bert_base_path": "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
         },
         "v3": {
-            "device": "cpu",
-            "is_half": False,
+            "device": infer_device,
+            "dtype": infer_dtype,
             "version": "v3",
             "t2s_weights_path": "GPT_SoVITS/pretrained_models/s1v3.ckpt",
             "vits_weights_path": "GPT_SoVITS/pretrained_models/s2Gv3.pth",
@@ -194,8 +237,8 @@ class TTS_Config:
             "bert_base_path": "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
         },
         "v4": {
-            "device": "cpu",
-            "is_half": False,
+            "device": infer_device,
+            "dtype": infer_dtype,
             "version": "v4",
             "t2s_weights_path": "GPT_SoVITS/pretrained_models/s1v3.ckpt",
             "vits_weights_path": "GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth",
@@ -203,8 +246,8 @@ class TTS_Config:
             "bert_base_path": "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
         },
         "v2Pro": {
-            "device": "cpu",
-            "is_half": False,
+            "device": infer_device,
+            "dtype": infer_dtype,
             "version": "v2Pro",
             "t2s_weights_path": "GPT_SoVITS/pretrained_models/s1v3.ckpt",
             "vits_weights_path": "GPT_SoVITS/pretrained_models/v2Pro/s2Gv2Pro.pth",
@@ -212,8 +255,8 @@ class TTS_Config:
             "bert_base_path": "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
         },
         "v2ProPlus": {
-            "device": "cpu",
-            "is_half": False,
+            "device": infer_device,
+            "dtype": infer_dtype,
             "version": "v2ProPlus",
             "t2s_weights_path": "GPT_SoVITS/pretrained_models/s1v3.ckpt",
             "vits_weights_path": "GPT_SoVITS/pretrained_models/v2Pro/s2Gv2ProPlus.pth",
@@ -252,11 +295,10 @@ class TTS_Config:
         os.makedirs(configs_base_path, exist_ok=True)
         self.configs_path: str = os.path.join(configs_base_path, "tts_infer.yaml")
 
-        if configs in ["", None]:
-            if not os.path.exists(self.configs_path):
-                self.save_configs()
-                print(f"Create default config file at {self.configs_path}")
-            configs: dict = deepcopy(self.default_configs)
+        if configs in ["", None] or not os.path.exists(configs):
+            self.save_configs()
+            print(f"Create default config file at {self.configs_path}")
+        configs: dict = deepcopy(self.default_configs)
 
         if isinstance(configs, str):
             self.configs_path = configs
@@ -265,16 +307,16 @@ class TTS_Config:
         assert isinstance(configs, dict)
         configs_ = deepcopy(self.default_configs)
         configs_.update(configs)
-        self.configs: dict = configs_.get("custom", configs_["v2"])
+        self.configs: dict = configs_.get("custom", configs_["v2Pro"])
         self.default_configs = deepcopy(configs_)
 
-        self.device = self.configs.get("device", torch.device("cpu"))
+        self.device = self.configs.get("device", infer_device)
         if "cuda" in str(self.device) and not torch.cuda.is_available():
             print("Warning: CUDA is not available, set device to CPU.")
             self.device = torch.device("cpu")
 
-        self.is_half = self.configs.get("is_half", False)
-        if str(self.device) == "cpu" and self.is_half:
+        self.is_half = self.configs.get("dtype", infer_dtype) != torch.float32
+        if self.device.type == "cpu" and self.is_half:
             print("Warning: Half precision is not supported on CPU, set is_half to False.")
             self.is_half = False
 
@@ -318,8 +360,8 @@ class TTS_Config:
         else:
             print(i18n("路径不存在,使用默认配置"))
             self.save_configs(configs_path)
-        with open(configs_path, "r", encoding="utf-8") as f:
-            configs = yaml.load(f, Loader=yaml.FullLoader)
+        with open(configs_path, encoding="utf-8") as f:
+            configs = yaml.safe_load(f)
 
         return configs
 
@@ -331,7 +373,7 @@ class TTS_Config:
         if configs_path is None:
             configs_path = self.configs_path
         with open(configs_path, "w") as f:
-            yaml.dump(configs, f)
+            yaml.safe_dump(configs, f)
 
     def update_configs(self):
         self.config = {
@@ -379,7 +421,7 @@ class TTS:
         configs: dict | str | TTS_Config,
         ar_backend: str = backends[-1],
         quantization: Any = None,
-        cache_size: int = 5,
+        cache_size: int = 3,
     ):
         if isinstance(configs, TTS_Config):
             self.configs = configs
@@ -547,7 +589,7 @@ class TTS:
         if "mlx" in ar_backend.lower():
             t2s_engine = MLX.T2SEngineMLX(
                 MLX.T2SEngineMLX.load_decoder(
-                    Path(weights_path), backend=ar_backend, quantize_mode=quantization, max_batch_size=40
+                    Path(weights_path), backend=ar_backend, quantize_mode=quantization, max_batch_size=80
                 ),
                 self.configs.device,
                 dtype=self.precision,
@@ -556,7 +598,7 @@ class TTS:
         else:
             t2s_engine = PyTorch.T2SEngineTorch(
                 PyTorch.T2SEngineTorch.load_decoder(
-                    Path(weights_path), backend=ar_backend, quantize_mode=quantization, max_batch_size=40
+                    Path(weights_path), backend=ar_backend, quantize_mode=quantization, max_batch_size=80
                 ),
                 self.configs.device if not torch.mps.is_available() else torch.device("cpu"),
                 dtype=self.precision,
@@ -803,7 +845,7 @@ class TTS:
             max_length = max(seq_lengths) if max_length < max(seq_lengths) else max_length
 
         padded_sequences = []
-        for seq, length in zip(sequences, seq_lengths):
+        for seq, length in zip(sequences, seq_lengths, strict=False):
             padding = [0] * axis + [0, max_length - length] + [0] * (ndim - axis - 1)
             padded_seq = torch.nn.functional.pad(seq, padding, value=pad_value)
             padded_sequences.append(padded_seq)
@@ -855,7 +897,7 @@ class TTS:
                     batch_index_list.append([])
                 batch_index_list[-1].append(i)
 
-        for batch_idx, index_list in enumerate(batch_index_list):
+        for _batch_idx, index_list in enumerate(batch_index_list):
             item_list = [data[idx] for idx in index_list]
             phones_list = []
             phones_len_list = []
@@ -951,7 +993,7 @@ class TTS:
         """
         self.stop_flag = True
 
-    async def run(self, inputs: dict):
+    def run(self, inputs: dict):
         """
         Text to speech inference.
 
@@ -1129,7 +1171,7 @@ class TTS:
         if not (return_fragment or streaming_mode):
             data = self.text_preprocessor.preprocess(text, text_lang, text_split_method, self.configs.version)
             if len(data) == 0:
-                yield 16000, np.zeros(int(16000), dtype=np.int16)
+                yield 16000, np.zeros(16000, dtype=np.int16)
                 return
 
             batch_index_list: list = None
@@ -1462,7 +1504,6 @@ class TTS:
                     ...
                 else:
                     audio.append(batch_audio_fragment)
-                await asyncio.sleep(0)
 
                 if self.stop_flag:
                     yield output_sr, np.zeros(int(output_sr), dtype=np.int16)
@@ -1491,7 +1532,7 @@ class TTS:
             logger.bind(show_locals=False).exception("TTS Inference Error: ")
             # 必须返回一个空音频, 否则会导致显存不释放。
             audio_len.append(1)
-            yield 16000, np.zeros(int(16000), dtype=np.int16)
+            yield 16000, np.zeros(16000, dtype=np.int16)
             # 重置模型, 否则会导致显存释放不完全。
             del self.t2s_model
             del self.vits_model
@@ -1503,14 +1544,16 @@ class TTS:
         finally:
             infer_speed_avg = sum(infer_len) / sum(infer_time) if infer_time else 0
             rtf_value = sum((t1 - t0, t2 - t1, t_34, t_45)) / sum(audio_len)
-            console.print(f">> Time Stamps: {t1 - t0:.4f}\t{t2 - t1:.4f}\t{t_34:.4f}\t{t_45:.4f}")
-            console.print(f">> Infer Speed: {infer_speed_avg:.4f} Token/s")
-            console.print(f">> RTF: {rtf_value:.4f}")
+            console.print(
+                f">> Time Stamps: {format_sig(t1 - t0)}\t{format_sig(t2 - t1)}\t{format_sig(t_34)}\t{format_sig(t_45)}"
+            )
+            console.print(f">> Infer Speed: {format_sig(infer_speed_avg)} Token/s")
+            console.print(f">> RTF: {format_sig(rtf_value)}")
 
             if ttft_time > 2:
-                console.print(f">> TTFT: {ttft_time:.4f} s")
+                console.print(f">> TTFT: {format_sig(ttft_time)} s")
             else:
-                console.print(f">> TTFT: {ttft_time * 1000:.4f} ms")
+                console.print(f">> TTFT: {format_sig(ttft_time * 1000)} ms")
 
             self.empty_cache()
 

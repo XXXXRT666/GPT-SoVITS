@@ -71,10 +71,8 @@ Görünmeyen konuşmacılar birkaç örnekli ince ayar demosu:
 
 | Python Version | PyTorch Version |    Device     |
 | :------------: | :-------------: | :-----------: |
-|  Python 3.10   |  PyTorch 2.5.1  |   CUDA 12.4   |
-|  Python 3.11   |  PyTorch 2.5.1  |   CUDA 12.4   |
-|  Python 3.11   |  PyTorch 2.7.0  |   CUDA 12.8   |
-|  Python 3.11   |  PyTorch 2.8.0  | Apple Silicon |
+|  Python 3.11   |  PyTorch 2.9.0  |   CUDA 12.8   |
+|  Python 3.11   |  PyTorch 2.9.0  | Apple Silicon |
 |  Python 3.10   |  PyTorch 2.8.0  |      CPU      |
 
 </div>
@@ -83,10 +81,10 @@ Görünmeyen konuşmacılar birkaç örnekli ince ayar demosu:
 
 Eğer bir Windows kullanıcısıysanız (win>=10 ile test edilmiştir), [entegre paketi indirin](https://huggingface.co/lj1995/GPT-SoVITS-windows-package/resolve/main/GPT-SoVITS-v3lora-20250228.7z?download=true) ve _go-webui.bat_ dosyasına çift tıklayarak GPT-SoVITS-WebUI'yi başlatın.
 
-```pwsh
+```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-pwsh -F install.ps1 --Device <CU126|CU128|CPU> --Source <HF|HF-Mirror|ModelScope> [--DownloadUVR5]
+pwsh -F install.ps1 --help
 ```
 
 ### Linux
@@ -94,7 +92,7 @@ pwsh -F install.ps1 --Device <CU126|CU128|CPU> --Source <HF|HF-Mirror|ModelScope
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 ### macOS
@@ -106,7 +104,7 @@ Aşağıdaki komutları çalıştırarak programı yükleyin:
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 <div align="center">
@@ -120,37 +118,11 @@ bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--downloa
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
+conda install uv ffmpeg -c conda-forge
 
-pip install -r extra-req.txt --no-deps
-pip install -r requirements.txt
-```
-
-#### FFmpeg'i Yükleme
-
-##### Conda Kullanıcıları
-
-```bash
-conda activate GPTSoVITS
-conda install ffmpeg -c conda-forge
-```
-
-##### Ubuntu/Debian Kullanıcıları
-
-```bash
-sudo apt install ffmpeg
-sudo apt install libsox-dev
-```
-
-##### Windows Kullanıcıları
-
-[ffmpeg.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffmpeg.exe) ve [ffprobe.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffprobe.exe) dosyalarını indirin ve GPT-SoVITS kök dizinine yerleştirin
-
-[Visual Studio 2017](https://aka.ms/vs/17/release/vc_redist.x86.exe) ortamını yükleyin
-
-##### MacOS Kullanıcıları
-
-```bash
-brew install ffmpeg
+uv export --extra main -o pylock.toml -q --extra [mlx|cu126|cu128|rocm|cpu]
+uv pip sync pylock.toml --no-break-system-packages --preview-features pylock
+uv pip install ".[flash-attn]"
 ```
 
 <div align="center">
@@ -219,15 +191,15 @@ docker exec -it <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|GPT-SoVITS-CU126|GP
 
 2. [G2PWModel.zip(HF)](https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/G2PWModel.zip)| [G2PWModel.zip(ModelScope)](https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/G2PWModel.zip) üzerinden modeli indirip sıkıştırmayı açın ve `G2PWModel` olarak yeniden adlandırın, ardından `GPT_SoVITS/text` dizinine yerleştirin. (Sadece Çince TTS için)
 
-3. UVR5 (Vokal/Enstrümantal Ayrımı & Yankı Giderme) için, [UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) üzerinden modelleri indirip `tools/uvr5/uvr5_weights` dizinine yerleştirin.
+3. UVR5 (Vokal/Enstrümantal Ayrımı & Yankı Giderme) için, [UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) üzerinden modelleri indirip `gsv_tools/uvr5/uvr5_weights` dizinine yerleştirin.
 
-   - UVR5'te bs_roformer veya mel_band_roformer modellerini kullanıyorsanız, modeli ve ilgili yapılandırma dosyasını manuel olarak indirip `tools/UVR5/UVR5_weights` klasörüne yerleştirebilirsiniz. **Model dosyası ve yapılandırma dosyasının adı, uzantı dışında aynı olmalıdır**. Ayrıca, model ve yapılandırma dosyasının adlarında **"roformer"** kelimesi yer almalıdır, böylece roformer sınıfındaki bir model olarak tanınır.
+   - UVR5'te bs_roformer veya mel_band_roformer modellerini kullanıyorsanız, modeli ve ilgili yapılandırma dosyasını manuel olarak indirip `gsv_tools/uvr5/UVR5_weights` klasörüne yerleştirebilirsiniz. **Model dosyası ve yapılandırma dosyasının adı, uzantı dışında aynı olmalıdır**. Ayrıca, model ve yapılandırma dosyasının adlarında **"roformer"** kelimesi yer almalıdır, böylece roformer sınıfındaki bir model olarak tanınır.
 
    - Model adı ve yapılandırma dosyası adı içinde **doğrudan model tipini belirtmek önerilir**. Örneğin: mel_mand_roformer, bs_roformer. Belirtilmezse, yapılandırma dosyasından özellikler karşılaştırılarak model tipi belirlenir. Örneğin, `bs_roformer_ep_368_sdr_12.9628.ckpt` modeli ve karşılık gelen yapılandırma dosyası `bs_roformer_ep_368_sdr_12.9628.yaml` bir çifttir. Aynı şekilde, `kim_mel_band_roformer.ckpt` ve `kim_mel_band_roformer.yaml` da bir çifttir.
 
-4. Çince ASR için, [Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files), [Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files) ve [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) üzerinden modelleri indirip `tools/asr/models` dizinine yerleştirin.
+4. Çince ASR için, [Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files), [Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files) ve [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) üzerinden modelleri indirip `gsv_tools/asr/models` dizinine yerleştirin.
 
-5. İngilizce veya Japonca ASR için, [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) üzerinden modeli indirip `tools/asr/models` dizinine yerleştirin. Ayrıca, [diğer modeller](https://huggingface.co/Systran) benzer bir etki yaratabilir ve daha az disk alanı kaplayabilir.
+5. İngilizce veya Japonca ASR için, [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) üzerinden modeli indirip `gsv_tools/asr/models` dizinine yerleştirin. Ayrıca, [diğer modeller](https://huggingface.co/Systran) benzer bir etki yaratabilir ve daha az disk alanı kaplayabilir.
 
 <div align="center">
 
@@ -406,7 +378,7 @@ V1/V2/V3/V4 ortamından V2Pro'ya geçiş:
 UVR5 için Web Arayüzünü açmak için komut satırını kullanın
 
 ```bash
-python tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
+python gsv_tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
 ```
 
 <!-- Bir tarayıcı açamıyorsanız, UVR işleme için aşağıdaki formatı izleyin,Bu ses işleme için mdxnet kullanıyor
@@ -429,7 +401,7 @@ python audio_slicer.py \
 Veri seti ASR işleme komut satırı kullanılarak bu şekilde yapılır (Yalnızca Çince)
 
 ```bash
-python tools/asr/funasr_asr.py -i <girdi> -o <çıktı>
+python gsv_tools/asr/funasr_asr.py -i <girdi> -o <çıktı>
 ```
 
 ASR işleme Faster_Whisper aracılığıyla gerçekleştirilir (Çince dışındaki ASR işaretleme)
@@ -437,7 +409,7 @@ ASR işleme Faster_Whisper aracılığıyla gerçekleştirilir (Çince dışınd
 (İlerleme çubukları yok, GPU performansı zaman gecikmelerine neden olabilir)
 
 ```bash
-python ./tools/asr/fasterwhisper_asr.py -i <girdi> -o <çıktı> -l <dil>
+python ./gsv_tools/asr/fasterwhisper_asr.py -i <girdi> -o <çıktı> -l <dil>
 ```
 
 Özel bir liste kaydetme yolu etkinleştirildi
@@ -458,7 +430,7 @@ python ./tools/asr/fasterwhisper_asr.py -i <girdi> -o <çıktı> -l <dil>
 - [TransferTTS](https://github.com/hcy71o/TransferTTS/blob/master/models.py#L556)
 - [contentvec](https://github.com/auspicious3000/contentvec/)
 - [hifi-gan](https://github.com/jik876/hifi-gan)
-- [fish-speech](https://github.com/fishaudio/fish-speech/blob/main/tools/llama/generate.py#L41)
+- [fish-speech](https://github.com/fishaudio/fish-speech/blob/f5243096380be703b640d387ab959623eefad756/fish_speech/models/text2semantic/inference.py#L81)
 - [f5-TTS](https://github.com/SWivid/F5-TTS/blob/main/src/f5_tts/model/backbones/dit.py)
 - [shortcut flow matching](https://github.com/kvfrans/shortcut-models/blob/main/targets_shortcut.py)
 

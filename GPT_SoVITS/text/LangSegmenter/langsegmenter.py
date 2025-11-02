@@ -6,6 +6,7 @@ import fast_langdetect
 import jieba
 from split_lang import LangSplitter
 
+
 jieba.setLogLevel(logging.CRITICAL)
 
 

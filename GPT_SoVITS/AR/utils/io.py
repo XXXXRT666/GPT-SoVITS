@@ -20,11 +20,11 @@ def save_config_to_yaml(config, path):
 def write_args(args, path):
     args_dict = dict((name, getattr(args, name)) for name in dir(args) if not name.startswith("_"))
     with open(path, "a") as args_file:
-        args_file.write("==> torch version: {}\n".format(torch.__version__))
-        args_file.write("==> cudnn version: {}\n".format(torch.backends.cudnn.version()))
+        args_file.write(f"==> torch version: {torch.__version__}\n")
+        args_file.write(f"==> cudnn version: {torch.backends.cudnn.version()}\n")
         args_file.write("==> Cmd:\n")
         args_file.write(str(sys.argv))
         args_file.write("\n==> args:\n")
         for k, v in sorted(args_dict.items()):
-            args_file.write("  %s: %s\n" % (str(k), str(v)))
+            args_file.write(f"  {str(k)}: {str(v)}\n")
         args_file.close()

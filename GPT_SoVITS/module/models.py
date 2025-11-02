@@ -1,19 +1,19 @@
 import contextlib
 import math
+import os
 import random
 
 import torch
 from torch import nn
-from torch.cuda.amp import autocast
-from torch.nn import Conv1d, Conv2d, ConvTranspose1d
-from torch.nn import functional as F
+from torch.amp.autocast_mode import autocast
+from torch.nn import Conv1d, Conv2d, ConvTranspose1d, functional as F
 from torch.nn.utils import remove_weight_norm, spectral_norm, weight_norm
 
 from GPT_SoVITS.f5_tts.model import DiT
-from GPT_SoVITS.text import symbols as symbols_v1
-from GPT_SoVITS.text import symbols2 as symbols_v2
+from GPT_SoVITS.text import symbols as symbols_v1, symbols2 as symbols_v2
 from GPT_SoVITS.utils import HParams
-from tools.my_utils import _open_file
+from gsv_tools.logger import Timer
+from gsv_tools.my_utils import _open_file
 
 from . import attentions, commons, modules
 from .commons import get_padding, init_weights
@@ -27,6 +27,24 @@ def set_serialization():
 
 
 set_serialization()
+
+timer = Timer("SoVITS")
+
+Tensor = torch.Tensor
+
+
+def synchronize_device(device: torch.device) -> None:
+    match device.type:
+        case "cuda":
+            torch.cuda.synchronize()
+        case "mps":
+            torch.mps.synchronize()
+        case "xpu":
+            torch.xpu.synchronize()
+        case "mtia":
+            torch.mtia.synchronize()
+        case "cpu":
+            pass
 
 
 class StochasticDurationPredictor(nn.Module):
@@ -51,7 +69,7 @@ class StochasticDurationPredictor(nn.Module):
         self.log_flow = modules.Log()
         self.flows = nn.ModuleList()
         self.flows.append(modules.ElementwiseAffine(2))
-        for i in range(n_flows):
+        for _i in range(n_flows):
             self.flows.append(modules.ConvFlow(2, filter_channels, kernel_size, n_layers=3))
             self.flows.append(modules.Flip())
 
@@ -60,7 +78,7 @@ class StochasticDurationPredictor(nn.Module):
         self.post_convs = modules.DDSConv(filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout)
         self.post_flows = nn.ModuleList()
         self.post_flows.append(modules.ElementwiseAffine(2))
-        for i in range(4):
+        for _i in range(4):
             self.post_flows.append(modules.ConvFlow(2, filter_channels, kernel_size, n_layers=3))
             self.post_flows.append(modules.Flip())
 
@@ -300,7 +318,7 @@ class ResidualCouplingBlock(nn.Module):
         self.gin_channels = gin_channels
 
         self.flows = nn.ModuleList()
-        for i in range(n_flows):
+        for _i in range(n_flows):
             self.flows.append(
                 modules.ResidualCouplingLayer(
                     channels,
@@ -355,7 +373,7 @@ class PosteriorEncoder(nn.Module):
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
     def forward(self, x, x_lengths, g=None):
-        if g != None:
+        if g is not None:
             g = g.detach()
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)
         x = self.pre(x) * x_mask
@@ -384,7 +402,7 @@ class Encoder(nn.Module):
         self.proj = nn.Conv1d(hidden_channels, out_channels, 1)
 
     def forward(self, x, x_lengths, g=None):
-        if g != None:
+        if g is not None:
             g = g.detach()
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)
         x = self.pre(x) * x_mask
@@ -446,14 +464,14 @@ class Generator(torch.nn.Module):
         gin_channels=0,
         is_bias=False,
     ):
-        super(Generator, self).__init__()
+        super().__init__()
         self.num_kernels = len(resblock_kernel_sizes)
         self.num_upsamples = len(upsample_rates)
         self.conv_pre = Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3)
         resblock = modules.ResBlock1 if resblock == "1" else modules.ResBlock2
 
         self.ups = nn.ModuleList()
-        for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
+        for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes, strict=False)):
             self.ups.append(
                 weight_norm(
                     ConvTranspose1d(
@@ -469,7 +487,7 @@ class Generator(torch.nn.Module):
         self.resblocks = nn.ModuleList()
         for i in range(len(self.ups)):
             ch = upsample_initial_channel // (2 ** (i + 1))
-            for j, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
+            for _j, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes, strict=False)):
                 self.resblocks.append(resblock(ch, k, d))
 
         self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=is_bias)
@@ -509,7 +527,7 @@ class Generator(torch.nn.Module):
 
 class DiscriminatorP(torch.nn.Module):
     def __init__(self, period, kernel_size=5, stride=3, use_spectral_norm=False):
-        super(DiscriminatorP, self).__init__()
+        super().__init__()
         self.period = period
         self.use_spectral_norm = use_spectral_norm
         norm_f = weight_norm if use_spectral_norm is False else spectral_norm
@@ -588,7 +606,7 @@ class DiscriminatorP(torch.nn.Module):
 
 class DiscriminatorS(torch.nn.Module):
     def __init__(self, use_spectral_norm=False):
-        super(DiscriminatorS, self).__init__()
+        super().__init__()
         norm_f = weight_norm if use_spectral_norm is False else spectral_norm
         self.convs = nn.ModuleList(
             [
@@ -621,7 +639,7 @@ v2pro_set = {"v2Pro", "v2ProPlus"}
 
 class MultiPeriodDiscriminator(torch.nn.Module):
     def __init__(self, use_spectral_norm=False, version=None):
-        super(MultiPeriodDiscriminator, self).__init__()
+        super().__init__()
         if version in v2pro_set:
             periods = [2, 3, 5, 7, 11, 17, 23]
         else:
@@ -636,7 +654,7 @@ class MultiPeriodDiscriminator(torch.nn.Module):
         y_d_gs = []
         fmap_rs = []
         fmap_gs = []
-        for i, d in enumerate(self.discriminators):
+        for _i, d in enumerate(self.discriminators):
             y_d_r, fmap_r = d(y)
             y_d_g, fmap_g = d(y_hat)
             y_d_rs.append(y_d_r)
@@ -701,14 +719,14 @@ class ReferenceEncoder(nn.Module):
         return self.proj(out.squeeze(0)).unsqueeze(-1)
 
     def calculate_channels(self, L, kernel_size, stride, pad, n_convs):
-        for i in range(n_convs):
+        for _i in range(n_convs):
             L = (L - kernel_size + 2 * pad) // stride + 1
         return L
 
 
 class Quantizer_module(torch.nn.Module):
     def __init__(self, n_e, e_dim):
-        super(Quantizer_module, self).__init__()
+        super().__init__()
         self.embedding = nn.Embedding(n_e, e_dim)
         self.embedding.weight.data.uniform_(-1.0 / n_e, 1.0 / n_e)
 
@@ -725,7 +743,7 @@ class Quantizer_module(torch.nn.Module):
 
 class Quantizer(torch.nn.Module):
     def __init__(self, embed_dim=512, n_code_groups=4, n_codes=160):
-        super(Quantizer, self).__init__()
+        super().__init__()
         assert embed_dim % n_code_groups == 0
         self.quantizer_modules = nn.ModuleList(
             [Quantizer_module(n_codes, embed_dim // n_code_groups) for _ in range(n_code_groups)]
@@ -741,7 +759,7 @@ class Quantizer(torch.nn.Module):
         x = torch.split(x, self.embed_dim // self.n_code_groups, dim=-1)
         min_indicies = []
         z_q = []
-        for _x, m in zip(x, self.quantizer_modules):
+        for _x, m in zip(x, self.quantizer_modules, strict=False):
             _z_q, _min_indicies = m(_x)
             z_q.append(_z_q)
             min_indicies.append(_min_indicies)  # B * T,
@@ -757,7 +775,7 @@ class Quantizer(torch.nn.Module):
         x = x.transpose(1, 2)
         x = torch.split(x, 1, 2)
         ret = []
-        for q, embed in zip(x, self.quantizer_modules):
+        for q, embed in zip(x, self.quantizer_modules, strict=False):
             q = embed.embedding(q.squeeze(-1))
             ret.append(q)
         ret = torch.cat(ret, -1)
@@ -938,7 +956,7 @@ class SynthesizerTrn(nn.Module):
             ge += sv_emb.unsqueeze(-1)
             ge = self.prelu(ge)
             ge512 = self.ge_to512(ge.transpose(2, 1)).transpose(2, 1)
-        with autocast(enabled=False):
+        with autocast(device_type=y.device.type, enabled=False):
             maybe_no_grad = torch.no_grad() if self.freeze_quantizer else contextlib.nullcontext()
             with maybe_no_grad:
                 if self.freeze_quantizer:
@@ -988,50 +1006,87 @@ class SynthesizerTrn(nn.Module):
         o = self.dec((z * y_mask)[:, :, :], g=ge)
         return o, y_mask, (z, z_p, m_p, logs_p)
 
-    def decode(self, codes, text, refer, noise_scale=0.5, speed=1, sv_emb=None):
-        def get_ge(refer, sv_emb):
-            ge = None
-            if refer is not None:
-                refer_lengths = torch.LongTensor([refer.size(2)]).to(refer.device)
-                refer_mask = torch.unsqueeze(commons.sequence_mask(refer_lengths, refer.size(2)), 1).to(refer.dtype)
-                if self.version == "v1":
-                    ge = self.ref_enc(refer * refer_mask, refer_mask)
+    def decode(
+        self,
+        codes: Tensor,
+        text: Tensor,
+        refer: Tensor | list[Tensor],
+        noise_scale=0.5,
+        speed=1.0,
+        sv_emb: list[Tensor] = None,
+    ):
+        if sv_emb is None:
+            sv_emb = []
+
+        debug = os.environ.get("DEBUG", "0") == "1"
+        device = text.device
+
+        with timer("SoVITS.Decode", debug):
+
+            def get_ge(refer, sv_emb):
+                ge = None
+                if refer is not None:
+                    refer_lengths = torch.LongTensor([refer.size(2)]).to(refer.device)
+                    refer_mask = torch.unsqueeze(commons.sequence_mask(refer_lengths, refer.size(2)), 1).to(refer.dtype)
+                    if self.version == "v1":
+                        ge = self.ref_enc(refer * refer_mask, refer_mask)
+                    else:
+                        ge = self.ref_enc(refer[:, :704] * refer_mask, refer_mask)
+                    if self.is_v2pro:
+                        sv_emb = self.sv_emb(sv_emb)  # B*20480->B*512
+                        ge += sv_emb.unsqueeze(-1)
+                        ge = self.prelu(ge)
+                return ge
+
+            with timer("SoVITS.GE", debug):
+                if isinstance(refer, list):
+                    ges = []
+                    for idx, _refer in enumerate(refer):
+                        ge = get_ge(_refer, sv_emb[idx] if self.is_v2pro else None)
+                        ges.append(ge)
+                    ge = torch.stack(ges, 0).mean(0)
                 else:
-                    ge = self.ref_enc(refer[:, :704] * refer_mask, refer_mask)
-                if self.is_v2pro:
-                    sv_emb = self.sv_emb(sv_emb)  # B*20480->B*512
-                    ge += sv_emb.unsqueeze(-1)
-                    ge = self.prelu(ge)
-            return ge
+                    ge = get_ge(refer, sv_emb)
+                if debug:
+                    synchronize_device(device)
 
-        if isinstance(refer, list):
-            ges = []
-            for idx, _refer in enumerate(refer):
-                ge = get_ge(_refer, sv_emb[idx] if self.is_v2pro else None)
-                ges.append(ge)
-            ge = torch.stack(ges, 0).mean(0)
-        else:
-            ge = get_ge(refer, sv_emb)
+            y_lengths = torch.LongTensor([codes.size(2) * 2]).to(codes.device)
+            text_lengths = torch.LongTensor([text.size(-1)]).to(text.device)
 
-        y_lengths = torch.LongTensor([codes.size(2) * 2]).to(codes.device)
-        text_lengths = torch.LongTensor([text.size(-1)]).to(text.device)
+            with timer("SoVITS.Dequantize", debug):
+                quantized = self.quantizer.decode(codes)
+                if self.semantic_frame_rate == "25hz":
+                    quantized = F.interpolate(quantized, size=int(quantized.shape[-1] * 2), mode="nearest")
+                if debug:
+                    synchronize_device(device)
+            with timer("SoVITS.EncP", debug):
+                x, m_p, logs_p, y_mask = self.enc_p(
+                    quantized,
+                    y_lengths,
+                    text,
+                    text_lengths,
+                    self.ge_to512(ge.transpose(2, 1)).transpose(2, 1) if self.is_v2pro else ge,
+                    speed,
+                )
+                if debug:
+                    synchronize_device(device)
 
-        quantized = self.quantizer.decode(codes)
-        if self.semantic_frame_rate == "25hz":
-            quantized = F.interpolate(quantized, size=int(quantized.shape[-1] * 2), mode="nearest")
-        x, m_p, logs_p, y_mask, _, _ = self.enc_p(
-            quantized,
-            y_lengths,
-            text,
-            text_lengths,
-            self.ge_to512(ge.transpose(2, 1)).transpose(2, 1) if self.is_v2pro else ge,
-            speed,
-        )
-        z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
+            z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
 
-        z = self.flow(z_p, y_mask, g=ge, reverse=True)
+            with timer("SoVITS.Flow", debug):
+                z = self.flow(z_p, y_mask, g=ge, reverse=True)
+                if debug:
+                    synchronize_device(device)
 
-        o = self.dec((z * y_mask)[:, :, :], g=ge)
+            with timer("SoVITS.Dec", debug):
+                o = self.dec((z * y_mask)[:, :, :], g=ge)
+                if debug:
+                    synchronize_device(device)
+
+        if debug:
+            timer.summary()
+            timer.clear()
+
         return o
 
     @torch.no_grad()
@@ -1132,7 +1187,7 @@ class CFM(torch.nn.Module):
         text_cfg_cache = None
         dt_cache = None
         d_tensor = torch.ones(x.shape[0], device=x.device, dtype=mu.dtype) * d
-        for j in range(n_timesteps):
+        for _j in range(n_timesteps):
             t_tensor = torch.ones(x.shape[0], device=x.device, dtype=mu.dtype) * t
             # v_pred = model(x, t_tensor, d_tensor, **extra_args)
             v_pred, text_emb, dt = self.estimator(
@@ -1214,7 +1269,7 @@ class CFM(torch.nn.Module):
 
 
 def set_no_grad(net_g):
-    for name, param in net_g.named_parameters():
+    for _name, param in net_g.named_parameters():
         param.requires_grad = False
 
 
@@ -1301,7 +1356,7 @@ class SynthesizerTrnV3(nn.Module):
     def forward(
         self, ssl, y, mel, ssl_lengths, y_lengths, text, text_lengths, mel_lengths, use_grad_ckpt
     ):  # ssl_lengths no need now
-        with autocast(enabled=False):
+        with autocast(device_type=y.device.type, enabled=False):
             y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, y.size(2)), 1).to(y.dtype)
             ge = self.ref_enc(y[:, :704] * y_mask, y_mask)
             maybe_no_grad = torch.no_grad() if self.freeze_quantizer else contextlib.nullcontext()
@@ -1451,7 +1506,7 @@ class SynthesizerTrnV3b(nn.Module):
         )  # text_dim is condition feature dim
 
     def forward(self, ssl, y, mel, ssl_lengths, y_lengths, text, text_lengths, mel_lengths):  # ssl_lengths no need now
-        with autocast(enabled=False):
+        with autocast(device_type=y.device.type, enabled=False):
             y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, y.size(2)), 1).to(y.dtype)
             ge = self.ref_enc(y[:, :704] * y_mask, y_mask)
             # ge = self.ref_enc(y * y_mask, y_mask)#change back, new spec setting is whole 24k

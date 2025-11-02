@@ -6,7 +6,6 @@
 
 """Residual vector quantizer implementation."""
 
-import typing as tp
 from dataclasses import dataclass, field
 
 import torch
@@ -20,7 +19,7 @@ class QuantizedResult:
     quantized: torch.Tensor
     codes: torch.Tensor
     bandwidth: torch.Tensor  # bandwidth in kb/s used, per batch item.
-    penalty: tp.Optional[torch.Tensor] = None
+    penalty: torch.Tensor | None = None
     metrics: dict = field(default_factory=dict)
 
 
@@ -69,8 +68,8 @@ class ResidualVectorQuantizer(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        n_q: tp.Optional[int] = None,
-        layers: tp.Optional[list] = None,
+        n_q: int | None = None,
+        layers: list | None = None,
     ) -> QuantizedResult:
         """Residual vector quantization on the given input tensor.
         Args:
@@ -90,7 +89,7 @@ class ResidualVectorQuantizer(nn.Module):
         quantized, codes, commit_loss, quantized_list = self.vq(x, n_q=n_q, layers=layers)
         return quantized, codes, torch.mean(commit_loss), quantized_list
 
-    def encode(self, x: torch.Tensor, n_q: tp.Optional[int] = None, st: tp.Optional[int] = None) -> torch.Tensor:
+    def encode(self, x: torch.Tensor, n_q: int | None = None, st: int | None = None) -> torch.Tensor:
         """Encode a given input tensor with the specified sample rate at the given bandwidth.
         The RVQ encode method sets the appropriate number of quantizer to use
         and returns indices for each quantizer.

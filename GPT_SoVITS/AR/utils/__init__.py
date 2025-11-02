@@ -27,7 +27,7 @@ def get_newest_ckpt(string_list):
 # 文本存在且不为空时 return True
 def check_txt_file(file_path):
     try:
-        with open(file_path, "r") as file:
+        with open(file_path) as file:
             text = file.readline().strip()
         assert text.strip() != ""
         return text

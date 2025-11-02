@@ -1,0 +1,39 @@
+cn2an
+fastapi[standard]
+ffmpeg-python
+funasr
+g2pk2
+g2p-en
+jieba-fast
+kernels
+ko-pron
+modelscope
+numpy
+opencc
+peft
+py-cpuinfo
+pypinyin
+rich-argparse
+split-lang
+torchao
+torchaudio
+torchcodec; platform_machine != "aarch64" or sys_platform != "linux"
+transformers
+tensorboard
+ToJyutping
+wordsegment
+x-transformers
+
+onnxruntime; platform_machine == "aarch64" or platform_machine == "arm64"
+onnxruntime-gpu; platform_machine == "x86_64" or platform_machine == "AMD64"
+python-mecab-ko-py313; sys_platform != "win32"
+eunjeon; sys_platform == "win32"
+
+av>=11
+ctranslate2>=4.0,<5
+gradio<5.50
+librosa~=0.10
+matplotlib>=3.10
+pyopenjtalk>=0.4.1
+pytorch-lightning>=2.4
+torchmetrics<=1.5

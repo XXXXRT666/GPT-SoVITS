@@ -1,7 +1,6 @@
 import os
 import sys
 import threading
-from typing import Dict, List, Tuple
 
 import regex as re
 import torch
@@ -11,9 +10,9 @@ from transformers import AutoModelForMaskedLM, AutoTokenizer
 from GPT_SoVITS.text import cleaned_text_to_sequence
 from GPT_SoVITS.text.cleaner import clean_text
 from GPT_SoVITS.text.LangSegmenter import LangSegmenter
-from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import get_method as get_seg_method
-from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import split_big_text, splits
-from tools.i18n.i18n import I18nAuto, scan_language_list
+from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import get_method as get_seg_method, split_big_text, splits
+from gsv_tools.i18n.i18n import I18nAuto, scan_language_list
+
 
 language = os.environ.get("language", "Auto")
 language = sys.argv[-1] if sys.argv[-1] in scan_language_list() else language
@@ -52,7 +51,7 @@ class TextPreprocessor:
         self.device = device
         self.bert_lock = threading.RLock()
 
-    def preprocess(self, text: str, lang: str, text_split_method: str, version: str = "v2") -> List[Dict]:
+    def preprocess(self, text: str, lang: str, text_split_method: str, version: str = "v2") -> list[dict]:
         print(f"############ {i18n('切分文本')} ############")
         text = self.replace_consecutive_punctuation(text)
         texts = self.pre_seg_text(text, lang, text_split_method)
@@ -94,7 +93,7 @@ class TextPreprocessor:
             # 解决输入目标文本的空行导致报错的问题
             if len(text.strip()) == 0:
                 continue
-            if not re.sub("\W+", "", text):
+            if not re.sub(r"\W+", "", text):
                 # 检测一下，如果是纯符号，就跳过。
                 continue
             if text[-1] not in splits:
@@ -112,7 +111,7 @@ class TextPreprocessor:
 
     def segment_and_extract_feature_for_text(
         self, text: str, language: str, version: str = "v1"
-    ) -> Tuple[list, torch.Tensor, str]:
+    ) -> tuple[list, torch.Tensor, str]:
         return self.get_phones_and_bert(text, language, version)
 
     def get_phones_and_bert(self, text: str, language: str, version: str, final: bool = False):

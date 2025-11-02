@@ -1,19 +1,14 @@
 import math
-from typing import Optional
 
 import torch
 from torch import nn
-from torch.nn import Conv1d, Conv2d, ConvTranspose1d
-from torch.nn import functional as F
-from torch.nn.utils import remove_weight_norm, spectral_norm
-from torch.nn.utils import weight_norm
+from torch.nn import Conv1d, Conv2d, ConvTranspose1d, functional as F
+from torch.nn.utils import remove_weight_norm, spectral_norm, weight_norm
 
 from GPT_SoVITS.f5_tts.model import DiT
-from GPT_SoVITS.text import symbols as symbols_v1
-from GPT_SoVITS.text import symbols2 as symbols_v2
+from GPT_SoVITS.text import symbols as symbols_v1, symbols2 as symbols_v2
 
-from . import attentions_onnx as attentions
-from . import commons, modules
+from . import attentions_onnx as attentions, commons, modules
 from .commons import get_padding, init_weights
 from .quantize import ResidualVectorQuantizer
 
@@ -40,7 +35,7 @@ class StochasticDurationPredictor(nn.Module):
         self.log_flow = modules.Log()
         self.flows = nn.ModuleList()
         self.flows.append(modules.ElementwiseAffine(2))
-        for i in range(n_flows):
+        for _i in range(n_flows):
             self.flows.append(modules.ConvFlow(2, filter_channels, kernel_size, n_layers=3))
             self.flows.append(modules.Flip())
 
@@ -49,7 +44,7 @@ class StochasticDurationPredictor(nn.Module):
         self.post_convs = modules.DDSConv(filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout)
         self.post_flows = nn.ModuleList()
         self.post_flows.append(modules.ElementwiseAffine(2))
-        for i in range(4):
+        for _i in range(4):
             self.post_flows.append(modules.ConvFlow(2, filter_channels, kernel_size, n_layers=3))
             self.post_flows.append(modules.Flip())
 
@@ -245,7 +240,7 @@ class ResidualCouplingBlock(nn.Module):
         self.gin_channels = gin_channels
 
         self.flows = nn.ModuleList()
-        for i in range(n_flows):
+        for _i in range(n_flows):
             self.flows.append(
                 modules.ResidualCouplingLayer(
                     channels,
@@ -300,7 +295,7 @@ class PosteriorEncoder(nn.Module):
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
     def forward(self, x, x_lengths, g=None):
-        if g != None:
+        if g is not None:
             g = g.detach()
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)
         x = self.pre(x) * x_mask
@@ -329,7 +324,7 @@ class Encoder(nn.Module):
         self.proj = nn.Conv1d(hidden_channels, out_channels, 1)
 
     def forward(self, x, x_lengths, g=None):
-        if g != None:
+        if g is not None:
             g = g.detach()
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)
         x = self.pre(x) * x_mask
@@ -391,14 +386,14 @@ class Generator(torch.nn.Module):
         gin_channels=0,
         is_bias=False,
     ):
-        super(Generator, self).__init__()
+        super().__init__()
         self.num_kernels = len(resblock_kernel_sizes)
         self.num_upsamples = len(upsample_rates)
         self.conv_pre = Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3)
         resblock = modules.ResBlock1 if resblock == "1" else modules.ResBlock2
 
         self.ups = nn.ModuleList()
-        for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
+        for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes, strict=False)):
             self.ups.append(
                 weight_norm(
                     ConvTranspose1d(
@@ -414,7 +409,7 @@ class Generator(torch.nn.Module):
         self.resblocks = nn.ModuleList()
         for i in range(len(self.ups)):
             ch = upsample_initial_channel // (2 ** (i + 1))
-            for j, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
+            for _j, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes, strict=False)):
                 self.resblocks.append(resblock(ch, k, d))
 
         self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=is_bias)
@@ -423,7 +418,7 @@ class Generator(torch.nn.Module):
         if gin_channels != 0:
             self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
 
-    def forward(self, x, g: Optional[torch.Tensor] = None):
+    def forward(self, x, g: torch.Tensor | None = None):
         x = self.conv_pre(x)
         if g is not None:
             x = x + self.cond(g)
@@ -454,7 +449,7 @@ class Generator(torch.nn.Module):
 
 class DiscriminatorP(torch.nn.Module):
     def __init__(self, period, kernel_size=5, stride=3, use_spectral_norm=False):
-        super(DiscriminatorP, self).__init__()
+        super().__init__()
         self.period = period
         self.use_spectral_norm = use_spectral_norm
         norm_f = weight_norm if use_spectral_norm is False else spectral_norm
@@ -533,7 +528,7 @@ class DiscriminatorP(torch.nn.Module):
 
 class DiscriminatorS(torch.nn.Module):
     def __init__(self, use_spectral_norm=False):
-        super(DiscriminatorS, self).__init__()
+        super().__init__()
         norm_f = weight_norm if use_spectral_norm is False else spectral_norm
         self.convs = nn.ModuleList(
             [
@@ -563,7 +558,7 @@ class DiscriminatorS(torch.nn.Module):
 
 class MultiPeriodDiscriminator(torch.nn.Module):
     def __init__(self, use_spectral_norm=False):
-        super(MultiPeriodDiscriminator, self).__init__()
+        super().__init__()
         periods = [2, 3, 5, 7, 11]
 
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
@@ -575,7 +570,7 @@ class MultiPeriodDiscriminator(torch.nn.Module):
         y_d_gs = []
         fmap_rs = []
         fmap_gs = []
-        for i, d in enumerate(self.discriminators):
+        for _i, d in enumerate(self.discriminators):
             y_d_r, fmap_r = d(y)
             y_d_g, fmap_g = d(y_hat)
             y_d_rs.append(y_d_r)
@@ -640,14 +635,14 @@ class ReferenceEncoder(nn.Module):
         return self.proj(out.squeeze(0)).unsqueeze(-1)
 
     def calculate_channels(self, L, kernel_size, stride, pad, n_convs):
-        for i in range(n_convs):
+        for _i in range(n_convs):
             L = (L - kernel_size + 2 * pad) // stride + 1
         return L
 
 
 class Quantizer_module(torch.nn.Module):
     def __init__(self, n_e, e_dim):
-        super(Quantizer_module, self).__init__()
+        super().__init__()
         self.embedding = nn.Embedding(n_e, e_dim)
         self.embedding.weight.data.uniform_(-1.0 / n_e, 1.0 / n_e)
 
@@ -664,7 +659,7 @@ class Quantizer_module(torch.nn.Module):
 
 class Quantizer(torch.nn.Module):
     def __init__(self, embed_dim=512, n_code_groups=4, n_codes=160):
-        super(Quantizer, self).__init__()
+        super().__init__()
         assert embed_dim % n_code_groups == 0
         self.quantizer_modules = nn.ModuleList(
             [Quantizer_module(n_codes, embed_dim // n_code_groups) for _ in range(n_code_groups)]
@@ -680,7 +675,7 @@ class Quantizer(torch.nn.Module):
         x = torch.split(x, self.embed_dim // self.n_code_groups, dim=-1)
         min_indicies = []
         z_q = []
-        for _x, m in zip(x, self.quantizer_modules):
+        for _x, m in zip(x, self.quantizer_modules, strict=False):
             _z_q, _min_indicies = m(_x)
             z_q.append(_z_q)
             min_indicies.append(_min_indicies)  # B * T,
@@ -696,7 +691,7 @@ class Quantizer(torch.nn.Module):
         x = x.transpose(1, 2)
         x = torch.split(x, 1, 2)
         ret = []
-        for q, embed in zip(x, self.quantizer_modules):
+        for q, embed in zip(x, self.quantizer_modules, strict=False):
             q = embed.embedding(q.squeeze(-1))
             ret.append(q)
         ret = torch.cat(ret, -1)
@@ -943,7 +938,7 @@ class CFM(torch.nn.Module):
         d = torch.tensor(1.0 / ntimesteps, dtype=x.dtype, device=x.device)
         d_tensor = torch.ones(x.shape[0], device=x.device, dtype=mu.dtype) * d
 
-        for j in range(ntimesteps):
+        for _j in range(ntimesteps):
             t_tensor = torch.ones(x.shape[0], device=x.device, dtype=mu.dtype) * t
             # d_tensor = torch.ones(x.shape[0], device=x.device,dtype=mu.dtype) * d
             # v_pred = model(x, t_tensor, d_tensor, **extra_args)
@@ -958,7 +953,7 @@ class CFM(torch.nn.Module):
 
 
 def set_no_grad(net_g):
-    for name, param in net_g.named_parameters():
+    for _name, param in net_g.named_parameters():
         param.requires_grad = False
 
 

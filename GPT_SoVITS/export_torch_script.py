@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 from io import BytesIO
-from typing import Optional
 
 import soundfile
 import torch
@@ -20,7 +19,8 @@ from GPT_SoVITS.feature_extractor import cnhubert
 from GPT_SoVITS.inference_webui import get_phones_and_bert
 from GPT_SoVITS.module.models_onnx import SynthesizerTrn
 from GPT_SoVITS.sv import SV
-from tools.my_utils import load_audio
+from gsv_tools.my_utils import load_audio
+
 
 default_config = {
     "embedding_dim": 512,
@@ -66,10 +66,10 @@ def get_raw_t2s_model(dict_s1) -> Text2SemanticLightningModule:
 @torch.jit.script
 def logits_to_probs(
     logits,
-    previous_tokens: Optional[torch.Tensor] = None,
+    previous_tokens: torch.Tensor | None = None,
     temperature: float = 1.0,
-    top_k: Optional[int] = None,
-    top_p: Optional[int] = None,
+    top_k: int | None = None,
+    top_p: int | None = None,
     repetition_penalty: float = 1.0,
 ):
     # if previous_tokens is not None:
@@ -113,8 +113,8 @@ def sample(
     logits,
     previous_tokens,
     temperature: float = 1.0,
-    top_k: Optional[int] = None,
-    top_p: Optional[int] = None,
+    top_k: int | None = None,
+    top_p: int | None = None,
     repetition_penalty: float = 1.35,
 ):
     probs = logits_to_probs(
@@ -174,7 +174,7 @@ class DictToAttrRecursive(dict):
     def __setattr__(self, key, value):
         if isinstance(value, dict):
             value = DictToAttrRecursive(value)
-        super(DictToAttrRecursive, self).__setitem__(key, value)
+        super().__setitem__(key, value)
         super().__setattr__(key, value)
 
     def __delattr__(self, item):
@@ -233,7 +233,7 @@ class T2SBlock:
         self.false = torch.tensor(False, dtype=torch.bool)
 
     @torch.jit.ignore
-    def to_mask(self, x: torch.Tensor, padding_mask: Optional[torch.Tensor]):
+    def to_mask(self, x: torch.Tensor, padding_mask: torch.Tensor | None):
         if padding_mask is None:
             return x
 
@@ -242,7 +242,7 @@ class T2SBlock:
         else:
             return x * padding_mask
 
-    def process_prompt(self, x: torch.Tensor, attn_mask: torch.Tensor, padding_mask: Optional[torch.Tensor] = None):
+    def process_prompt(self, x: torch.Tensor, attn_mask: torch.Tensor, padding_mask: torch.Tensor | None = None):
         q, k, v = F.linear(self.to_mask(x, padding_mask), self.qkv_w, self.qkv_b).chunk(3, dim=-1)
 
         batch_size = q.shape[0]
@@ -316,7 +316,7 @@ class T2STransformer:
         self.num_blocks: int = num_blocks
         self.blocks = blocks
 
-    def process_prompt(self, x: torch.Tensor, attn_mask: torch.Tensor, padding_mask: Optional[torch.Tensor] = None):
+    def process_prompt(self, x: torch.Tensor, attn_mask: torch.Tensor, padding_mask: torch.Tensor | None = None):
         k_cache: list[torch.Tensor] = []
         v_cache: list[torch.Tensor] = []
         for i in range(self.num_blocks):
@@ -382,7 +382,7 @@ class VitsModel(nn.Module):
 
 class T2SModel(nn.Module):
     def __init__(self, raw_t2s: Text2SemanticLightningModule):
-        super(T2SModel, self).__init__()
+        super().__init__()
         self.model_dim = raw_t2s.model.model_dim
         self.embedding_dim = raw_t2s.model.embedding_dim
         self.num_head = raw_t2s.model.num_head
@@ -561,7 +561,7 @@ def build_phone_level_feature(res: Tensor, word2ph: IntTensor):
 
 class MyBertModel(torch.nn.Module):
     def __init__(self, bert_model):
-        super(MyBertModel, self).__init__()
+        super().__init__()
         self.bert = bert_model
 
     def forward(
@@ -862,7 +862,7 @@ class GPT_SoVITS(nn.Module):
 
 class ExportERes2NetV2(nn.Module):
     def __init__(self, sv_cn_model: SV):
-        super(ExportERes2NetV2, self).__init__()
+        super().__init__()
         self.bn1 = sv_cn_model.embedding_model.bn1
         self.conv1 = sv_cn_model.embedding_model.conv1
         self.layer1 = sv_cn_model.embedding_model.layer1
@@ -930,8 +930,6 @@ def test():
     parser.add_argument("--output_path", required=True, help="Path to the output directory")
 
     args = parser.parse_args()
-    gpt_path = args.gpt_model
-    vits_path = args.sovits_model
     ref_audio_path = args.ref_audio
     ref_text = args.ref_text
 

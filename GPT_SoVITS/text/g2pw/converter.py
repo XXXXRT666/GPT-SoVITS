@@ -5,7 +5,7 @@ import importlib.util
 import json
 import os
 import platform
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from opencc import OpenCC
@@ -15,6 +15,7 @@ from config import get_dtype, infer_device
 
 from ..zh_normalization.char_convert import traditional_to_simplified
 from .tokenizer import G2PWInput, G2PWTokenizer
+
 
 device = infer_device
 dtype = get_dtype(device.index)
@@ -90,7 +91,7 @@ class G2PWConverter:
 
         self.pos_tags = ["UNK", "A", "C", "D", "I", "N", "P", "T", "V", "DE", "SHI"]
 
-        with open(os.path.join(model_source, "bopomofo_to_pinyin_wo_tune_dict.json"), "r", encoding="utf-8") as fr:
+        with open(os.path.join(model_source, "bopomofo_to_pinyin_wo_tune_dict.json"), encoding="utf-8") as fr:
             self.bopomofo_convert_dict: dict[str, str] = json.load(fr)
 
         self.style_convert_func: Callable[[str], str] = {
@@ -98,7 +99,7 @@ class G2PWConverter:
             "pinyin": self._convert_bopomofo_to_pinyin,
         }[style]
 
-        with open(os.path.join(model_source, "char_bopomofo_dict.json"), "r", encoding="utf-8") as fr:
+        with open(os.path.join(model_source, "char_bopomofo_dict.json"), encoding="utf-8") as fr:
             self.char_bopomofo_dict = json.load(fr)
 
         self.cc = OpenCC("s2tw")
@@ -153,7 +154,7 @@ class G2PWConverter:
 
         preds = self.predict(model_input)
 
-        for qid, pred in zip(query_ids, preds):
+        for qid, pred in zip(query_ids, preds, strict=False):
             partial_result[qid] = self.style_convert_func(pred)
 
         return [partial_result]

@@ -1,9 +1,8 @@
 import os
 import warnings
 
-from . import cleaned_text_to_sequence
-from . import symbols as symbols_v1
-from . import symbols2 as symbols_v2
+from . import cleaned_text_to_sequence, symbols as symbols_v1, symbols2 as symbols_v2
+
 
 warnings.filterwarnings("ignore", category=UserWarning, module="jieba_fast._compat")
 
@@ -15,7 +14,7 @@ special = [
 ]
 
 
-def clean_text(text, language, version=None) -> tuple[list[str], list[int] | None, str]:
+def clean_text(text, language, version=None) -> tuple[list[str], list[int], str]:
     if version is None:
         version = os.environ.get("version", "v2")
     if version == "v1":
@@ -46,10 +45,10 @@ def clean_text(text, language, version=None) -> tuple[list[str], list[int] | Non
         phones = language_module.g2p(norm_text)
         if len(phones) < 4:
             phones = [","] + phones
-        word2ph = None
+        word2ph = []
     else:
         phones = language_module.g2p(norm_text)
-        word2ph = None
+        word2ph = []
     phones = ["UNK" if ph not in symbols else ph for ph in phones]
     return phones, word2ph, norm_text
 

@@ -11,6 +11,7 @@ from .symbols import punctuation
 from .tone_sandhi import ToneSandhi
 from .zh_normalization.text_normlization import TextNormalizer
 
+
 jieba_fast.setLogLevel(logging.CRITICAL)
 
 
@@ -76,7 +77,7 @@ def replace_consecutive_punctuation(text):
 
 
 def g2p(text):
-    pattern = r"(?<=[{0}])\s*".format("".join(punctuation))
+    pattern = r"(?<=[{}])\s*".format("".join(punctuation))
     sentences = [i for i in re.split(pattern, text) if i.strip() != ""]
     phones, word2ph = _g2p(sentences)
     return phones, word2ph
@@ -87,7 +88,7 @@ def _get_initials_finals(word):
     finals = []
     orig_initials = lazy_pinyin(word, neutral_tone_with_five=True, style=Style.INITIALS)
     orig_finals = lazy_pinyin(word, neutral_tone_with_five=True, style=Style.FINALS_TONE3)
-    for c, v in zip(orig_initials, orig_finals):
+    for c, v in zip(orig_initials, orig_finals, strict=False):
         initials.append(c)
         finals.append(v)
     return initials, finals
@@ -97,7 +98,6 @@ def _g2p(segments):
     phones_list = []
     word2ph = []
     for seg in segments:
-        pinyins = []
         # Replace all English words in the sentence
         seg = re.sub("[a-zA-Z]+", "", seg)
         seg_cut = psg.lcut(seg)
@@ -116,7 +116,7 @@ def _g2p(segments):
         initials = sum(initials, [])
         finals = sum(finals, [])
         #
-        for c, v in zip(initials, finals):
+        for c, v in zip(initials, finals, strict=False):
             raw_pinyin = c + v
             # NOTE: post process for pypinyin outputs
             # we discriminate i, ii and iii
@@ -184,7 +184,7 @@ def text_normalize(text):
 
 
 if __name__ == "__main__":
-    text = "啊——但是《原神》是由,米哈\游自主，研发的一款全.新开放世界.冒险游戏"
+    text = r"啊——但是《原神》是由,米哈\游自主，研发的一款全.新开放世界.冒险游戏"
     text = "呣呣呣～就是…大人的鼹鼠党吧？"
     text = "你好"
     text = text_normalize(text)

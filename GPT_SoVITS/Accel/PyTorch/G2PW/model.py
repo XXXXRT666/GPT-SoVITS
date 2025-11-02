@@ -1,12 +1,13 @@
 import math
+from collections.abc import MutableSequence
 from pathlib import Path
-from typing import MutableSequence
 
 import torch
 from transformers import BertConfig
 
 from .. import nn
 from ..nn import functional as F
+
 
 Tensor = torch.Tensor
 

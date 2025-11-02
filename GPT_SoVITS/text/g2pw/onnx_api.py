@@ -4,7 +4,7 @@
 import json
 import os
 import zipfile
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import onnxruntime
@@ -18,6 +18,7 @@ from ..zh_normalization.char_convert import traditional_to_simplified
 from .dataset import get_char_phoneme_labels, get_phoneme_labels, prepare_onnx_input
 from .utils import load_config
 
+
 onnxruntime.set_default_logger_severity(3)
 try:
     onnxruntime.preload_dlls()
@@ -28,7 +29,7 @@ except Exception:
 model_version = "1.1"
 
 
-def predict(session, onnx_input: Dict[str, Any], labels: List[str]) -> Tuple[List[str], List[float]]:
+def predict(session, onnx_input: dict[str, Any], labels: list[str]) -> tuple[list[str], list[float]]:
     all_preds = []
     all_confidences = []
     probs = session.run(
@@ -45,7 +46,7 @@ def predict(session, onnx_input: Dict[str, Any], labels: List[str]) -> Tuple[Lis
 
     preds = np.argmax(probs, axis=1).tolist()
     max_probs = []
-    for index, arr in zip(preds, probs.tolist()):
+    for index, arr in zip(preds, probs.tolist(), strict=False):
         max_probs.append(arr[index])
     all_preds += [labels[pred] for pred in preds]
     all_confidences += max_probs
@@ -166,14 +167,14 @@ class G2PWOnnxConverter:
 
         self.pos_tags = ["UNK", "A", "C", "D", "I", "N", "P", "T", "V", "DE", "SHI"]
 
-        with open(os.path.join(uncompress_path, "bopomofo_to_pinyin_wo_tune_dict.json"), "r", encoding="utf-8") as fr:
+        with open(os.path.join(uncompress_path, "bopomofo_to_pinyin_wo_tune_dict.json"), encoding="utf-8") as fr:
             self.bopomofo_convert_dict = json.load(fr)
         self.style_convert_func = {
             "bopomofo": lambda x: x,
             "pinyin": self._convert_bopomofo_to_pinyin,
         }[style]
 
-        with open(os.path.join(uncompress_path, "char_bopomofo_dict.json"), "r", encoding="utf-8") as fr:
+        with open(os.path.join(uncompress_path, "char_bopomofo_dict.json"), encoding="utf-8") as fr:
             self.char_bopomofo_dict = json.load(fr)
 
         if self.enable_opencc:
@@ -189,7 +190,7 @@ class G2PWOnnxConverter:
             print(f'Warning: "{bopomofo}" cannot convert to pinyin')
             return None
 
-    def __call__(self, sentence: str) -> List[List[str]]:
+    def __call__(self, sentence: str) -> list[list[str]]:
         sentences = [sentence]
 
         if self.enable_opencc:
@@ -221,12 +222,12 @@ class G2PWOnnxConverter:
             preds = [pred.split(" ")[1] for pred in preds]
 
         results = partial_results
-        for sent_id, query_id, pred in zip(sent_ids, query_ids, preds):
+        for sent_id, query_id, pred in zip(sent_ids, query_ids, preds, strict=False):
             results[sent_id][query_id] = self.style_convert_func(pred)
 
         return results
 
-    def _prepare_data(self, sentences: List[str]) -> Tuple[List[str], List[int], List[int], List[List[str]]]:
+    def _prepare_data(self, sentences: list[str]) -> tuple[list[str], list[int], list[int], list[list[str]]]:
         texts, query_ids, sent_ids, partial_results = [], [], [], []
         for sent_id, sent in enumerate(sentences):
             # pypinyin works well for Simplified Chinese than Traditional Chinese

@@ -20,6 +20,7 @@ from GPT_SoVITS.AR.utils import get_newest_ckpt
 from GPT_SoVITS.AR.utils.io import load_yaml_config
 from GPT_SoVITS.process_ckpt import save
 
+
 logging.getLogger("numba").setLevel(logging.WARNING)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 torch.set_float32_matmul_precision("high")

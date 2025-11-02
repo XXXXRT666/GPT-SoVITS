@@ -21,6 +21,7 @@ from GPT_SoVITS.module.mel_processing import mel_spectrogram_torch
 from GPT_SoVITS.module.models_onnx import CFM, Generator, SynthesizerTrnV3
 from GPT_SoVITS.process_ckpt import inspect_version
 
+
 logging.config.dictConfig(uvicorn.config.LOGGING_CONFIG)
 logger = logging.getLogger("uvicorn")
 
@@ -132,7 +133,7 @@ class ExportDitEmbed(torch.nn.Module):
 class ExportDiT(torch.nn.Module):
     def __init__(self, dit: DiT):
         super().__init__()
-        if dit != None:
+        if dit is not None:
             self.embed = ExportDitEmbed(dit)
             self.blocks = ExportDitBlocks(dit)
         else:
@@ -504,7 +505,7 @@ def init_bigvgan():
     from BigVGAN import bigvgan
 
     bigvgan_model = bigvgan.BigVGAN.from_pretrained(
-        "%s/GPT_SoVITS/pretrained_models/models--nvidia--bigvgan_v2_24khz_100band_256x" % (now_dir,),
+        f"{now_dir}/GPT_SoVITS/pretrained_models/models--nvidia--bigvgan_v2_24khz_100band_256x",
         use_cuda_kernel=False,
     )  # if True, RuntimeError: Ninja is required to load C++ extensions
     # remove weight norm in the model and set to eval mode
@@ -532,7 +533,7 @@ def init_hifigan():
     hifigan_model.eval()
     hifigan_model.remove_weight_norm()
     state_dict_g = torch.load(
-        "%s/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/vocoder.pth" % (now_dir,), map_location="cpu"
+        f"{now_dir}/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/vocoder.pth", map_location="cpu"
     )
     print("loading vocoder", hifigan_model.load_state_dict(state_dict_g))
     if is_half is True:
@@ -567,7 +568,7 @@ class DictToAttrRecursive(dict):
     def __setattr__(self, key, value):
         if isinstance(value, dict):
             value = DictToAttrRecursive(value)
-        super(DictToAttrRecursive, self).__setitem__(key, value)
+        super().__setitem__(key, value)
         super().__setattr__(key, value)
 
     def __delattr__(self, item):
@@ -722,7 +723,6 @@ def export_1(ref_wav_path, ref_wav_text, version="v3"):
 
     hps = sovits.hps
     # ref_wav_path = "onnx/ad/ref.wav"
-    speed = 1.0
     sample_steps = 8
     dtype = torch.float16 if is_half is True else torch.float32
     refer = get_spepc(hps, ref_wav_path).to(device).to(dtype)
@@ -930,7 +930,6 @@ def test_export(
 ):
     # hps = sovits.hps
     ref_wav_path = "onnx/ad/ref.wav"
-    speed = 1.0
     sample_steps = 8
 
     dtype = torch.float16 if is_half is True else torch.float32
@@ -1048,10 +1047,7 @@ def test_export(
 ):
     # hps = sovits.hps
     ref_wav_path = "onnx/ad/ref.wav"
-    speed = 1.0
     sample_steps = torch.LongTensor([16])
-
-    dtype = torch.float16 if is_half is True else torch.float32
 
     zero_wav = np.zeros(
         int(out_sr * 0.3),

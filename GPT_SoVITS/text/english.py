@@ -12,6 +12,7 @@ from .en_normalization.expend import normalize
 from .symbols import punctuation
 from .symbols2 import symbols
 
+
 word_tokenize = TweetTokenizer().tokenize
 
 current_file_path = os.path.dirname(__file__)
@@ -122,7 +123,7 @@ def replace_phs(phs):
 
 def replace_consecutive_punctuation(text):
     punctuations = "".join(re.escape(p) for p in punctuation)
-    pattern = f"([{punctuations}\s])([{punctuations}])+"
+    pattern = rf"([{punctuations}\s])([{punctuations}])+"
     result = re.sub(pattern, r"\1", text)
     return result
 

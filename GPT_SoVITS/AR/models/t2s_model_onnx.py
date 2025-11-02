@@ -8,6 +8,7 @@ from torchmetrics.classification import MulticlassAccuracy
 from GPT_SoVITS.AR.modules.embedding_onnx import SinePositionalEmbedding, TokenEmbedding
 from GPT_SoVITS.AR.modules.transformer_onnx import LayerNorm, TransformerEncoder, TransformerEncoderLayer
 
+
 default_config = {
     "embedding_dim": 512,
     "hidden_dim": 512,
@@ -248,7 +249,7 @@ class T2SStageDecoder(nn.Module):
 
 class Text2SemanticDecoder(nn.Module):
     def __init__(self, config, norm_first=False, top_k=3):
-        super(Text2SemanticDecoder, self).__init__()
+        super().__init__()
         self.model_dim = config["model"]["hidden_dim"]
         self.embedding_dim = config["model"]["embedding_dim"]
         self.num_head = config["model"]["head"]

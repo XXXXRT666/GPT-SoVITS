@@ -1,8 +1,8 @@
 import os
 import warnings
 
-from . import symbols as symbols_v1
-from . import symbols2 as symbols_v2
+from . import symbols as symbols_v1, symbols2 as symbols_v2
+
 
 warnings.filterwarnings("ignore", category=UserWarning, module="jieba_fast._compat")
 warnings.filterwarnings("ignore", category=UserWarning, module="jieba._compat")

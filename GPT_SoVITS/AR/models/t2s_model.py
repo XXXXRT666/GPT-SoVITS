@@ -1,7 +1,6 @@
 # modified from https://github.com/yangdongchao/SoundStorm/blob/master/soundstorm/s1/AR/models/t2s_model.py
 # reference: https://github.com/lifeiteng/vall-e
 import math
-from typing import List, Optional
 
 import torch
 from torch import nn
@@ -20,6 +19,7 @@ from GPT_SoVITS.AR.models.utils import (
 )
 from GPT_SoVITS.AR.modules.embedding import SinePositionalEmbedding, TokenEmbedding
 from GPT_SoVITS.AR.modules.transformer import LayerNorm, TransformerEncoder, TransformerEncoderLayer
+
 
 default_config = {
     "embedding_dim": 512,
@@ -40,8 +40,8 @@ def scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
-    scale: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
+    scale: torch.Tensor | None = None,
 ) -> torch.Tensor:
     B, H, L, S = query.size(0), query.size(1), query.size(-2), key.size(-2)
     if scale is None:
@@ -122,7 +122,7 @@ class T2SBlock:
     def to_mask(
         self,
         x: torch.Tensor,
-        padding_mask: Optional[torch.Tensor],
+        padding_mask: torch.Tensor | None,
     ):
         if padding_mask is None:
             return x
@@ -136,7 +136,7 @@ class T2SBlock:
         self,
         x: torch.Tensor,
         attn_mask: torch.Tensor,
-        padding_mask: Optional[torch.Tensor] = None,
+        padding_mask: torch.Tensor | None = None,
         torch_sdpa: bool = True,
     ):
         q, k, v = F.linear(self.to_mask(x, padding_mask), self.qkv_w, self.qkv_b).chunk(3, dim=-1)
@@ -223,7 +223,7 @@ class T2SBlock:
 
 @torch.jit.script
 class T2STransformer:
-    def __init__(self, num_blocks: int, blocks: List[T2SBlock]):
+    def __init__(self, num_blocks: int, blocks: list[T2SBlock]):
         self.num_blocks: int = num_blocks
         self.blocks = blocks
 
@@ -231,11 +231,11 @@ class T2STransformer:
         self,
         x: torch.Tensor,
         attn_mask: torch.Tensor,
-        padding_mask: Optional[torch.Tensor] = None,
+        padding_mask: torch.Tensor | None = None,
         torch_sdpa: bool = True,
     ):
-        k_cache: List[torch.Tensor] = []
-        v_cache: List[torch.Tensor] = []
+        k_cache: list[torch.Tensor] = []
+        v_cache: list[torch.Tensor] = []
         for i in range(self.num_blocks):
             x, k_cache_, v_cache_ = self.blocks[i].process_prompt(x, attn_mask, padding_mask, torch_sdpa)
             k_cache.append(k_cache_)
@@ -245,8 +245,8 @@ class T2STransformer:
     def decode_next_token(
         self,
         x: torch.Tensor,
-        k_cache: List[torch.Tensor],
-        v_cache: List[torch.Tensor],
+        k_cache: list[torch.Tensor],
+        v_cache: list[torch.Tensor],
         attn_mask: torch.Tensor = None,
         torch_sdpa: bool = True,
     ):
@@ -259,7 +259,7 @@ class T2STransformer:
 
 class Text2SemanticDecoder(nn.Module):
     def __init__(self, config, norm_first=False, top_k=3):
-        super(Text2SemanticDecoder, self).__init__()
+        super().__init__()
         self.model_dim = config["model"]["hidden_dim"]
         self.embedding_dim = config["model"]["embedding_dim"]
         self.num_head = config["model"]["head"]
@@ -582,10 +582,10 @@ class Text2SemanticDecoder(nn.Module):
 
     def infer_panel_batch_infer(
         self,
-        x: List[torch.LongTensor],  #####全部文本token
+        x: list[torch.LongTensor],  #####全部文本token
         x_lens: torch.LongTensor,
         prompts: torch.LongTensor,  ####参考音频token
-        bert_feature: List[torch.LongTensor],
+        bert_feature: list[torch.LongTensor],
         top_k: int = -100,
         top_p: int = 100,
         early_stop_num: int = -1,
@@ -609,7 +609,7 @@ class Text2SemanticDecoder(nn.Module):
 
         max_len = kwargs.get("max_len", x_lens.max())
         x_list = []
-        for x_item, bert_item in zip(x, bert_feature):
+        for x_item, bert_item in zip(x, bert_feature, strict=False):
             # max_len = max(max_len, x_item.shape[0], bert_item.shape[1])
             x_item = self.ar_text_embedding(x_item.unsqueeze(0))
             x_item = x_item + self.bert_proj(bert_item.transpose(0, 1).unsqueeze(0))
@@ -782,10 +782,10 @@ class Text2SemanticDecoder(nn.Module):
 
     def infer_panel_naive_batched(
         self,
-        x: List[torch.LongTensor],  #####全部文本token
+        x: list[torch.LongTensor],  #####全部文本token
         x_lens: torch.LongTensor,
         prompts: torch.LongTensor,  ####参考音频token
-        bert_feature: List[torch.LongTensor],
+        bert_feature: list[torch.LongTensor],
         top_k: int = -100,
         top_p: int = 100,
         early_stop_num: int = -1,

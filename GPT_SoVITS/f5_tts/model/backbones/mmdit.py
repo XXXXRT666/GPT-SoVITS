@@ -22,6 +22,7 @@ from ..modules import (
     precompute_freqs_cis,
 )
 
+
 # text embedding
 
 
@@ -116,7 +117,7 @@ class MMDiT(nn.Module):
         x: float["b n d"],  # nosied input audio  # noqa: F722
         cond: float["b n d"],  # masked cond audio  # noqa: F722
         text: int["b nt"],  # text  # noqa: F722
-        time: float["b"] | float[""],  # time step  # noqa: F821 F722
+        time: float[b] | float[""],  # time step  # noqa: F821 F722
         drop_audio_cond,  # cfg for cond audio
         drop_text,  # cfg for text
         mask: bool["b n"] | None = None,  # noqa: F722

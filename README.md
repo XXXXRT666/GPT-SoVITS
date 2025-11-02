@@ -73,8 +73,6 @@ For users in China, you can [Click Here to use AutoDL](https://www.codewithgpu.c
 
 | Python Version | PyTorch Version |    Device     |
 | :------------: | :-------------: | :-----------: |
-|  Python 3.10   |  PyTorch 2.5.1  |   CUDA 12.4   |
-|  Python 3.11   |  PyTorch 2.5.1  |   CUDA 12.4   |
 |  Python 3.11   |  PyTorch 2.9.0  |   CUDA 12.8   |
 |  Python 3.11   |  PyTorch 2.9.0  | Apple Silicon |
 |  Python 3.10   |  PyTorch 2.8.0  |      CPU      |
@@ -89,10 +87,10 @@ If you are a Windows user (tested with win>=10), you can [download the integrate
 
 Install the program by running the following commands:
 
-```pwsh
+```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-pwsh -F install.ps1 --Device <CU126|CU128|CPU> --Source <HF|HF-Mirror|ModelScope> [--DownloadUVR5]
+pwsh -F install.ps1 --help
 ```
 
 ### Linux
@@ -100,7 +98,7 @@ pwsh -F install.ps1 --Device <CU126|CU128|CPU> --Source <HF|HF-Mirror|ModelScope
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 ### macOS
@@ -112,7 +110,7 @@ Install the program by running the following commands:
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 <div align="center">
@@ -126,37 +124,11 @@ bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--downloa
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
+conda install uv ffmpeg -c conda-forge
 
-pip install -r extra-req.txt --no-deps
-pip install -r requirements.txt
-```
-
-#### Install FFmpeg
-
-##### Conda Users
-
-```bash
-conda activate GPTSoVITS
-conda install ffmpeg -c conda-forge
-```
-
-##### Ubuntu/Debian Users
-
-```bash
-sudo apt install ffmpeg
-sudo apt install libsox-dev
-```
-
-##### Windows Users
-
-Download and place [ffmpeg.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffmpeg.exe) and [ffprobe.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffprobe.exe) in the GPT-SoVITS root
-
-Install [Visual Studio 2017](https://aka.ms/vs/17/release/vc_redist.x86.exe)
-
-##### MacOS Users
-
-```bash
-brew install ffmpeg
+uv export --extra main -o pylock.toml -q --extra [mlx|cu126|cu128|rocm|cpu]
+uv pip sync pylock.toml --no-break-system-packages --preview-features pylock
+uv pip install ".[flash-attn]"
 ```
 
 <div align="center">
@@ -227,15 +199,15 @@ docker exec -it <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|GPT-SoVITS-CU126|GP
 
 2. Download G2PW models from [G2PWModel.zip(HF)](https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/G2PWModel.zip)| [G2PWModel.zip(ModelScope)](https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/G2PWModel.zip), unzip and rename to `G2PWModel`, and then place them in `GPT_SoVITS/text`.(Chinese TTS Only)
 
-3. For UVR5 (Vocals/Accompaniment Separation & Reverberation Removal, additionally), download models from [UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) and place them in `tools/uvr5/uvr5_weights`.
+3. For UVR5 (Vocals/Accompaniment Separation & Reverberation Removal, additionally), download models from [UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) and place them in `gsv_tools/uvr5/uvr5_weights`.
 
-   - If you want to use `bs_roformer` or `mel_band_roformer` models for UVR5, you can manually download the model and corresponding configuration file, and put them in `tools/uvr5/uvr5_weights`. **Rename the model file and configuration file, ensure that the model and configuration files have the same and corresponding names except for the suffix**. In addition, the model and configuration file names **must include `roformer`** in order to be recognized as models of the roformer class.
+   - If you want to use `bs_roformer` or `mel_band_roformer` models for UVR5, you can manually download the model and corresponding configuration file, and put them in `gsv_tools/uvr5/uvr5_weights`. **Rename the model file and configuration file, ensure that the model and configuration files have the same and corresponding names except for the suffix**. In addition, the model and configuration file names **must include `roformer`** in order to be recognized as models of the roformer class.
 
    - The suggestion is to **directly specify the model type** in the model name and configuration file name, such as `mel_mand_roformer`, `bs_roformer`. If not specified, the features will be compared from the configuration file to determine which type of model it is. For example, the model `bs_roformer_ep_368_sdr_12.9628.ckpt` and its corresponding configuration file `bs_roformer_ep_368_sdr_12.9628.yaml` are a pair, `kim_mel_band_roformer.ckpt` and `kim_mel_band_roformer.yaml` are also a pair.
 
-4. For Chinese ASR (additionally), download models from [Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files), [Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files), and [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) and place them in `tools/asr/models`.
+4. For Chinese ASR (additionally), download models from [Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files), [Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files), and [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) and place them in `gsv_tools/asr/models`.
 
-5. For English or Japanese ASR (additionally), download models from [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) and place them in `tools/asr/models`. Also, [other models](https://huggingface.co/Systran) may have the similar effect with smaller disk footprint.
+5. For English or Japanese ASR (additionally), download models from [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) and place them in `gsv_tools/asr/models`. Also, [other models](https://huggingface.co/Systran) may have the similar effect with smaller disk footprint.
 
 <div align="center">
 
@@ -418,7 +390,7 @@ Use v2Pro from v1/v2/v3/v4 environment:
 Use the command line to open the WebUI for UVR5
 
 ```bash
-python tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
+python gsv_tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
 ```
 
 <!-- If you can't open a browser, follow the format below for UVR processing,This is using mdxnet for audio processing
@@ -441,7 +413,7 @@ python audio_slicer.py \
 This is how dataset ASR processing is done using the command line(Only Chinese)
 
 ```bash
-python tools/asr/funasr_asr.py -i <input> -o <output>
+python gsv_tools/asr/funasr_asr.py -i <input> -o <output>
 ```
 
 ASR processing is performed through Faster_Whisper(ASR marking except Chinese)
@@ -449,7 +421,7 @@ ASR processing is performed through Faster_Whisper(ASR marking except Chinese)
 (No progress bars, GPU performance may cause time delays)
 
 ```bash
-python ./tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p <precision>
+python ./gsv_tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p <precision>
 ```
 
 A custom list save path is enabled
@@ -470,7 +442,7 @@ Special thanks to the following projects and contributors:
 - [TransferTTS](https://github.com/hcy71o/TransferTTS/blob/master/models.py#L556)
 - [contentvec](https://github.com/auspicious3000/contentvec/)
 - [hifi-gan](https://github.com/jik876/hifi-gan)
-- [fish-speech](https://github.com/fishaudio/fish-speech/blob/main/tools/llama/generate.py#L41)
+- [fish-speech](https://github.com/fishaudio/fish-speech/blob/f5243096380be703b640d387ab959623eefad756/fish_speech/models/text2semantic/inference.py#L81)
 - [f5-TTS](https://github.com/SWivid/F5-TTS/blob/main/src/f5_tts/model/backbones/dit.py)
 - [shortcut flow matching](https://github.com/kvfrans/shortcut-models/blob/main/targets_shortcut.py)
 

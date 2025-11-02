@@ -1,4 +1,5 @@
 import math
+
 import torch
 from torch.nn import functional as F
 
@@ -126,7 +127,6 @@ def generate_path(duration, mask):
     duration: [b, 1, t_x]
     mask: [b, 1, t_y, t_x]
     """
-    device = duration.device
 
     b, _, t_y, t_x = mask.shape
     cum_duration = torch.cumsum(duration, -1)

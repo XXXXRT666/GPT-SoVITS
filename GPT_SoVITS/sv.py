@@ -5,6 +5,7 @@ import torchaudio
 
 from GPT_SoVITS.eres2net.ERes2NetV2 import ERes2NetV2
 
+
 sv_path = "GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt"
 
 torchaudio.compliance.kaldi.get_mel_banks = lru_cache(maxsize=128)(torchaudio.compliance.kaldi.get_mel_banks)

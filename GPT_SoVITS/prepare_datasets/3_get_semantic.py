@@ -6,7 +6,6 @@ import queue
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple
 
 import torch
 import torch.multiprocessing as tmp
@@ -14,10 +13,11 @@ import typer
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from torch.multiprocessing.spawn import spawn
 
-from GPT_SoVITS.Accel.logger import SpeedColumnIteration, console, logger
 from GPT_SoVITS.module.models import SynthesizerTrn, SynthesizerTrnV3
 from GPT_SoVITS.process_ckpt import inspect_version
-from tools.my_utils import DictToAttrRecursive, clean_path
+from gsv_tools.logger import SpeedColumnIteration, console, logger
+from gsv_tools.my_utils import DictToAttrRecursive, clean_path
+
 
 torch.set_grad_enabled(False)
 
@@ -41,8 +41,8 @@ def parse_inp_text_line(line: str) -> str:
     return wav_name
 
 
-def build_device_strings(device_type: str, device_ids: List[int], procs_per_device: int) -> List[str]:
-    devices: List[str] = []
+def build_device_strings(device_type: str, device_ids: list[int], procs_per_device: int) -> list[str]:
+    devices: list[str] = []
     for device_id in device_ids:
         dstr = f"{device_type}:{device_id}" if device_type in {"cuda", "mps"} else "cpu"
         devices.extend([dstr] * procs_per_device)
@@ -51,9 +51,9 @@ def build_device_strings(device_type: str, device_ids: List[int], procs_per_devi
 
 def worker_entry(
     rank: int,
-    device_strs: List[str],
-    tasks_q: "tmp.Queue[Tuple[int, str] | None]",
-    results_q: "tmp.Queue[Tuple[int, str]]",
+    device_strs: list[str],
+    tasks_q: "tmp.Queue[tuple[int, str] | None]",
+    results_q: "tmp.Queue[tuple[int, str]]",
     pretrained_s2g: str,
     opt_dir: str,
     fp16: bool,
@@ -207,10 +207,10 @@ def main(
     os.makedirs(opt, exist_ok=True)
     merged_path = osp.join(opt, "6-name2semantic.tsv")
 
-    with open(inp_list, "r", encoding="utf8") as f:
+    with open(inp_list, encoding="utf8") as f:
         raw_lines = [ln for ln in f.read().splitlines() if ln.strip()]
 
-    tasks_all: List[Tuple[int, str]] = []
+    tasks_all: list[tuple[int, str]] = []
     for idx, line in enumerate(raw_lines):
         try:
             wav_name = parse_inp_text_line(line)
@@ -228,15 +228,15 @@ def main(
     device_strs = build_device_strings(device, device_ids, nproc)
     world_size = len(device_strs)
 
-    tasks_q: "tmp.Queue[Tuple[int, str] | None]" = tmp.Queue()
-    results_q: "tmp.Queue[Tuple[int, str]]" = tmp.Queue()
+    tasks_q: tmp.Queue[tuple[int, str] | None] = tmp.Queue()
+    results_q: tmp.Queue[tuple[int, str]] = tmp.Queue()
 
     for task in tasks_all:
         tasks_q.put(task)
     for _ in range(world_size):
         tasks_q.put(None)
 
-    ordered: List[str] = [""] * n_tasks
+    ordered: list[str] = [""] * n_tasks
     completed = 0
 
     with Progress(

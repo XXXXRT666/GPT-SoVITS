@@ -1,8 +1,10 @@
-from typing import Callable, Protocol, TypeVar, cast
+from collections.abc import Callable
+from typing import Protocol, TypeVar, cast
 
 import torch
 import torch.nn.functional as F
 from typing_extensions import ParamSpec
+
 
 P = ParamSpec("P")
 R = TypeVar("R")

@@ -2,7 +2,7 @@
 
 import os
 import pickle
-from typing import Callable, Text
+from collections.abc import Callable
 
 from pypinyin.constants import RE_HANS, Style
 from pypinyin.contrib.tone_convert import to_tone
@@ -12,7 +12,8 @@ from pypinyin.seg.simpleseg import simple_seg
 
 from .converter import G2PWConverter
 
-TErrors = Callable[[Text], Text] | Text
+
+TErrors = Callable[[str], str] | str
 
 current_file_path = os.path.dirname(__file__)
 CACHE_PATH = os.path.join(current_file_path, "polyphonic.pickle")
@@ -46,13 +47,13 @@ class G2PWPinyin(Pinyin):
 
 class Converter(UltimateConverter):
     def __init__(self, g2pw_instance, v_to_u=False, neutral_tone_with_five=False, tone_sandhi=False, **kwargs):
-        super(Converter, self).__init__(
+        super().__init__(
             v_to_u=v_to_u, neutral_tone_with_five=neutral_tone_with_five, tone_sandhi=tone_sandhi, **kwargs
         )
 
         self._g2pw = g2pw_instance
 
-    def convert(self, words: Text, style: Style, heteronym: bool, errors: TErrors, strict: bool = False, **kwargs):
+    def convert(self, words: str, style: Style, heteronym: bool, errors: TErrors, strict: bool = False, **kwargs):
         pys = []
         if RE_HANS.match(words):
             pys = self._to_pinyin(words, style=style, heteronym=heteronym, errors=errors, strict=strict)
@@ -75,11 +76,11 @@ class Converter(UltimateConverter):
         g2pw_pinyin = self._g2pw(han)
 
         if not g2pw_pinyin:  # g2pw 不支持的汉字改为使用 pypinyin 原有逻辑
-            return super(Converter, self).convert(han, Style.TONE, heteronym, errors, strict, **kwargs)
+            return super().convert(han, Style.TONE, heteronym, errors, strict, **kwargs)
 
         for i, item in enumerate(g2pw_pinyin[0]):
             if item is None:  # g2pw 不支持的汉字改为使用 pypinyin 原有逻辑
-                py = super(Converter, self).convert(han[i], Style.TONE, heteronym, errors, strict, **kwargs)
+                py = super().convert(han[i], Style.TONE, heteronym, errors, strict, **kwargs)
                 pinyins.extend(py)
             else:
                 pinyins.append([to_tone(item)])

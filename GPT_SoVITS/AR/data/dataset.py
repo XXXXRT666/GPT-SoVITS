@@ -1,10 +1,8 @@
 # modified from https://github.com/yangdongchao/SoundStorm/blob/master/soundstorm/s1/AR/data/dataset.py
 # reference: https://github.com/lifeiteng/vall-e
 
-# sys.path.append("/data/docker/liujing04/gpt-vits/mq-vits-s1bert_no_bert")
 import os
 import traceback
-from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -13,12 +11,11 @@ from torch.utils.data import DataLoader, Dataset
 
 from GPT_SoVITS.text import cleaned_text_to_sequence
 
+
 version = os.environ.get("version", None)
 
-# from config import exp_dir
 
-
-def batch_sequences(sequences: List[np.array], axis: int = 0, pad_value: int = 0):
+def batch_sequences(sequences: list[np.ndarray], axis: int = 0, pad_value: int = 0):
     seq = sequences[0]
     ndim = seq.ndim
     if axis < 0:
@@ -29,7 +26,7 @@ def batch_sequences(sequences: List[np.array], axis: int = 0, pad_value: int = 0
     max_length = np.max(seq_lengths)
 
     padded_sequences = []
-    for seq, length in zip(sequences, seq_lengths):
+    for seq, length in zip(sequences, seq_lengths, strict=False):
         padding = [(0, 0)] * axis + [(0, max_length - length)] + [(0, 0)] * (ndim - axis - 1)
         padded_seq = np.pad(seq, padding, mode="constant", constant_values=pad_value)
         padded_sequences.append(padded_seq)
@@ -61,7 +58,7 @@ class Text2SemanticDataset(Dataset):
         )
         # get dict
         self.path2 = phoneme_path  # "%s/2-name2text.txt"%exp_dir#phoneme_path
-        self.path3 = "%s/3-bert" % (
+        self.path3 = "{}/3-bert".format(
             os.path.dirname(
                 phoneme_path,
             )
@@ -70,7 +67,7 @@ class Text2SemanticDataset(Dataset):
         assert os.path.exists(self.path2)
         assert os.path.exists(self.path6)
         self.phoneme_data = {}
-        with open(self.path2, "r", encoding="utf8") as f:
+        with open(self.path2, encoding="utf8") as f:
             lines = f.read().strip("\n").split("\n")
 
         for line in lines:
@@ -205,13 +202,13 @@ class Text2SemanticDataset(Dataset):
         # 345410 for LibriTTS
         print("dataset.__len__():", self.__len__())
 
-    def __get_item_names__(self) -> List[str]:
+    def __get_item_names__(self) -> list[str]:
         return self.item_names
 
     def __len__(self) -> int:
         return len(self.semantic_phoneme)
 
-    def __getitem__(self, idx: int) -> Dict:
+    def __getitem__(self, idx: int) -> dict:
         semantic_ids, phoneme_ids = self.semantic_phoneme[idx]
         item_name = self.item_names[idx]
         phoneme_ids_len = len(phoneme_ids)
@@ -219,7 +216,7 @@ class Text2SemanticDataset(Dataset):
         semantic_ids_len = len(semantic_ids)
 
         flag = 0
-        path_bert = "%s/%s.pt" % (self.path3, item_name)
+        path_bert = f"{self.path3}/{item_name}.pt"
         if os.path.exists(path_bert) is True:
             bert_feature = torch.load(path_bert, map_location="cpu")
         else:
@@ -243,12 +240,12 @@ class Text2SemanticDataset(Dataset):
         sec = 1.0 * len(semantic_ids) / self.hz
         return sec
 
-    def collate(self, examples: List[Dict]) -> Dict:
-        sample_index: List[int] = []
-        phoneme_ids: List[torch.Tensor] = []
-        phoneme_ids_lens: List[int] = []
-        semantic_ids: List[torch.Tensor] = []
-        semantic_ids_lens: List[int] = []
+    def collate(self, examples: list[dict]) -> dict:
+        sample_index: list[int] = []
+        phoneme_ids: list[torch.Tensor] = []
+        phoneme_ids_lens: list[int] = []
+        semantic_ids: list[torch.Tensor] = []
+        semantic_ids_lens: list[int] = []
         # return
 
         for item in examples:
@@ -272,7 +269,7 @@ class Text2SemanticDataset(Dataset):
 
         for idx, item in enumerate(examples):
             bert = item["bert_feature"]
-            if bert != None:
+            if bert is not None:
                 bert_padded[idx, :, : bert.shape[-1]] = bert
 
         return {
@@ -305,7 +302,7 @@ if __name__ == "__main__":
         collate_fn=dataset.collate,
         shuffle=False,
     )
-    for i, batch in enumerate(dataloader):
+    for i, _batch in enumerate(dataloader):
         if i % 1000 == 0:
             print(i)
         # if i == 0:

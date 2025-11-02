@@ -1,12 +1,11 @@
 import argparse
-import asyncio
 import contextlib
 import gc
 import logging
 import os
-import traceback
 import warnings
-from functools import partial
+from collections import OrderedDict
+from functools import lru_cache, partial
 from pathlib import Path
 from time import perf_counter as ttime
 from typing import Any
@@ -19,6 +18,7 @@ import regex as re
 import torch
 import torchaudio
 from peft import LoraConfig, get_peft_model
+from rich_argparse import RawDescriptionRichHelpFormatter
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 import GPT_SoVITS.text.g2pw.converter
@@ -26,13 +26,10 @@ from config import (
     change_choices,
     get_dtype,
     get_weights_names,
+    infer_device as default_device,
     pretrained_sovits_name,
 )
-from config import (
-    infer_device as default_device,
-)
 from GPT_SoVITS.Accel import MLX, PyTorch, T2SEngineProtocol, T2SRequest, backends
-from GPT_SoVITS.Accel.logger import console
 from GPT_SoVITS.feature_extractor import cnhubert
 from GPT_SoVITS.module.mel_processing import mel_spectrogram_torch, spectrogram_torch
 from GPT_SoVITS.module.models import Generator, SynthesizerTrn, SynthesizerTrnV3
@@ -41,12 +38,11 @@ from GPT_SoVITS.sv import SV
 from GPT_SoVITS.text import cleaned_text_to_sequence
 from GPT_SoVITS.text.cleaner import clean_text
 from GPT_SoVITS.text.LangSegmenter import LangSegmenter
-from tools.assets import css, js, top_html
-from tools.i18n.i18n import I18nAuto, scan_language_list
-from tools.my_utils import DictToAttrRecursive
+from gsv_tools.assets import css, js, top_html
+from gsv_tools.i18n.i18n import I18nAuto, scan_language_list
+from gsv_tools.logger import console, format_sig, logger
+from gsv_tools.my_utils import DictToAttrRecursive
 
-with contextlib.suppress(ImportError):
-    import mlx.utils as mxutils
 
 warnings.filterwarnings(
     "ignore", message="MPS: The constant padding of more than 3 dimensions is not currently supported natively."
@@ -94,10 +90,17 @@ def none_or_str(value: str):
     return value
 
 
+BLUE = "\033[34m"
+RESET = "\033[0m"
+
+RawDescriptionRichHelpFormatter.styles["argparse.args"] = "blue"
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="inference_webui",
-        description=f"python -s -m GPT_SoVITS.inference_webui zh_CN -b {backends[-1]}",
+        description=f"{BLUE}python -s -m GPT_SoVITS.inference_webui zh_CN -b {backends[-1]}{RESET}",
+        formatter_class=RawDescriptionRichHelpFormatter,
     )
     p.add_argument(
         "language",
@@ -126,13 +129,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--device",
         "-d",
+        metavar="device_str",
         default=str(default_device),
-        help="Inference Device",
+        help="Inference Device, Such as 'cpu:0', 'cuda:0', 'mps:0'",
         required=False,
     )
     p.add_argument(
         "--port",
         "-p",
+        metavar="Int",
         default=9872,
         type=int,
         help="WebUI Binding Port",
@@ -148,24 +153,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--cnhubert",
+        metavar="Folder Path",
         default="GPT_SoVITS/pretrained_models/chinese-hubert-base",
         help="CNHuBERT Pretrain",
         required=False,
     )
     p.add_argument(
         "--bert",
+        metavar="Folder Path",
         default="GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
         help="BERT Pretrain",
         required=False,
     )
     p.add_argument(
         "--gpt",
+        metavar="File Path",
         default="",
         help="GPT Model",
         required=False,
     )
     p.add_argument(
         "--sovits",
+        metavar="File Path",
         default="",
         help="SoVITS Model",
         required=False,
@@ -302,7 +311,7 @@ def get_bert_feature(text, word2ph):
     return phone_level_feature_t.T
 
 
-async def change_sovits_weights(sovits_path, prompt_language=None, text_language=None):
+def change_sovits_weights(sovits_path, prompt_language=None, text_language=None):
     global vq_model, hps, version, model_version, dict_language
     model_version, version, is_lora, hps, dict_s2 = inspect_version(sovits_path)
     print(sovits_path, version, model_version, is_lora)
@@ -389,7 +398,7 @@ async def change_sovits_weights(sovits_path, prompt_language=None, text_language
         )
         vq_model.cfm = get_peft_model(vq_model.cfm, lora_config)  # type: ignore
         vq_model.load_state_dict(state_dict)
-        vq_model.cfm = vq_model.cfm.merge_and_unload()  # pyright: ignore[reportAttributeAccessIssue, reportCallIssue]
+        vq_model.cfm = vq_model.cfm.merge_and_unload()  # type: ignore
         vq_model.eval()
 
     vq_model = vq_model.to(infer_device, dtype)
@@ -407,11 +416,11 @@ async def change_sovits_weights(sovits_path, prompt_language=None, text_language
     )
 
 
-with contextlib.suppress(UnboundLocalError):
-    asyncio.run(anext(change_sovits_weights(sovits_path)))
+for _ in change_sovits_weights(sovits_path):
+    pass
 
 
-async def change_gpt_weights(gpt_path):
+def change_gpt_weights(gpt_path):
     global t2s_engine, config
     if "mlx" in ar_backend.lower():
         t2s_engine = MLX.T2SEngineMLX(
@@ -421,7 +430,7 @@ async def change_gpt_weights(gpt_path):
             cache_size=1,
         )
         # t2s_engine.decoder_model.compile()
-        total = sum((p[-1].size for p in mxutils.tree_flatten(t2s_engine.decoder_model.parameters())))  # type: ignore
+        total = sum(p[-1].size for p in MLX.mxutils.tree_flatten(t2s_engine.decoder_model.parameters()))  # type: ignore
     else:
         t2s_engine = PyTorch.T2SEngineTorch(
             PyTorch.T2SEngineTorch.load_decoder(Path(gpt_path), backend=ar_backend, quantize_mode=args.quantization),
@@ -434,7 +443,7 @@ async def change_gpt_weights(gpt_path):
     console.print(">> Number of parameter: %.2fM" % (total / 1e6))
 
 
-asyncio.run(change_gpt_weights(gpt_path))
+change_gpt_weights(gpt_path)
 
 
 def clean_hifigan_model():
@@ -524,15 +533,15 @@ if model_version == "v4":
 if model_version in {"v2Pro", "v2ProPlus"}:
     init_sv_cn()
 
-resample_transform_dict = {}
+
+@lru_cache
+def get_resample_transform(sr0: int, sr1: int):
+    return torchaudio.transforms.Resample(sr0, sr1)
 
 
 def resample(audio_tensor, sr0, sr1, device):
-    global resample_transform_dict
-    key = f"{sr0}-{sr1}-{device}"
-    if key not in resample_transform_dict:
-        resample_transform_dict[key] = torchaudio.transforms.Resample(sr0, sr1).to(device)
-    return resample_transform_dict[key](audio_tensor)
+    resample_transform = get_resample_transform(sr0, sr1).to(device)
+    return resample_transform(audio_tensor)
 
 
 def get_spepc(hps, filename, dtype, device, is_v2pro=False):
@@ -681,7 +690,7 @@ sr_model = None
 def audio_sr(audio, sr):
     global sr_model
     if sr_model is None:
-        from tools.audio_sr import AP_BWE
+        from gsv_tools.audio_sr import AP_BWE
 
         try:
             sr_model = AP_BWE(infer_device, DictToAttrRecursive)
@@ -694,7 +703,57 @@ def audio_sr(audio, sr):
 cache: dict[int, Any] = {}
 
 
-async def get_tts_wav(
+class PromptLRUCache:
+    def __init__(self, max_size: int):
+        self.max_size = max_size
+        self.data: OrderedDict[str, torch.Tensor] = OrderedDict()
+
+    def get(self, key: str):
+        if key in self.data:
+            self.data.move_to_end(key)
+            return self.data[key]
+        return None
+
+    def set(self, key: str, value: torch.Tensor):
+        if key in self.data:
+            self.data.move_to_end(key)
+        self.data[key] = value
+        if len(self.data) > self.max_size:
+            self.data.popitem(last=False)
+
+
+prompt_cache = PromptLRUCache(max_size=10)
+
+
+def process_prompt_audio(ref_wav_path: str, ref_free: bool, zero_wav_torch: torch.Tensor):
+    if not ref_free:
+        assert vq_model
+        wav16k, sr = librosa.load(ref_wav_path, sr=16000)
+        if wav16k.shape[0] > 160000 or wav16k.shape[0] < 48000:
+            gr.Warning(i18n("参考音频在3~10秒范围外, 请更换!"))
+            raise OSError(i18n("参考音频在3~10秒范围外, 请更换!"))
+        wav16k_t = torch.from_numpy(wav16k)
+        if is_half is True:
+            wav16k_t = wav16k_t.half().to(infer_device)
+        else:
+            wav16k_t = wav16k_t.to(infer_device)
+        if prompt_cache.get(ref_wav_path) is not None:
+            prompt = prompt_cache.get(ref_wav_path)
+            assert prompt is not None
+            return prompt
+        wav16k_t = torch.cat([wav16k_t, zero_wav_torch])
+        ssl_content = ssl_model.model(wav16k_t.unsqueeze(0))["last_hidden_state"].transpose(1, 2)  # .float()
+        codes = vq_model.extract_latent(ssl_content)
+        prompt_semantic: torch.Tensor = codes[0, 0]
+        prompt = prompt_semantic.unsqueeze(0).to(device)
+        prompt_cache.set(ref_wav_path, prompt)
+    else:
+        prompt = torch.zeros((1, 0)).to(device, torch.int32)
+
+    return prompt
+
+
+def get_tts_wav(
     ref_wav_path,
     prompt_text,
     prompt_language,
@@ -749,33 +808,12 @@ async def get_tts_wav(
     text = text.strip("\n")
 
     print(">>", i18n("实际输入的目标文本:"), text)
-    zero_wav = np.zeros(
+    zero_wav_torch = torch.zeros(
         int(hps.data.sampling_rate * pause_second),
-        dtype=np.float16 if is_half is True else np.float32,
-    )
-    zero_wav_torch = torch.from_numpy(zero_wav)
-    if is_half is True:
-        zero_wav_torch = zero_wav_torch.half().to(infer_device)
-    else:
-        zero_wav_torch = zero_wav_torch.to(infer_device)
-    if not ref_free:
-        assert vq_model
-        wav16k, sr = librosa.load(ref_wav_path, sr=16000)
-        if wav16k.shape[0] > 160000 or wav16k.shape[0] < 48000:
-            gr.Warning(i18n("参考音频在3~10秒范围外, 请更换!"))
-            raise OSError(i18n("参考音频在3~10秒范围外, 请更换!"))
-        wav16k_t = torch.from_numpy(wav16k)
-        if is_half is True:
-            wav16k_t = wav16k_t.half().to(infer_device)
-        else:
-            wav16k_t = wav16k_t.to(infer_device)
-        wav16k_t = torch.cat([wav16k_t, zero_wav_torch])
-        ssl_content = ssl_model.model(wav16k_t.unsqueeze(0))["last_hidden_state"].transpose(1, 2)  # .float()
-        codes = vq_model.extract_latent(ssl_content)
-        prompt_semantic = codes[0, 0]
-        prompt = prompt_semantic.unsqueeze(0).to(device)
-    else:
-        prompt = torch.zeros((1, 0)).to(device, torch.int32)
+        dtype=torch.float16 if is_half is True else torch.float32,
+    ).to(infer_device)
+
+    prompt = process_prompt_audio(ref_wav_path, ref_free, zero_wav_torch)
 
     t1 = ttime()
     t.append(t1 - t0)
@@ -837,7 +875,7 @@ async def get_tts_wav(
                 top_k=top_k,
                 top_p=top_p,
                 temperature=temperature,
-                early_stop_num=1500,
+                early_stop_num=1024,
                 use_cuda_graph=torch.cuda.is_available()
                 and torch.version.cuda is not None
                 and os.environ.get("CUDAGraph", "1") != "0",
@@ -871,9 +909,8 @@ async def get_tts_wav(
                         if is_v2pro:
                             assert sv_cn_model
                             sv_emb.append(sv_cn_model.compute_embedding(audio_tensor))
-                    except Exception as e:
-                        print(e)
-                        traceback.print_exc()
+                    except Exception:
+                        logger.bind(show_locals=False).exception(f"{path}")
             if len(refers) == 0:
                 refers, audio_tensor = get_spepc(hps, ref_wav_path, dtype, infer_device, is_v2pro)
                 refers = [refers]
@@ -957,7 +994,6 @@ async def get_tts_wav(
         audio_opt.append(zero_wav_torch)  # zero_wav
         t4 = ttime()
         t.extend([t2 - t1, t3 - t2, t4 - t3])
-        await asyncio.sleep(0)
         t1 = ttime()
 
     audio_opt_t = torch.cat(audio_opt, 0)  # np.concatenate
@@ -984,23 +1020,21 @@ async def get_tts_wav(
     infer_speed_avg = sum(infer_len) / sum(infer_time) if infer_time else 0
     rtf_value = sum(t) / (audio_opt_n.__len__() / opt_sr)
 
-    console.print(f">> Time Stamps: {t0:.4f}\t{t1:.4f}\t{t2:.4f}\t{t3:.4f}")
-    console.print(f">> Infer Speed: {infer_speed_avg:.4f} Token/s")
-    console.print(f">> RTF: {rtf_value:.4f}")
+    console.print(f">> Time Stamps: {format_sig(t0)}\t{format_sig(t1)}\t{format_sig(t2)}\t{format_sig(t3)}")
+    console.print(f">> Infer Speed: {format_sig(infer_speed_avg)} Token/s")
+    console.print(f">> RTF: {format_sig(rtf_value)}")
 
-    gr.Info(f"{infer_speed_avg:.4f} Token/s", title="Infer Speed")
-    gr.Info(f"{rtf_value:.4f}", title="RTF")
+    gr.Info(f"{format_sig(infer_speed_avg)} Token/s", title="Infer Speed")
+    gr.Info(f"{format_sig(rtf_value)}", title="RTF")
 
     if ttft_time > 2:
-        console.print(f">> TTFT: {ttft_time:.4f} s")
-        gr.Info(f"{ttft_time:.4f} s", title="TTFT")
+        console.print(f">> TTFT: {format_sig(ttft_time)} s")
+        gr.Info(f"{format_sig(ttft_time)} s", title="TTFT")
     else:
-        console.print(f">> TTFT: {ttft_time * 1000:.4f} ms")
-        gr.Info(f"{ttft_time * 1000:.4f} ms", title="TTFT")
+        console.print(f">> TTFT: {format_sig(ttft_time * 1000)} ms")
+        gr.Info(f"{format_sig(ttft_time * 1000)} ms", title="TTFT")
 
     yield opt_sr, (audio_opt_n * 32767).astype(np.int16)
-
-    gc.collect()
 
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -1085,7 +1119,7 @@ def cut4(inp):
 # contributed by https://github.com/AI-Hobbyist/GPT-SoVITS/blob/main/GPT_SoVITS/inference_webui.py
 def cut5(inp):
     inp = inp.strip("\n")
-    punds = {",", ".", ";", "?", "!", "、", "，", "。", "？", "！", ";", "：", "…"}
+    punds = {",", ".", ";", "?", "!", "、", "，", "。", "？", "！", "：", "…"}
     mergeitems = []
     items = []
 
@@ -1197,14 +1231,18 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
             inp_refs = (
                 gr.File(
                     label=i18n(
-                        "可选项: 通过拖拽多个文件上传多个参考音频 (建议同性), 平均融合他们的音色. 如不填写此项, 音色由左侧单个参考音频控制. 如是微调模型, 建议参考音频全部在微调训练集音色内, 底模不用管."
+                        "可选项: 通过拖拽多个文件上传多个参考音频 (建议同性), 平均融合他们的音色."
+                        "如不填写此项, 音色由左侧单个参考音频控制. "
+                        "如是微调模型, 建议参考音频全部在微调训练集音色内, 底模不用管."
                     ),
                     file_count="multiple",
                 )
                 if model_version not in v3v4set
                 else gr.File(
                     label=i18n(
-                        "可选项: 通过拖拽多个文件上传多个参考音频 (建议同性), 平均融合他们的音色. 如不填写此项, 音色由左侧单个参考音频控制. 如是微调模型, 建议参考音频全部在微调训练集音色内, 底模不用管."
+                        "可选项: 通过拖拽多个文件上传多个参考音频 (建议同性), 平均融合他们的音色."
+                        "如不填写此项, 音色由左侧单个参考音频控制."
+                        "如是微调模型, 建议参考音频全部在微调训练集音色内, 底模不用管."
                     ),
                     file_count="multiple",
                     visible=False,

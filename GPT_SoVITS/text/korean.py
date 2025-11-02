@@ -1,10 +1,8 @@
 # reference: https://github.com/ORI-Muchim/MB-iSTFT-VITS-Korean/blob/main/text/korean.py
 
-import importlib
 import os
 import re
 import shutil
-import sys
 
 import ko_pron
 from g2pk2 import G2p
@@ -12,47 +10,51 @@ from jamo import h2j, j2hcj
 
 from .symbols2 import symbols
 
+
 # 防止win下无法读取模型
 if os.name == "nt":
 
     class win_G2p(G2p):
         def check_mecab(self):
             super().check_mecab()
+            import importlib.util
+
             spam_spec = importlib.util.find_spec("eunjeon")
-            non_found = spam_spec is None
-            if non_found:
-                print("you have to install eunjeon. install it...")
-            else:
-                installpath = spam_spec.submodule_search_locations[0]
-                if not (re.match(r"^[A-Za-z0-9_/\\:.\-]*$", installpath)):
-                    from eunjeon import Mecab as _Mecab
+            assert spam_spec is not None
+            assert spam_spec is not None
+            assert spam_spec.submodule_search_locations is not None
+            installpath = spam_spec.submodule_search_locations[0]
+            if not (re.match(r"^[A-Za-z0-9_/\\:.\-]*$", installpath)):
+                import eunjeon
+                from eunjeon import Mecab as _Mecab  # type: ignore
 
-                    class Mecab(_Mecab):
-                        def get_dicpath(installpath):
-                            if not (re.match(r"^[A-Za-z0-9_/\\:.\-]*$", installpath)):
-                                python_dir = os.getcwd()
-                                if installpath[: len(python_dir)].upper() == python_dir.upper():
-                                    dicpath = os.path.join(os.path.relpath(installpath, python_dir), "data", "mecabrc")
-                                else:
-                                    if not os.path.exists("TEMP"):
-                                        os.mkdir("TEMP")
-                                    if not os.path.exists(os.path.join("TEMP", "ko")):
-                                        os.mkdir(os.path.join("TEMP", "ko"))
-                                    if os.path.exists(os.path.join("TEMP", "ko", "ko_dict")):
-                                        shutil.rmtree(os.path.join("TEMP", "ko", "ko_dict"))
-
-                                    shutil.copytree(
-                                        os.path.join(installpath, "data"), os.path.join("TEMP", "ko", "ko_dict")
-                                    )
-                                    dicpath = os.path.join("TEMP", "ko", "ko_dict", "mecabrc")
+                class Mecab(_Mecab):
+                    @staticmethod
+                    def get_dicpath(installpath):
+                        if not (re.match(r"^[A-Za-z0-9_/\\:.\-]*$", installpath)):
+                            python_dir = os.getcwd()
+                            if installpath[: len(python_dir)].upper() == python_dir.upper():
+                                dicpath = os.path.join(os.path.relpath(installpath, python_dir), "data", "mecabrc")
                             else:
-                                dicpath = os.path.abspath(os.path.join(installpath, "data/mecabrc"))
-                            return dicpath
+                                if not os.path.exists("TEMP"):
+                                    os.mkdir("TEMP")
+                                if not os.path.exists(os.path.join("TEMP", "ko")):
+                                    os.mkdir(os.path.join("TEMP", "ko"))
+                                if os.path.exists(os.path.join("TEMP", "ko", "ko_dict")):
+                                    shutil.rmtree(os.path.join("TEMP", "ko", "ko_dict"))
 
-                        def __init__(self, dicpath=get_dicpath(installpath)):
-                            super().__init__(dicpath=dicpath)
+                                shutil.copytree(
+                                    os.path.join(installpath, "data"), os.path.join("TEMP", "ko", "ko_dict")
+                                )
+                                dicpath = os.path.join("TEMP", "ko", "ko_dict", "mecabrc")
+                        else:
+                            dicpath = os.path.abspath(os.path.join(installpath, "data/mecabrc"))
+                        return dicpath
 
-                    sys.modules["eunjeon"].Mecab = Mecab
+                    def __init__(self, dicpath=get_dicpath(installpath)):
+                        super().__init__(dicpath=dicpath)
+
+                eunjeon.Mecab = Mecab  # type: ignore
 
     G2p = win_G2p
 
@@ -64,7 +66,7 @@ _korean_classifiers = (
 
 # List of (hangul, hangul divided) pairs:
 _hangul_divided = [
-    (re.compile("%s" % x[0]), x[1])
+    (re.compile(f"{x[0]}"), x[1])
     for x in [
         # ('ㄳ', 'ㄱㅅ'),   # g2pk2, A Syllable-ending Rule
         # ('ㄵ', 'ㄴㅈ'),
@@ -95,7 +97,7 @@ _hangul_divided = [
 
 # List of (Latin alphabet, hangul) pairs:
 _latin_to_hangul = [
-    (re.compile("%s" % x[0], re.IGNORECASE), x[1])
+    (re.compile(f"{x[0]}", re.IGNORECASE), x[1])
     for x in [
         ("a", "에이"),
         ("b", "비"),
@@ -128,7 +130,7 @@ _latin_to_hangul = [
 
 # List of (ipa, lazy ipa) pairs:
 _ipa_to_lazy_ipa = [
-    (re.compile("%s" % x[0], re.IGNORECASE), x[1])
+    (re.compile(f"{x[0]}", re.IGNORECASE), x[1])
     for x in [
         ("t͡ɕ", "ʧ"),
         ("d͡ʑ", "ʥ"),
@@ -190,12 +192,12 @@ def hangul_number(num, sino=True):
 
     digits = "123456789"
     names = "일이삼사오육칠팔구"
-    digit2name = {d: n for d, n in zip(digits, names)}
+    digit2name = {d: n for d, n in zip(digits, names, strict=False)}
 
     modifiers = "한 두 세 네 다섯 여섯 일곱 여덟 아홉"
     decimals = "열 스물 서른 마흔 쉰 예순 일흔 여든 아흔"
-    digit2mod = {d: mod for d, mod in zip(digits, modifiers.split())}
-    digit2dec = {d: dec for d, dec in zip(digits, decimals.split())}
+    digit2mod = {d: mod for d, mod in zip(digits, modifiers.split(), strict=False)}
+    digit2dec = {d: dec for d, dec in zip(digits, decimals.split(), strict=False)}
 
     spelledout = []
     for i, digit in enumerate(num):
@@ -271,7 +273,7 @@ def number_to_hangul(text):
     # digit by digit for remaining digits
     digits = "0123456789"
     names = "영일이삼사오육칠팔구"
-    for d, n in zip(digits, names):
+    for d, n in zip(digits, names, strict=False):
         text = text.replace(d, n)
     return text
 

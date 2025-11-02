@@ -22,10 +22,10 @@ else
 fi
 
 if [ "$TARGETPLATFORM" = "linux/amd64" ]; then
-    "${WGET_CMD[@]}" -O miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py311_25.3.1-1-Linux-x86_64.sh
+    "${WGET_CMD[@]}" -O miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py312_25.9.1-3-Linux-x86_64.sh
     SYSROOT_PKG="sysroot_linux-64>=2.28"
 elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then
-    "${WGET_CMD[@]}" -O miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py311_25.3.1-1-Linux-aarch64.sh
+    "${WGET_CMD[@]}" -O miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py312_25.9.1-3-Linux-aarch64.sh
     SYSROOT_PKG="sysroot_linux-aarch64>=2.28"
 else
     exit 1
@@ -55,15 +55,15 @@ source "$HOME/.bashrc"
 
 "$HOME/miniconda3/bin/conda" update -q --all -y 1>/dev/null
 
-"$HOME/miniconda3/bin/conda" install python=3.11 -q -y
+"$HOME/miniconda3/bin/conda" install python=3.12 -q -y
 
-"$HOME/miniconda3/bin/conda" install gcc=11 gxx ffmpeg cmake make unzip $SYSROOT_PKG "libstdcxx-ng>=11" -q -y
+"$HOME/miniconda3/bin/conda" install gcc gxx ffmpeg cmake make unzip $SYSROOT_PKG uv "libstdcxx-ng>=11" -q -y
 
 if [ "$CUDA_VERSION" = "12.8" ]; then
-    "$HOME/miniconda3/bin/pip" install torch torchao --no-cache-dir --index-url https://download.pytorch.org/whl/cu128
+    "$HOME/miniconda3/bin/uv" pip install ".[cu128]" --no-cache
     "$HOME/miniconda3/bin/conda" install cuda-nvcc=12.8 -c nvidia
 elif [ "$CUDA_VERSION" = "12.6" ]; then
-    "$HOME/miniconda3/bin/pip" install torch torchao --no-cache-dir --index-url https://download.pytorch.org/whl/cu126
+    "$HOME/miniconda3/bin/uv" pip install ".[cu126]" --no-cache
     "$HOME/miniconda3/bin/conda" install cuda-nvcc=12.6 -c nvidia
 fi
 
@@ -74,10 +74,8 @@ export PATH="$HOME/miniconda3/bin:$PATH"
 export PATH="$CUDA_HOME/bin:$PATH"
 export PATH="$CUDA_HOME/nvvm/bin:$PATH"
 
-"$HOME/miniconda3/bin/pip" install psutil ninja packaging wheel "setuptools>=42"
-"$HOME/miniconda3/bin/pip" install flash-attn -i https://xxxxrt666.github.io/PIP-Index/ --no-build-isolation
-
-"$HOME/miniconda3/bin/pip" cache purge
+"$HOME/miniconda3/bin/uv" pip install ".[flash-attn]" --no-cache
+"$HOME/miniconda3/bin/uv" cache clean
 
 rm $LOG_PATH
 

@@ -1,7 +1,6 @@
 # modified from https://github.com/yangdongchao/SoundStorm/blob/master/soundstorm/s1/AR/modules/lr_schedulers.py
 # reference: https://github.com/lifeiteng/vall-e
 import math
-from typing import Optional
 
 import torch
 from matplotlib import pyplot as plt
@@ -41,7 +40,7 @@ class WarmupCosineLRSchedule(torch.optim.lr_scheduler._LRScheduler):
         for g in self.optimizer.param_groups:
             g["lr"] = self.end_lr
 
-    def step(self, epoch: Optional[int] = None):
+    def step(self, epoch: int | None = None):
         if self._current_step < self.warmup_steps:
             lr = self.init_lr + self._warmup_rate * self._current_step
 
@@ -74,7 +73,7 @@ if __name__ == "__main__":
         current_step=0,
     )
     lrs = []
-    for i in range(25000):
+    for _i in range(25000):
         s.step()
         lrs.append(s.lr)
         print(s.lr)

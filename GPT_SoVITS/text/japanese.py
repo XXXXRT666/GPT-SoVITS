@@ -5,6 +5,7 @@ import re
 
 from .symbols import punctuation
 
+
 try:
     import pyopenjtalk
 
@@ -63,7 +64,7 @@ try:
     if os.path.exists(USERDIC_CSV_PATH):
         if (
             not os.path.exists(USERDIC_BIN_PATH)
-            or get_hash(USERDIC_CSV_PATH) != open(USERDIC_HASH_PATH, "r", encoding="utf-8").read()
+            or get_hash(USERDIC_CSV_PATH) != open(USERDIC_HASH_PATH, encoding="utf-8").read()
         ):
             pyopenjtalk.mecab_dict_index(USERDIC_CSV_PATH, USERDIC_BIN_PATH)
             with open(USERDIC_HASH_PATH, "w", encoding="utf-8") as f:
@@ -90,12 +91,12 @@ _japanese_marks = re.compile(
 )
 
 # List of (symbol, Japanese) pairs for marks:
-_symbols_to_japanese = [(re.compile("%s" % x[0]), x[1]) for x in [("％", "パーセント")]]
+_symbols_to_japanese = [(re.compile(f"{x[0]}"), x[1]) for x in [("％", "パーセント")]]
 
 
 # List of (consonant, sokuon) pairs:
 _real_sokuon = [
-    (re.compile("%s" % x[0]), x[1])
+    (re.compile(f"{x[0]}"), x[1])
     for x in [
         (r"Q([↑↓]*[kg])", r"k#\1"),
         (r"Q([↑↓]*[tdjʧ])", r"t#\1"),
@@ -106,7 +107,7 @@ _real_sokuon = [
 
 # List of (consonant, hatsuon) pairs:
 _real_hatsuon = [
-    (re.compile("%s" % x[0]), x[1])
+    (re.compile(f"{x[0]}"), x[1])
     for x in [
         (r"N([↑↓]*[pbm])", r"m\1"),
         (r"N([↑↓]*[ʧʥj])", r"n^\1"),

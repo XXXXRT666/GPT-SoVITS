@@ -10,136 +10,11 @@ d - dimension
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
-import torchaudio
-from librosa.filters import mel as librosa_mel_fn
 from torch import nn
 from x_transformers.x_transformers import apply_rotary_pos_emb
-
-# raw wav to mel spec
-
-
-mel_basis_cache = {}
-hann_window_cache = {}
-
-
-def get_bigvgan_mel_spectrogram(
-    waveform,
-    n_fft=1024,
-    n_mel_channels=100,
-    target_sample_rate=24000,
-    hop_length=256,
-    win_length=1024,
-    fmin=0,
-    fmax=None,
-    center=False,
-):  # Copy from https://github.com/NVIDIA/BigVGAN/tree/main
-    device = waveform.device
-    key = f"{n_fft}_{n_mel_channels}_{target_sample_rate}_{hop_length}_{win_length}_{fmin}_{fmax}_{device}"
-
-    if key not in mel_basis_cache:
-        mel = librosa_mel_fn(sr=target_sample_rate, n_fft=n_fft, n_mels=n_mel_channels, fmin=fmin, fmax=fmax)
-        mel_basis_cache[key] = torch.from_numpy(mel).float().to(device)  # TODO: why they need .float()?
-        hann_window_cache[key] = torch.hann_window(win_length).to(device)
-
-    mel_basis = mel_basis_cache[key]
-    hann_window = hann_window_cache[key]
-
-    padding = (n_fft - hop_length) // 2
-    waveform = torch.nn.functional.pad(waveform.unsqueeze(1), (padding, padding), mode="reflect").squeeze(1)
-
-    spec = torch.stft(
-        waveform,
-        n_fft,
-        hop_length=hop_length,
-        win_length=win_length,
-        window=hann_window,
-        center=center,
-        pad_mode="reflect",
-        normalized=False,
-        onesided=True,
-        return_complex=True,
-    )
-    spec = torch.sqrt(torch.view_as_real(spec).pow(2).sum(-1) + 1e-9)
-
-    mel_spec = torch.matmul(mel_basis, spec)
-    mel_spec = torch.log(torch.clamp(mel_spec, min=1e-5))
-
-    return mel_spec
-
-
-def get_vocos_mel_spectrogram(
-    waveform,
-    n_fft=1024,
-    n_mel_channels=100,
-    target_sample_rate=24000,
-    hop_length=256,
-    win_length=1024,
-):
-    mel_stft = torchaudio.transforms.MelSpectrogram(
-        sample_rate=target_sample_rate,
-        n_fft=n_fft,
-        win_length=win_length,
-        hop_length=hop_length,
-        n_mels=n_mel_channels,
-        power=1,
-        center=True,
-        normalized=False,
-        norm=None,
-    ).to(waveform.device)
-    if len(waveform.shape) == 3:
-        waveform = waveform.squeeze(1)  # 'b 1 nw -> b nw'
-
-    assert len(waveform.shape) == 2
-
-    mel = mel_stft(waveform)
-    mel = mel.clamp(min=1e-5).log()
-    return mel
-
-
-class MelSpec(nn.Module):
-    def __init__(
-        self,
-        n_fft=1024,
-        hop_length=256,
-        win_length=1024,
-        n_mel_channels=100,
-        target_sample_rate=24_000,
-        mel_spec_type="vocos",
-    ):
-        super().__init__()
-        assert mel_spec_type in ["vocos", "bigvgan"], print("We only support two extract mel backend: vocos or bigvgan")
-
-        self.n_fft = n_fft
-        self.hop_length = hop_length
-        self.win_length = win_length
-        self.n_mel_channels = n_mel_channels
-        self.target_sample_rate = target_sample_rate
-
-        if mel_spec_type == "vocos":
-            self.extractor = get_vocos_mel_spectrogram
-        elif mel_spec_type == "bigvgan":
-            self.extractor = get_bigvgan_mel_spectrogram
-
-        self.register_buffer("dummy", torch.tensor(0), persistent=False)
-
-    def forward(self, wav):
-        if self.dummy.device != wav.device:
-            self.to(wav.device)
-
-        mel = self.extractor(
-            waveform=wav,
-            n_fft=self.n_fft,
-            n_mel_channels=self.n_mel_channels,
-            target_sample_rate=self.target_sample_rate,
-            hop_length=self.hop_length,
-            win_length=self.win_length,
-        )
-
-        return mel
 
 
 # sinusoidal position embedding
@@ -339,7 +214,7 @@ class Attention(nn.Module):
         heads: int = 8,
         dim_head: int = 64,
         dropout: float = 0.0,
-        context_dim: Optional[int] = None,  # if not None -> joint attention
+        context_dim: int | None = None,  # if not None -> joint attention
         context_pre_only=None,
     ):
         super().__init__()
@@ -658,7 +533,7 @@ class TimestepEmbedding(nn.Module):
         self.time_embed = SinusPositionEmbedding(freq_embed_dim)
         self.time_mlp = nn.Sequential(nn.Linear(freq_embed_dim, dim), nn.SiLU(), nn.Linear(dim, dim))
 
-    def forward(self, timestep: float["b"]):  # noqa: F821
+    def forward(self, timestep: float[b]):  # noqa: F821
         time_hidden = self.time_embed(timestep)
         time_hidden = time_hidden.to(timestep.dtype)
         time = self.time_mlp(time_hidden)  # b d

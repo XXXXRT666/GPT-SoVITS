@@ -19,7 +19,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 import GPT_SoVITS.utils as utils
 from GPT_SoVITS.Accel import console, logger
-from GPT_SoVITS.Accel.logger import SpeedColumnIteration
 from GPT_SoVITS.module import commons
 from GPT_SoVITS.module.data_utils import (
     DistributedBucketSampler,
@@ -33,6 +32,8 @@ from GPT_SoVITS.module.models import (
     SynthesizerTrn,
 )
 from GPT_SoVITS.process_ckpt import save_ckpt
+from gsv_tools.logger import SpeedColumnIteration, timer
+
 
 logging.getLogger("matplotlib").setLevel(logging.INFO)
 logging.getLogger("h5py").setLevel(logging.INFO)
@@ -53,11 +54,26 @@ global_step = 0
 if torch.cuda.is_available():
     device_str = "cuda"
 elif torch.mps.is_available():
-    device_str = "mps"
+    device_str = "cpu"
+    hps.train.fp16_run = False  # type: ignore
 else:
     device_str = "cpu"
 
 multigpu = torch.cuda.device_count() > 1 if torch.cuda.is_available() else False
+
+
+def synchronize_device(device: torch.device) -> None:
+    match device.type:
+        case "cuda":
+            torch.cuda.synchronize()
+        case "mps":
+            torch.mps.synchronize()
+        case "xpu":
+            torch.xpu.synchronize()
+        case "mtia":
+            torch.mtia.synchronize()
+        case "cpu":
+            pass
 
 
 def main():
@@ -82,6 +98,7 @@ def main():
 
 def run(rank, n_gpus, hps):
     global global_step
+    torch.set_grad_enabled(True)
     device = torch.device(f"{device_str}:{rank}")
 
     if rank == 0:
@@ -163,6 +180,12 @@ def run(rank, n_gpus, hps):
         version=hps.model.version,
     ).to(device)
 
+    if torch.cuda.is_available() and platform.system() != "Windows":
+        torch._dynamo.config.compiled_autograd = True
+
+        net_g.compile()
+        net_d.compile()
+
     for name, param in net_g.named_parameters():
         if not param.requires_grad:
             console.print(name, "not requires_grad")
@@ -235,7 +258,7 @@ def run(rank, n_gpus, hps):
                 logger.info(f"loaded pretrained {hps.train.pretrained_s2G}")
             console.print(
                 f"loaded pretrained {hps.train.pretrained_s2G}",
-                net_g.module.load_state_dict(
+                net_g.module.load_state_dict(  # type: ignore
                     torch.load(hps.train.pretrained_s2G, map_location="cpu")["weight"],
                     strict=False,
                 )
@@ -254,7 +277,7 @@ def run(rank, n_gpus, hps):
                 logger.info(f"loaded pretrained {hps.train.pretrained_s2D}")
             console.print(
                 f"loaded pretrained {hps.train.pretrained_s2D}",
-                net_d.module.load_state_dict(
+                net_d.module.load_state_dict(  # type: ignore
                     torch.load(hps.train.pretrained_s2D, map_location="cpu")["weight"], strict=False
                 )
                 if multigpu
@@ -305,7 +328,7 @@ def run(rank, n_gpus, hps):
                 completed=int(epoch_str) - 1,
             )
         else:
-            epoch_task = step_task = None
+            epoch_task = None
 
         for epoch in range(epoch_str, hps.train.epochs + 1):
             if rank == 0:
@@ -349,19 +372,18 @@ def run(rank, n_gpus, hps):
 
 def train_and_evaluate(
     device: torch.device,
-    epoch,
+    epoch: int,
     hps,
     nets,
-    optims,
+    optims: tuple[torch.optim.Optimizer, torch.optim.Optimizer],
     schedulers,
-    scaler,
+    scaler: GradScaler,
     loaders,
     logger,
     writers,
 ):
     net_g, net_d = nets
     optim_g, optim_d = optims
-    # scheduler_g, scheduler_d = schedulers
     train_loader, eval_loader = loaders
     writer, writer_eval = writers
 
@@ -391,159 +413,198 @@ def train_and_evaluate(
         else:
             step_task = None
 
-        for batch_idx, data in enumerate(train_loader):
-            if hps.model.version in {"v2Pro", "v2ProPlus"}:
-                ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths, sv_emb = data
-                ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths, sv_emb = map(
-                    lambda x: x.to(device, non_blocking=True),
-                    (ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths, sv_emb),
-                )
-            else:
-                ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths = data
-                ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths = map(
-                    lambda x: x.to(device, non_blocking=True),
-                    (ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths),
-                )
-                sv_emb = None
-            ssl.requires_grad = False
+        REQUIRES_GRAD = False  # Not Acc if True
+        DEBUG = os.environ.get("DEBUG", "0") == "1"
 
-            with autocast(device_type=device.type, dtype=torch.float16, enabled=hps.train.fp16_run):
-                if hps.model.version in {"v2Pro", "v2ProPlus"}:
-                    (y_hat, kl_ssl, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q), stats_ssl) = net_g(
-                        ssl, spec, spec_lengths, text, text_lengths, sv_emb
-                    )
-                else:
-                    (
-                        y_hat,
-                        kl_ssl,
-                        ids_slice,
-                        x_mask,
-                        z_mask,
-                        (z, z_p, m_p, logs_p, m_q, logs_q),
-                        stats_ssl,
-                    ) = net_g(ssl, spec, spec_lengths, text, text_lengths)
-
-                mel = spec_to_mel_torch(
-                    spec,
-                    hps.data.filter_length,
-                    hps.data.n_mel_channels,
-                    hps.data.sampling_rate,
-                    hps.data.mel_fmin,
-                    hps.data.mel_fmax,
-                )
-                y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
-                y_hat_mel = mel_spectrogram_torch(
-                    y_hat.squeeze(1),
-                    hps.data.filter_length,
-                    hps.data.n_mel_channels,
-                    hps.data.sampling_rate,
-                    hps.data.hop_length,
-                    hps.data.win_length,
-                    hps.data.mel_fmin,
-                    hps.data.mel_fmax,
-                )
-
-                y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size)  # slice
-
-                # Discriminator
-                y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
-                with autocast(device_type=device.type, enabled=False):
-                    loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
-                        y_d_hat_r,
-                        y_d_hat_g,
-                    )
-                    loss_disc_all = loss_disc
-
-            optim_d.zero_grad()
-            scaler.scale(loss_disc_all).backward()
-            scaler.unscale_(optim_d)
-            grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
-            scaler.step(optim_d)
-
-            with autocast(device_type=device.type, dtype=torch.float16, enabled=hps.train.fp16_run):
-                # Generator
-                y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
-                with autocast(device_type=device.type, enabled=False):
-                    loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
-                    loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
-
-                    loss_fm = feature_loss(fmap_r, fmap_g)
-                    loss_gen, losses_gen = generator_loss(y_d_hat_g)
-                    loss_gen_all = loss_gen + loss_fm + loss_mel + kl_ssl * 1 + loss_kl
-
-            optim_g.zero_grad()
-            scaler.scale(loss_gen_all).backward()
-            scaler.unscale_(optim_g)
-            grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
-            scaler.step(optim_g)
-            scaler.update()
-
-            if device.index == 0 and progress is not None and step_task is not None:
-                progress.advance(step_task, 1)
-
-            if device.index == 0:
-                if global_step % hps.train.log_interval == 0:
-                    lr = optim_g.param_groups[0]["lr"]
-                    losses = [loss_disc, loss_gen, loss_fm, loss_mel, kl_ssl, loss_kl]
-                    logger.info(
-                        "Train Epoch: {} [{:.0f}%]".format(
-                            epoch,
-                            100.0 * batch_idx / len(train_loader),
-                        )
-                    )
-                    logger.info([x.item() for x in losses] + [global_step, lr])
-
-                    scalar_dict = {
-                        "loss/g/total": loss_gen_all,
-                        "loss/d/total": loss_disc_all,
-                        "learning_rate": lr,
-                        "grad_norm_d": grad_norm_d,
-                        "grad_norm_g": grad_norm_g,
-                    }
-                    scalar_dict.update(
-                        {
-                            "loss/g/fm": loss_fm,
-                            "loss/g/mel": loss_mel,
-                            "loss/g/kl_ssl": kl_ssl,
-                            "loss/g/kl": loss_kl,
-                        }
-                    )
-
-                    # scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
-                    # scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
-                    # scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
-                    image_dict = None
-                    try:  # Some people installed the wrong version of matplotlib.
-                        image_dict = {
-                            "slice/mel_org": utils.plot_spectrogram_to_numpy(
-                                y_mel[0].data.cpu().numpy(),
-                            ),
-                            "slice/mel_gen": utils.plot_spectrogram_to_numpy(
-                                y_hat_mel[0].data.cpu().numpy(),
-                            ),
-                            "all/mel": utils.plot_spectrogram_to_numpy(
-                                mel[0].data.cpu().numpy(),
-                            ),
-                            "all/stats_ssl": utils.plot_spectrogram_to_numpy(
-                                stats_ssl[0].data.cpu().numpy(),
-                            ),
-                        }
-                    except Exception as _:
-                        pass
-                    if image_dict:
-                        utils.summarize(
-                            writer=writer,
-                            global_step=global_step,
-                            images=image_dict,
-                            scalars=scalar_dict,
+        with timer("Epoch Train", debug=DEBUG):
+            train_loader = iter(train_loader)
+            for batch_idx in range(len(train_loader)):
+                if batch_idx == 1 and epoch == 1 and DEBUG:
+                    timer.summary()
+                    timer.clear()
+                with timer("dataloader", debug=DEBUG):
+                    data = next(train_loader)
+                # for batch_idx, data in enumerate(train_loader):
+                with timer("cpu to gpu", debug=DEBUG):
+                    if hps.model.version in {"v2Pro", "v2ProPlus"}:
+                        ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths, sv_emb = data
+                        ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths, sv_emb = map(
+                            lambda x: x.to(device, non_blocking=True),
+                            (ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths, sv_emb),
                         )
                     else:
-                        utils.summarize(
-                            writer=writer,
-                            global_step=global_step,
-                            scalars=scalar_dict,
+                        ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths = data
+                        ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths = map(
+                            lambda x: x.to(device, non_blocking=True),
+                            (ssl, ssl_lengths, spec, spec_lengths, y, y_lengths, text, text_lengths),
                         )
-            global_step += 1
+                        sv_emb = None
+                    if DEBUG:
+                        synchronize_device(device)
+                with autocast(device_type=device.type, dtype=torch.float16, enabled=hps.train.fp16_run):
+                    with timer("Generator.forward", debug=DEBUG):
+                        if hps.model.version in {"v2Pro", "v2ProPlus"}:
+                            (
+                                y_hat,
+                                kl_ssl,
+                                ids_slice,
+                                x_mask,
+                                z_mask,
+                                (z, z_p, m_p, logs_p, m_q, logs_q),
+                                stats_ssl,
+                            ) = net_g(ssl, spec, spec_lengths, text, text_lengths, sv_emb)
+                        else:
+                            (
+                                y_hat,
+                                kl_ssl,
+                                ids_slice,
+                                x_mask,
+                                z_mask,
+                                (z, z_p, m_p, logs_p, m_q, logs_q),
+                                stats_ssl,
+                            ) = net_g(ssl, spec, spec_lengths, text, text_lengths)
+                        if DEBUG:
+                            synchronize_device(device)
+
+                    with timer("MEL", debug=DEBUG):
+                        mel = spec_to_mel_torch(
+                            spec,
+                            hps.data.filter_length,
+                            hps.data.n_mel_channels,
+                            hps.data.sampling_rate,
+                            hps.data.mel_fmin,
+                            hps.data.mel_fmax,
+                        )
+                        y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
+                        y_hat_mel = mel_spectrogram_torch(
+                            y_hat.squeeze(1),
+                            hps.data.filter_length,
+                            hps.data.n_mel_channels,
+                            hps.data.sampling_rate,
+                            hps.data.hop_length,
+                            hps.data.win_length,
+                            hps.data.mel_fmin,
+                            hps.data.mel_fmax,
+                        )
+
+                        y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size)  # slice
+                        torch.mps.synchronize()
+
+                    # Discriminator
+                    with timer("Discriminator.forward", debug=DEBUG):
+                        y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
+                        with autocast(device_type=device.type, enabled=False):
+                            loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(
+                                y_d_hat_r,
+                                y_d_hat_g,
+                            )
+                            loss_disc_all = loss_disc
+                        if DEBUG:
+                            synchronize_device(device)
+
+                with timer("Discriminator.backward", debug=DEBUG):
+                    optim_d.zero_grad()
+                    scaler.scale(loss_disc_all).backward()
+                    scaler.unscale_(optim_d)
+                    if DEBUG:
+                        synchronize_device(device)
+
+                grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
+                scaler.step(optim_d)
+
+                with autocast(device_type=device.type, dtype=torch.float16, enabled=hps.train.fp16_run):
+                    # Generator
+                    if not REQUIRES_GRAD:
+                        net_d.module.requires_grad_(False) if multigpu else net_d.requires_grad_(False)
+                    with timer("Discriminator.forward 2", debug=DEBUG):
+                        y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
+                        with autocast(device_type=device.type, enabled=False):
+                            loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
+                            loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
+
+                            loss_fm = feature_loss(fmap_r, fmap_g)
+                            loss_gen, losses_gen = generator_loss(y_d_hat_g)
+                            loss_gen_all = loss_gen + loss_fm + loss_mel + kl_ssl * 1 + loss_kl
+                        if DEBUG:
+                            synchronize_device(device)
+
+                with timer("Generator.backward", debug=DEBUG):
+                    optim_g.zero_grad()
+                    scaler.scale(loss_gen_all).backward()
+                    scaler.unscale_(optim_g)
+                    grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
+                    if DEBUG:
+                        synchronize_device(device)
+
+                scaler.step(optim_g)
+                scaler.update()
+
+                if not REQUIRES_GRAD:
+                    net_d.module.requires_grad_(True) if multigpu else net_d.requires_grad_(True)
+
+                if device.index == 0 and progress is not None and step_task is not None:
+                    progress.advance(step_task, 1)
+
+                if device.index == 0:
+                    if global_step % hps.train.log_interval == 0:
+                        lr = optim_g.param_groups[0]["lr"]
+                        losses = [loss_disc, loss_gen, loss_fm, loss_mel, kl_ssl, loss_kl]
+                        logger.info(f"Train Epoch: {epoch} [{100.0 * batch_idx / len(train_loader):.0f}%]")
+                        logger.info([x.item() for x in losses] + [global_step, lr])
+
+                        scalar_dict = {
+                            "loss/g/total": loss_gen_all,
+                            "loss/d/total": loss_disc_all,
+                            "learning_rate": lr,
+                            "grad_norm_d": grad_norm_d,
+                            "grad_norm_g": grad_norm_g,
+                        }
+                        scalar_dict.update(
+                            {
+                                "loss/g/fm": loss_fm,
+                                "loss/g/mel": loss_mel,
+                                "loss/g/kl_ssl": kl_ssl,
+                                "loss/g/kl": loss_kl,
+                            }
+                        )
+
+                        # scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
+                        # scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
+                        # scalar_dict.update({"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)})
+                        image_dict = None
+                        try:  # Some people installed the wrong version of matplotlib.
+                            image_dict = {
+                                "slice/mel_org": utils.plot_spectrogram_to_numpy(
+                                    y_mel[0].data.cpu().numpy(),
+                                ),
+                                "slice/mel_gen": utils.plot_spectrogram_to_numpy(
+                                    y_hat_mel[0].data.cpu().numpy(),
+                                ),
+                                "all/mel": utils.plot_spectrogram_to_numpy(
+                                    mel[0].data.cpu().numpy(),
+                                ),
+                                "all/stats_ssl": utils.plot_spectrogram_to_numpy(
+                                    stats_ssl[0].data.cpu().numpy(),
+                                ),
+                            }
+                        except Exception as _:
+                            pass
+                        if image_dict:
+                            utils.summarize(
+                                writer=writer,
+                                global_step=global_step,
+                                images=image_dict,
+                                scalars=scalar_dict,
+                            )
+                        else:
+                            utils.summarize(
+                                writer=writer,
+                                global_step=global_step,
+                                scalars=scalar_dict,
+                            )
+                    global_step += 1
+    if DEBUG:
+        timer.summary()
 
     if hps.train.if_save_latest == 0:
         utils.save_checkpoint(
@@ -594,7 +655,7 @@ def train_and_evaluate(
 
     if epoch % hps.train.save_every_epoch == 0 and device.index == 0:
         if hps.train.if_save_every_weights is True:
-            if hasattr(net_g, "module"):
+            if multigpu:
                 ckpt = net_g.module.state_dict()
             else:
                 ckpt = net_g.state_dict()
@@ -616,7 +677,7 @@ def evaluate(hps, generator, eval_loader, writer_eval, device):
     with torch.no_grad():
         for batch_idx, (
             ssl,
-            ssl_lengths,
+            _ssl_lengths,
             spec,
             spec_lengths,
             y,

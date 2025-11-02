@@ -6,7 +6,6 @@ import sys
 import time
 import warnings
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 import torch
@@ -17,10 +16,11 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from scipy.io import wavfile
 from torch.multiprocessing.spawn import spawn
 
-from GPT_SoVITS.Accel.logger import SpeedColumnIteration, console, logger
 from GPT_SoVITS.eres2net.ERes2NetV2 import ERes2NetV2
 from GPT_SoVITS.feature_extractor import cnhubert as cnhubert_mod
-from tools.my_utils import clean_path, load_audio
+from gsv_tools.logger import SpeedColumnIteration, console, logger
+from gsv_tools.my_utils import clean_path, load_audio
+
 
 warnings.filterwarnings("ignore", message=".*ComplexHalf support is experimental.*")
 
@@ -75,8 +75,8 @@ def parse_inp_text_line(line: str) -> str:
     return wav_name
 
 
-def build_device_strings(device_type: str, device_ids: List[int], procs_per_device: int) -> List[str]:
-    devices: List[str] = []
+def build_device_strings(device_type: str, device_ids: list[int], procs_per_device: int) -> list[str]:
+    devices: list[str] = []
     for device_id in device_ids:
         dstr = f"{device_type}:{device_id}"
         devices.extend([dstr] * procs_per_device)
@@ -85,11 +85,11 @@ def build_device_strings(device_type: str, device_ids: List[int], procs_per_devi
 
 def worker_entry(
     rank: int,
-    device_strs: List[str],
+    device_strs: list[str],
     tasks_q: "tmp.Queue[tuple[int, str] | None]",
     results_q: "tmp.Queue[int]",
     cnhubert_base_dir: str,
-    sv: Optional[str],
+    sv: str | None,
     opt_dir: str,
     fp16: bool,
 ):
@@ -276,7 +276,7 @@ def main(
         show_default=False,
         help="list File: wav|spk|lang|text",
     ),
-    wav_dir: Optional[Path] = typer.Option(
+    wav_dir: Path | None = typer.Option(
         None, "--wav-dir", file_okay=False, dir_okay=True, readable=True, show_default=False, help="Wav Audio Dir"
     ),
     opt: Path = typer.Option(
@@ -292,7 +292,7 @@ def main(
         show_default=False,
         help="Path to CNHuBERT Pretrained Models",
     ),
-    sv: Optional[Path] = typer.Option(
+    sv: Path | None = typer.Option(
         None,
         "--sv",
         exists=True,
@@ -315,7 +315,7 @@ def main(
 
     os.makedirs(opt, exist_ok=True)
 
-    with open(inp_list, "r", encoding="utf8") as f:
+    with open(inp_list, encoding="utf8") as f:
         lines = [ln for ln in f.read().splitlines() if ln.strip()]
 
     tasks_all: list[tuple[int, str]] = []
@@ -339,8 +339,8 @@ def main(
     device_strs = build_device_strings(device, device_ids, nproc)
     world_size = len(device_strs)
 
-    tasks_q: "tmp.Queue[tuple[int, str] | None]" = tmp.Queue()
-    results_q: "tmp.Queue[int]" = tmp.Queue()
+    tasks_q: tmp.Queue[tuple[int, str] | None] = tmp.Queue()
+    results_q: tmp.Queue[int] = tmp.Queue()
 
     for task in tasks_all:
         tasks_q.put(task)

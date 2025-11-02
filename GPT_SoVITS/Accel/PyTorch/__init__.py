@@ -2,11 +2,13 @@ import importlib.util
 import os
 
 import torch
+import torch._inductor.config
 
 from .AR.sample_funcs import sample_naive
 from .AR.structs import T2SRequest, T2SResult
 from .AR.t2s_engine import T2SEngine as T2SEngineTorch
 from .G2PW.model import load_g2pw_torch
+
 
 torch.set_grad_enabled(False)
 
@@ -26,6 +28,14 @@ torch.backends.cuda.matmul.allow_fp16_accumulation = True
 torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.enabled = True
+
+
+torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
+torch._inductor.config.coordinate_descent_tuning = True
+torch._inductor.config.triton.unique_kernel_names = True
+torch._inductor.config.fx_graph_cache = True
+torch._inductor.config.triton.cudagraph_trees = True
+torch._inductor.config.triton.cudagraph_support_input_mutation = True
 
 cpu_count = os.cpu_count() or 1
 torch.set_num_threads(cpu_count)

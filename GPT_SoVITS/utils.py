@@ -13,6 +13,7 @@ import librosa
 import numpy as np
 import torch
 
+
 logging.getLogger("numba").setLevel(logging.ERROR)
 logging.getLogger("matplotlib").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
@@ -53,12 +54,7 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, skip_optimizer=False
     else:
         model.load_state_dict(new_state_dict)
     print("load ")
-    logger.info(
-        "Loaded checkpoint '{}' (iteration {})".format(
-            checkpoint_path,
-            iteration,
-        )
-    )
+    logger.info(f"Loaded checkpoint '{checkpoint_path}' (iteration {iteration})")
     return model, optimizer, learning_rate, iteration
 
 
@@ -67,11 +63,11 @@ def save(fea, path):  #####fix issue: torch.save doesn't support chinese path
     name = os.path.basename(path)
     tmp_path = f"{ttime()}.pth"
     torch.save(fea, tmp_path)
-    shutil.move(tmp_path, "%s/%s" % (dir, name))
+    shutil.move(tmp_path, f"{dir}/{name}")
 
 
 def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path, logger):
-    logger.info("Saving model and optimizer state at iteration {} to {}".format(iteration, checkpoint_path))
+    logger.info(f"Saving model and optimizer state at iteration {iteration} to {checkpoint_path}")
     if hasattr(model, "module"):
         state_dict = model.module.state_dict()
     else:
@@ -91,12 +87,20 @@ def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path,
 def summarize(
     writer,
     global_step,
-    scalars={},
-    histograms={},
-    images={},
-    audios={},
+    scalars=None,
+    histograms=None,
+    images=None,
+    audios=None,
     audio_sampling_rate=22050,
 ):
+    if audios is None:
+        audios = {}
+    if images is None:
+        images = {}
+    if histograms is None:
+        histograms = {}
+    if scalars is None:
+        scalars = {}
     for k, v in scalars.items():
         writer.add_scalar(k, v, global_step)
     for k, v in histograms.items():
@@ -207,7 +211,7 @@ def get_hparams(init=True, stage=1):
     args = parser.parse_args()
 
     config_path = args.config
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         data = f.read()
     config = json.loads(data)
 
@@ -243,7 +247,7 @@ def clean_checkpoints(path_to_models="logs/44k/", n_ckpts_to_keep=2, sort_by_tim
     ckpts_files = [f for f in os.listdir(path_to_models) if os.path.isfile(os.path.join(path_to_models, f))]
 
     def name_key(_f):
-        return int(re.compile("._(\d+)\.pth").match(_f).group(1))
+        return int(re.compile(r"._(\d+)\.pth").match(_f).group(1))
 
     def time_key(_f):
         return os.path.getmtime(os.path.join(path_to_models, _f))
@@ -266,12 +270,12 @@ def clean_checkpoints(path_to_models="logs/44k/", n_ckpts_to_keep=2, sort_by_tim
     def del_routine(x):
         return [os.remove(x), del_info(x)]
 
-    rs = [del_routine(fn) for fn in to_del]
+    [del_routine(fn) for fn in to_del]
 
 
 def get_hparams_from_dir(model_dir):
     config_save_path = os.path.join(model_dir, "config.json")
-    with open(config_save_path, "r") as f:
+    with open(config_save_path) as f:
         data = f.read()
     config = json.loads(data)
 
@@ -281,7 +285,7 @@ def get_hparams_from_dir(model_dir):
 
 
 def get_hparams_from_file(config_path):
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         data = f.read()
     config = json.loads(data)
 
@@ -292,11 +296,7 @@ def get_hparams_from_file(config_path):
 def check_git_hash(model_dir):
     source_dir = os.path.dirname(os.path.realpath(__file__))
     if not os.path.exists(os.path.join(source_dir, ".git")):
-        logger.warning(
-            "{} is not a git repository, therefore hash value comparison will be ignored.".format(
-                source_dir,
-            )
-        )
+        logger.warning(f"{source_dir} is not a git repository, therefore hash value comparison will be ignored.")
         return
 
     cur_hash = subprocess.getoutput("git rev-parse HEAD")
@@ -305,12 +305,7 @@ def check_git_hash(model_dir):
     if os.path.exists(path):
         saved_hash = open(path).read()
         if saved_hash != cur_hash:
-            logger.warning(
-                "git hash values are different. {}(saved) != {}(current)".format(
-                    saved_hash[:8],
-                    cur_hash[:8],
-                )
-            )
+            logger.warning(f"git hash values are different. {saved_hash[:8]}(saved) != {cur_hash[:8]}(current)")
     else:
         open(path, "w").write(cur_hash)
 

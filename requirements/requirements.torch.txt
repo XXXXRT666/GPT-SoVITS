@@ -1,0 +1,4 @@
+torch>2.6
+torchaudio 
+torchao
+torchcodec; platform_machine != "aarch64" or sys_platform != "linux"

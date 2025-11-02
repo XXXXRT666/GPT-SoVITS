@@ -71,10 +71,8 @@
 
 | Python Version | PyTorch Version |    Device     |
 | :------------: | :-------------: | :-----------: |
-|  Python 3.10   |  PyTorch 2.5.1  |   CUDA 12.4   |
-|  Python 3.11   |  PyTorch 2.5.1  |   CUDA 12.4   |
-|  Python 3.11   |  PyTorch 2.7.0  |   CUDA 12.8   |
-|  Python 3.11   |  PyTorch 2.8.0  | Apple Silicon |
+|  Python 3.11   |  PyTorch 2.9.0  |   CUDA 12.8   |
+|  Python 3.11   |  PyTorch 2.9.0  | Apple Silicon |
 |  Python 3.10   |  PyTorch 2.8.0  |      CPU      |
 
 </div>
@@ -83,10 +81,10 @@
 
 Windows 사용자라면 (win>=10에서 테스트됨), [통합 패키지를 다운로드](https://huggingface.co/lj1995/GPT-SoVITS-windows-package/resolve/main/GPT-SoVITS-v3lora-20250228.7z?download=true)한 후 압축을 풀고 _go-webui.bat_ 파일을 더블 클릭하면 GPT-SoVITS-WebUI를 시작할 수 있습니다.
 
-```pwsh
+```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-pwsh -F install.ps1 --Device <CU126|CU128|CPU> --Source <HF|HF-Mirror|ModelScope> [--DownloadUVR5]
+pwsh -F install.ps1 --help
 ```
 
 ### Linux
@@ -94,7 +92,7 @@ pwsh -F install.ps1 --Device <CU126|CU128|CPU> --Source <HF|HF-Mirror|ModelScope
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 ### macOS
@@ -106,7 +104,7 @@ bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScop
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
-bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
+bash install.sh --help
 ```
 
 <div align="center">
@@ -120,37 +118,11 @@ bash install.sh --device <MLX|CPU> --source <HF|HF-Mirror|ModelScope> [--downloa
 ```bash
 conda create -n GPTSoVITS python=3.10
 conda activate GPTSoVITS
+conda install uv ffmpeg -c conda-forge
 
-pip install -r extra-req.txt --no-deps
-pip install -r requirements.txt
-```
-
-#### FFmpeg 설치
-
-##### Conda 사용자
-
-```bash
-conda activate GPTSoVITS
-conda install ffmpeg -c conda-forge
-```
-
-##### Ubuntu/Debian 사용자
-
-```bash
-sudo apt install ffmpeg
-sudo apt install libsox-dev
-```
-
-##### Windows 사용자
-
-[ffmpeg.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffmpeg.exe)와 [ffprobe.exe](https://huggingface.co/lj1995/VoiceConversionWebUI/blob/main/ffprobe.exe)를 GPT-SoVITS root 디렉토리에 넣습니다
-
-[Visual Studio 2017](https://aka.ms/vs/17/release/vc_redist.x86.exe) 설치
-
-##### MacOS 사용자
-
-```bash
-brew install ffmpeg
+uv export --extra main -o pylock.toml -q --extra [mlx|cu126|cu128|rocm|cpu]
+uv pip sync pylock.toml --no-break-system-packages --preview-features pylock
+uv pip install ".[flash-attn]"
 ```
 
 <div align="center">
@@ -219,15 +191,15 @@ docker exec -it <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|GPT-SoVITS-CU126|GP
 
 2. [G2PWModel.zip(HF)](https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/G2PWModel.zip)| [G2PWModel.zip(ModelScope)](https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/G2PWModel.zip) 에서 모델을 다운로드하고 압축을 풀어 `G2PWModel`로 이름을 변경한 후, `GPT_SoVITS/text` 디렉토리에 배치하세요. (중국어 TTS 전용)
 
-3. UVR5 (보컬/반주 분리 & 잔향 제거 추가 기능)의 경우, [UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) 에서 모델을 다운로드하고 `tools/uvr5/uvr5_weights` 디렉토리에 배치하세요.
+3. UVR5 (보컬/반주 분리 & 잔향 제거 추가 기능)의 경우, [UVR5 Weights](https://huggingface.co/lj1995/VoiceConversionWebUI/tree/main/uvr5_weights) 에서 모델을 다운로드하고 `gsv_tools/uvr5/uvr5_weights` 디렉토리에 배치하세요.
 
-   - UVR5에서 bs_roformer 또는 mel_band_roformer 모델을 사용할 경우, 모델과 해당 설정 파일을 수동으로 다운로드하여 `tools/UVR5/UVR5_weights` 폴더에 저장할 수 있습니다. **모델 파일과 설정 파일의 이름은 확장자를 제외하고 동일한 이름을 가지도록 해야 합니다**. 또한, 모델과 설정 파일 이름에는 **"roformer"**가 포함되어야 roformer 클래스의 모델로 인식됩니다.
+   - UVR5에서 bs_roformer 또는 mel_band_roformer 모델을 사용할 경우, 모델과 해당 설정 파일을 수동으로 다운로드하여 `gsv_tools/uvr5/UVR5_weights` 폴더에 저장할 수 있습니다. **모델 파일과 설정 파일의 이름은 확장자를 제외하고 동일한 이름을 가지도록 해야 합니다**. 또한, 모델과 설정 파일 이름에는 **"roformer"**가 포함되어야 roformer 클래스의 모델로 인식됩니다.
 
    - 모델 이름과 설정 파일 이름에 **모델 유형을 직접 지정하는 것이 좋습니다**. 예: mel_mand_roformer, bs_roformer. 지정하지 않으면 설정 파일을 기준으로 특성을 비교하여 어떤 유형의 모델인지를 판단합니다. 예를 들어, 모델 `bs_roformer_ep_368_sdr_12.9628.ckpt`와 해당 설정 파일 `bs_roformer_ep_368_sdr_12.9628.yaml`은 한 쌍입니다. `kim_mel_band_roformer.ckpt`와 `kim_mel_band_roformer.yaml`도 한 쌍입니다.
 
-4. 중국어 ASR (추가 기능)의 경우, [Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files), [Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files) 및 [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) 에서 모델을 다운로드하고, `tools/asr/models` 디렉토리에 배치하세요.
+4. 중국어 ASR (추가 기능)의 경우, [Damo ASR Model](https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/files), [Damo VAD Model](https://modelscope.cn/models/damo/speech_fsmn_vad_zh-cn-16k-common-pytorch/files) 및 [Damo Punc Model](https://modelscope.cn/models/damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/files) 에서 모델을 다운로드하고, `gsv_tools/asr/models` 디렉토리에 배치하세요.
 
-5. 영어 또는 일본어 ASR (추가 기능)의 경우, [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) 에서 모델을 다운로드하고, `tools/asr/models` 디렉토리에 배치하세요. 또한, [다른 모델](https://huggingface.co/Systran) 은 더 적은 디스크 용량으로 비슷한 효과를 가질 수 있습니다.
+5. 영어 또는 일본어 ASR (추가 기능)의 경우, [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3) 에서 모델을 다운로드하고, `gsv_tools/asr/models` 디렉토리에 배치하세요. 또한, [다른 모델](https://huggingface.co/Systran) 은 더 적은 디스크 용량으로 비슷한 효과를 가질 수 있습니다.
 
 <div align="center">
 
@@ -405,7 +377,7 @@ V1/V2/V3/V4 환경에서 V2Pro로 전환 방법:
 명령줄을 사용하여 UVR5용 WebUI 열기
 
 ```bash
-python tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
+python gsv_tools/uvr5/webui.py "<infer_device>" <is_half> <webui_port_uvr5>
 ```
 
 <!-- 브라우저를 열 수 없는 경우 UVR 처리를 위해 아래 형식을 따르십시오. 이는 오디오 처리를 위해 mdxnet을 사용하는 것입니다.
@@ -428,7 +400,7 @@ python audio_slicer.py \
 명령줄을 사용하여 데이터 세트 ASR 처리를 수행하는 방법입니다(중국어만 해당).
 
 ```bash
-python tools/asr/funasr_asr.py -i <input> -o <output>
+python gsv_tools/asr/funasr_asr.py -i <input> -o <output>
 ```
 
 ASR 처리는 Faster_Whisper(중국어를 제외한 ASR 마킹)를 통해 수행됩니다.
@@ -436,7 +408,7 @@ ASR 처리는 Faster_Whisper(중국어를 제외한 ASR 마킹)를 통해 수행
 (진행률 표시줄 없음, GPU 성능으로 인해 시간 지연이 발생할 수 있음)
 
 ```bash
-python ./tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p <precision>
+python ./gsv_tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p <precision>
 ```
 
 사용자 정의 목록 저장 경로가 활성화되었습니다.
@@ -457,7 +429,7 @@ python ./tools/asr/fasterwhisper_asr.py -i <input> -o <output> -l <language> -p 
 - [TransferTTS](https://github.com/hcy71o/TransferTTS/blob/master/models.py#L556)
 - [contentvec](https://github.com/auspicious3000/contentvec/)
 - [hifi-gan](https://github.com/jik876/hifi-gan)
-- [fish-speech](https://github.com/fishaudio/fish-speech/blob/main/tools/llama/generate.py#L41)
+- [fish-speech](https://github.com/fishaudio/fish-speech/blob/f5243096380be703b640d387ab959623eefad756/fish_speech/models/text2semantic/inference.py#L81)
 - [f5-TTS](https://github.com/SWivid/F5-TTS/blob/main/src/f5_tts/model/backbones/dit.py)
 - [shortcut flow matching](https://github.com/kvfrans/shortcut-models/blob/main/targets_shortcut.py)
 

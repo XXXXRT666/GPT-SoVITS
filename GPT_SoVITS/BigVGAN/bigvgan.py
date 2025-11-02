@@ -7,14 +7,12 @@
 import json
 import os
 from pathlib import Path
-from typing import Dict, Optional, Union
 
 import torch
 import torch.nn as nn
 from huggingface_hub import PyTorchModelHubMixin, hf_hub_download
 from torch.nn import Conv1d, ConvTranspose1d
-from torch.nn.utils import remove_weight_norm
-from torch.nn.utils import weight_norm
+from torch.nn.utils import remove_weight_norm, weight_norm
 
 from . import activations
 from .alias_free_activation.torch.act import Activation1d as TorchActivation1d
@@ -121,7 +119,7 @@ class AMPBlock1(torch.nn.Module):
 
     def forward(self, x):
         acts1, acts2 = self.activations[::2], self.activations[1::2]
-        for c1, c2, a1, a2 in zip(self.convs1, self.convs2, acts1, acts2):
+        for c1, c2, a1, a2 in zip(self.convs1, self.convs2, acts1, acts2, strict=False):
             xt = a1(x)
             xt = c1(xt)
             xt = a2(xt)
@@ -212,7 +210,7 @@ class AMPBlock2(torch.nn.Module):
             )
 
     def forward(self, x):
-        for c, a in zip(self.convs, self.activations):
+        for c, a in zip(self.convs, self.activations, strict=False):
             xt = a(x)
             xt = c(xt)
             x = xt + x
@@ -277,7 +275,7 @@ class BigVGAN(
 
         # Transposed conv-based upsamplers. does not apply anti-aliasing
         self.ups = nn.ModuleList()
-        for i, (u, k) in enumerate(zip(h.upsample_rates, h.upsample_kernel_sizes)):
+        for i, (u, k) in enumerate(zip(h.upsample_rates, h.upsample_kernel_sizes, strict=False)):
             self.ups.append(
                 nn.ModuleList(
                     [
@@ -298,7 +296,7 @@ class BigVGAN(
         self.resblocks = nn.ModuleList()
         for i in range(len(self.ups)):
             ch = h.upsample_initial_channel // (2 ** (i + 1))
-            for j, (k, d) in enumerate(zip(h.resblock_kernel_sizes, h.resblock_dilation_sizes)):
+            for _j, (k, d) in enumerate(zip(h.resblock_kernel_sizes, h.resblock_dilation_sizes, strict=False)):
                 self.resblocks.append(resblock_class(h, ch, k, d, activation=h.activation))
 
         # Post-conv
@@ -387,10 +385,10 @@ class BigVGAN(
         revision: str,
         cache_dir: str,
         force_download: bool,
-        proxies: Optional[Dict],
+        proxies: dict | None,
         resume_download: bool,
         local_files_only: bool,
-        token: Union[str, bool, None],
+        token: str | bool | None,
         map_location: str = "cpu",  # Additional argument
         strict: bool = False,  # Additional argument
         use_cuda_kernel: bool = False,
