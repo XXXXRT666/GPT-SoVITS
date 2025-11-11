@@ -25,16 +25,16 @@ from AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from BigVGAN.bigvgan import BigVGAN
 from feature_extractor.cnhubert import CNHubert
 from module.mel_processing import mel_spectrogram_torch, spectrogram_torch
-from module.models import SynthesizerTrn, SynthesizerTrnV3, Generator
+from module.models import Generator, SynthesizerTrn, SynthesizerTrnV3
 from peft import LoraConfig, get_peft_model
 from process_ckpt import get_sovits_version_from_path_fast, load_sovits_new
+from sv import SV
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 from tools.audio_sr import AP_BWE
 from tools.i18n.i18n import I18nAuto, scan_language_list
 from TTS_infer_pack.text_segmentation_method import splits
 from TTS_infer_pack.TextPreprocessor import TextPreprocessor
-from sv import SV
 
 resample_transform_dict = {}
 
@@ -325,7 +325,7 @@ class TTS_Config:
 
         self.is_half = self.configs.get("is_half", False)
         if str(self.device) == "cpu" and self.is_half:
-            print(f"Warning: Half precision is not supported on CPU, set is_half to False.")
+            print("Warning: Half precision is not supported on CPU, set is_half to False.")
             self.is_half = False
 
         version = self.configs.get("version", None)
@@ -588,8 +588,6 @@ class TTS:
             self.vits_model = self.vits_model.half()
 
         self.configs.save_configs()
-
-
 
     def init_t2s_weights(self, weights_path: str):
         print(f"Loading Text2Semantic weights from {weights_path}")
@@ -1031,6 +1029,7 @@ class TTS:
         returns:
             Tuple[int, np.ndarray]: sampling rate and audio data.
         """
+        ttt = time.perf_counter()
         ########## variables initialization ###########
         self.stop_flag: bool = False
         text: str = inputs.get("text", "")
@@ -1503,7 +1502,7 @@ class TTS:
                 if len(audio) == 0:
                     yield output_sr, np.zeros(int(output_sr), dtype=np.int16)
                     return
-                yield self.audio_postprocess(
+                sr, tmp = self.audio_postprocess(
                     audio,
                     output_sr,
                     batch_index_list,
@@ -1512,6 +1511,8 @@ class TTS:
                     fragment_interval,
                     super_sampling if self.configs.use_vocoder and self.configs.version == "v3" else False,
                 )
+                print(f">> RTF:{(time.perf_counter() - ttt) / (len(tmp) / sr):.4f}")
+                yield sr, tmp
 
         except Exception as e:
             traceback.print_exc()

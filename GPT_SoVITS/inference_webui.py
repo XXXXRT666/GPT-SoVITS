@@ -6,23 +6,27 @@
 全部按英文识别
 全部按日文识别
 """
-import psutil
+
 import os
+
+import psutil
+
 
 def set_high_priority():
     """把当前 Python 进程设为 HIGH_PRIORITY_CLASS"""
     if os.name != "nt":
-        return # 仅 Windows 有效
+        return  # 仅 Windows 有效
     p = psutil.Process(os.getpid())
     try:
         p.nice(psutil.HIGH_PRIORITY_CLASS)
         print("已将进程优先级设为 High")
     except psutil.AccessDenied:
         print("权限不足，无法修改优先级（请用管理员运行）")
+
+
 set_high_priority()
 import json
 import logging
-import os
 import re
 import sys
 import traceback
@@ -595,29 +599,26 @@ def get_first(text):
     return text
 
 
-from text import chinese
-
-
 def get_phones_and_bert(text, language, version, final=False):
-    text = re.sub(r' {2,}', ' ', text)
+    text = re.sub(r" {2,}", " ", text)
     textlist = []
     langlist = []
     if language == "all_zh":
-        for tmp in LangSegmenter.getTexts(text,"zh"):
+        for tmp in LangSegmenter.getTexts(text, "zh"):
             langlist.append(tmp["lang"])
             textlist.append(tmp["text"])
     elif language == "all_yue":
-        for tmp in LangSegmenter.getTexts(text,"zh"):
+        for tmp in LangSegmenter.getTexts(text, "zh"):
             if tmp["lang"] == "zh":
                 tmp["lang"] = "yue"
             langlist.append(tmp["lang"])
             textlist.append(tmp["text"])
     elif language == "all_ja":
-        for tmp in LangSegmenter.getTexts(text,"ja"):
+        for tmp in LangSegmenter.getTexts(text, "ja"):
             langlist.append(tmp["lang"])
             textlist.append(tmp["text"])
     elif language == "all_ko":
-        for tmp in LangSegmenter.getTexts(text,"ko"):
+        for tmp in LangSegmenter.getTexts(text, "ko"):
             langlist.append(tmp["lang"])
             textlist.append(tmp["text"])
     elif language == "en":
@@ -767,6 +768,9 @@ def get_tts_wav(
     pause_second=0.3,
 ):
     global cache
+    import time
+
+    ttt = time.perf_counter()
     if ref_wav_path:
         pass
     else:
@@ -998,6 +1002,7 @@ def get_tts_wav(
             audio_opt /= max_audio
     else:
         audio_opt = audio_opt.cpu().detach().numpy()
+    print(f">> RTF: {(time.perf_counter() - ttt) / len(audio_opt) / opt_sr:.4f}")
     yield opt_sr, (audio_opt * 32767).astype(np.int16)
 
 

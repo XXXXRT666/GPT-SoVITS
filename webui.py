@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 os.environ["version"] = version = "v2Pro"
 now_dir = os.getcwd()
@@ -539,9 +540,9 @@ def open1Ba(
         with open(tmp_config_path, "w") as f:
             f.write(json.dumps(data))
         if version in ["v1", "v2", "v2Pro", "v2ProPlus"]:
-            cmd = '"%s" -s GPT_SoVITS/s2_train.py --config "%s"' % (python_exec, tmp_config_path)
+            cmd = 'time "%s" -s GPT_SoVITS/s2_train.py --config "%s"' % (python_exec, tmp_config_path)
         else:
-            cmd = '"%s" -s GPT_SoVITS/s2_train_v3_lora.py --config "%s"' % (python_exec, tmp_config_path)
+            cmd = 'time "%s" -s GPT_SoVITS/s2_train_v3_lora.py --config "%s"' % (python_exec, tmp_config_path)
         yield (
             process_info(process_name_sovits, "opened"),
             {"__type__": "update", "visible": False},
@@ -633,7 +634,7 @@ def open1Bb(
         with open(tmp_config_path, "w") as f:
             f.write(yaml.dump(data, default_flow_style=False))
         # cmd = '"%s" GPT_SoVITS/s1_train.py --config_file "%s" --train_semantic_path "%s/6-name2semantic.tsv" --train_phoneme_path "%s/2-name2text.txt" --output_dir "%s/logs_s1"'%(python_exec,tmp_config_path,s1_dir,s1_dir,s1_dir)
-        cmd = '"%s" -s GPT_SoVITS/s1_train.py --config_file "%s" ' % (python_exec, tmp_config_path)
+        cmd = 'time "%s" -s GPT_SoVITS/s1_train.py --config_file "%s" ' % (python_exec, tmp_config_path)
         yield (
             process_info(process_name_gpt, "opened"),
             {"__type__": "update", "visible": False},
@@ -807,6 +808,7 @@ def open1a(inp_text, inp_wav_dir, exp_name, gpu_numbers, bert_pretrained_dir):
             os.environ.update(config)
             cmd = '"%s" -s GPT_SoVITS/prepare_datasets/1-get-text.py' % python_exec
             print(cmd)
+            t1 = time.perf_counter()
             p = Popen(cmd, shell=True)
             ps1a.append(p)
         yield (
@@ -825,6 +827,8 @@ def open1a(inp_text, inp_wav_dir, exp_name, gpu_numbers, bert_pretrained_dir):
         path_text = "%s/2-name2text.txt" % opt_dir
         with open(path_text, "w", encoding="utf8") as f:
             f.write("\n".join(opt) + "\n")
+        t2 = time.perf_counter()
+        print(f"Time taken for 1a: {t2 - t1} seconds")
         ps1a = []
         if len("".join(opt)) > 0:
             yield (
@@ -874,6 +878,7 @@ def open1b(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, ssl_pretrained
     if check_for_existance([inp_text, inp_wav_dir], is_dataset_processing=True):
         check_details([inp_text, inp_wav_dir], is_dataset_processing=True)
     exp_name = exp_name.rstrip(" ")
+    t1 = time.perf_counter()
     if ps1b == []:
         config = {
             "inp_text": inp_text,
@@ -924,6 +929,8 @@ def open1b(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, ssl_pretrained
             for p in ps1b:
                 p.wait()
             ps1b = []
+        t2 = time.perf_counter()
+        print(f"Time taken for 1b: {t2 - t1} seconds")
         yield (
             process_info(process_name_1b, "finish"),
             {"__type__": "update", "visible": True},
@@ -959,6 +966,7 @@ process_name_1c = i18n("语义Token提取")
 
 def open1c(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, pretrained_s2G_path):
     global ps1c
+    t1 = time.perf_counter()
     inp_text = my_utils.clean_path(inp_text)
     if check_for_existance([inp_text, inp_wav_dir], is_dataset_processing=True):
         check_details([inp_text, inp_wav_dir], is_dataset_processing=True)
@@ -1010,6 +1018,8 @@ def open1c(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, pretrained_s2G
         with open(path_semantic, "w", encoding="utf8") as f:
             f.write("\n".join(opt) + "\n")
         ps1c = []
+        t2 = time.perf_counter()
+        print(f"Time taken for 1c: {t2 - t1} seconds")
         yield (
             process_info(process_name_1c, "finish"),
             {"__type__": "update", "visible": True},
@@ -1056,6 +1066,7 @@ def open1abc(
     pretrained_s2G_path,
 ):
     global ps1abc
+    t1 = time.perf_counter()
     inp_text = my_utils.clean_path(inp_text)
     inp_wav_dir = my_utils.clean_path(inp_wav_dir)
     if check_for_existance([inp_text, inp_wav_dir], is_dataset_processing=True):
@@ -1224,6 +1235,8 @@ def open1abc(
                     {"__type__": "update", "visible": True},
                 )
             ps1abc = []
+            t2 = time.perf_counter()
+            print(f"Time taken for 1abc: {t2 - t1} seconds")
             yield (
                 process_info(process_name_1abc, "finish"),
                 {"__type__": "update", "visible": True},
