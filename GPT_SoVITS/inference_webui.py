@@ -791,6 +791,7 @@ def get_tts_wav(
         clean_hifigan_model()
         clean_sv_cn_model()
     t0 = ttime()
+    ttft = 0
     prompt_language = dict_language[prompt_language]
     text_language = dict_language[text_language]
 
@@ -982,6 +983,8 @@ def get_tts_wav(
         if max_audio > 1:
             audio = audio / max_audio
         audio_opt.append(audio)
+        if i_text == 0:
+            ttft = time.perf_counter()
         audio_opt.append(zero_wav_torch)  # zero_wav
         t4 = ttime()
         t.extend([t2 - t1, t3 - t2, t4 - t3])
@@ -1003,6 +1006,7 @@ def get_tts_wav(
     else:
         audio_opt = audio_opt.cpu().detach().numpy()
     print(f">> RTF: {(time.perf_counter() - ttt) / len(audio_opt) / opt_sr:.4f}")
+    print(f">> TTFB: {ttft - ttt:.3f} sec")
     yield opt_sr, (audio_opt * 32767).astype(np.int16)
 
 
