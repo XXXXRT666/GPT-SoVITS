@@ -41,7 +41,7 @@ run_conda_quiet() {
 
 run_pip_quiet() {
     local output
-    output=$(uv pip install "$@" --python "$(which python)" 2>&1) || {
+    output=$(uv pip install "$@" --python "$(which python)" --compile-bytecode 2>&1) || {
         echo -e "${ERROR}UV PIP install failed:\n$output"
         exit 1
     }
@@ -402,9 +402,9 @@ run_quiet uv export --extra=main --extra="$EXTRA" -o pylock.toml
 
 if [ "$Sync" = true ]; then
     echo -e "${INFO}Syncing UV Environment..."
-    run_quiet uv pip sync pylock.toml --no-break-system-packages --preview-features pylock --no-binary av
+    run_quiet uv pip sync pylock.toml --no-break-system-packages --preview-features pylock --no-binary av --compile-bytecode
 else
-    run_quiet uv pip install -r pylock.toml --preview-features pylock --no-binary av
+    run_quiet uv pip install -r pylock.toml --preview-features pylock --no-binary av --compile-bytecode
 fi
 
 run_pip_quiet faster-whisper --no-deps
