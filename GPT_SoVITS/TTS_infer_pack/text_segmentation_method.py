@@ -102,8 +102,9 @@ def cut0(inp):
 def cut1(inp):
     inp = inp.strip("\n")
     inps = split(inp)
-    split_idx = list(range(0, len(inps) + 1, 4))
-    split_idx[-1] = None
+    print("\n".join(inps))
+    split_idx = list(range(0, len(inps), 4))
+    split_idx.append(None)
     if len(split_idx) > 1:
         opts = []
         for idx in range(len(split_idx) - 1):

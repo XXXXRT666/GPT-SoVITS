@@ -88,7 +88,7 @@ class T2SEngine(T2SEngineProtocol):
             max_token = min(1024 - int(session.input_pos.max()), 640) * session.bsz
 
             task = progress.add_task("T2S Decoding", total=max_token)
-            for idx in range(max_token):
+            for idx in range(max_token // session.bsz):
                 progress.update(task, advance=session.bsz)
                 if idx == 0:
                     session.kv_cache = decoder.init_cache(session.bsz)
@@ -182,7 +182,9 @@ class T2SEngine(T2SEngineProtocol):
                     infer_speed = (idx + 1) * session.bsz / infer_time
                     break
 
-                if (request.early_stop_num != -1 and idx >= request.early_stop_num) or idx == max_token - 1:
+                if (
+                    request.early_stop_num != -1 and idx >= request.early_stop_num
+                ) or idx == max_token // session.bsz - 1:
                     for j in range(session.bsz):
                         if not session.completed[j].item():
                             session.y_results[j] = session.y[j, session.y_len : session.y_len + idx]
