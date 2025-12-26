@@ -33,7 +33,7 @@ class T2SEngine(T2SEngineProtocol):
         **kwds,
     ) -> None:
         match device:
-            case _ if isinstance(device, torch.device):
+            case torch.device():
                 match device.type:
                     case "cpu":
                         self.device = cpu
@@ -41,7 +41,7 @@ class T2SEngine(T2SEngineProtocol):
                         self.device = mx.Device(mx.gpu)
                     case _:
                         raise RuntimeError(f"Device {device} not supported")
-            case _ if isinstance(device, mx.Device):
+            case mx.Device():
                 self.device = device
             case _:
                 raise RuntimeError(f"Device {device} not supported")
