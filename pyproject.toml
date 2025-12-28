@@ -70,6 +70,9 @@ conflicts = [
     { extra = "mlx" },
   ],
 ]
+dependency-metadata = [
+    { name = "faster-whisper", requires-dist = [], requires-python = ">=3.10" },
+]
 
 [tool.uv.pip]
 no-binary = ["opencc"]

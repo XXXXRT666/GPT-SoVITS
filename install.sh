@@ -32,6 +32,10 @@ on_error() {
 }
 
 run_conda_quiet() {
+    if [ "$VERBOSE" = true ]; then
+        conda install --yes -c conda-forge "$@"
+        return
+    fi
     local output
     output=$(conda install --yes --quiet -c conda-forge "$@" 2>&1) || {
         echo -e "${ERROR}Conda install failed:\n$output"
@@ -40,14 +44,22 @@ run_conda_quiet() {
 }
 
 run_pip_quiet() {
+    if [ "$VERBOSE" = true ]; then
+        uv pip install "$@" --python "$(which python)"
+        return
+    fi
     local output
-    output=$(uv pip install "$@" --python "$(which python)" --compile-bytecode 2>&1) || {
+    output=$(uv pip install "$@" --python "$(which python)" 2>&1) || {
         echo -e "${ERROR}UV PIP install failed:\n$output"
         exit 1
     }
 }
 
 run_wget_quiet() {
+    if [ "$VERBOSE" = true ]; then
+        wget --tries=25 --wait=5 --read-timeout=40 --show-progress "$@"
+        return
+    fi
     if wget --tries=25 --wait=5 --read-timeout=40 -q --show-progress "$@" 2>&1; then
         tput cuu1 && tput el
     else
@@ -57,6 +69,10 @@ run_wget_quiet() {
 }
 
 run_quiet() {
+    if [ "$VERBOSE" = true ]; then
+        "$@"
+        return
+    fi
     local output
     output=$("$@" 2>&1) || {
         echo -e "${ERROR}Command failed:\n$output"
@@ -77,6 +93,7 @@ USE_CPU=false
 CUDA=128
 EXTRA=cpu
 Sync=false
+VERBOSE=false
 WORKFLOW=${WORKFLOW:-"false"}
 
 if [ "$(uname)" != "Darwin" ]; then
@@ -90,7 +107,6 @@ else
 fi
 
 USE_HF=true
-USE_HF_MIRROR=false
 USE_MODELSCOPE=false
 DOWNLOAD_UVR5=false
 
@@ -99,8 +115,9 @@ print_help() {
     echo ""
     echo "Options:"
     echo "  -D, --device   CU126|CU128|ROCM|MLX|CPU    Specify the Device (Optional, default: CU128 on Linux, MLX on macOS)"
-    echo "  -S, --source   HF|HF-Mirror|ModelScope     Specify the model source (Optional, default: HF)"
+    echo "  -S, --source   HF|ModelScope               Specify the model source (Optional, default: HF)"
     echo "  -U, --update                               Update the GPT-SoVITS repository and UV Lock before installation"
+    echo "  -V, --verbose                              Enable verbose output during installation"
     echo "  --sync                                     Sync the uv.lock into the conda environment instead of installing from it"
     echo "  --download-uvr5                            Enable downloading the UVR5 model"
     echo "  -h, --help                                 Show this help message and exit"
@@ -122,10 +139,6 @@ while [[ $# -gt 0 ]]; do
         case "$2" in
         HF)
             USE_HF=true
-            ;;
-        HF-Mirror)
-            USE_HF_MIRROR=true
-            USE_HF=false
             ;;
         ModelScope)
             USE_MODELSCOPE=true
@@ -190,6 +203,10 @@ while [[ $# -gt 0 ]]; do
         UPDATE=true
         shift
         ;;
+    -v | -V | --verbose | --Verbose)
+        VERBOSE=true
+        shift
+        ;;
     --sync | --Sync)
         Sync=true
         shift
@@ -203,9 +220,8 @@ done
 
 if [ "$UPDATE" = true ]; then
     echo -e "${INFO}Updating GPT-SoVITS Repository..."
-    git pull origin main || {
-        echo -e "${ERROR}Git Pull Failed"
-        exit 1
+    git pull || {
+        echo -e "${WARNING}Git Pull Failed"
     }
     echo -e "${SUCCESS}Repository Updated"
 fi
@@ -217,7 +233,7 @@ if ! $USE_CUDA && ! $USE_ROCM && ! $USE_MLX && ! $USE_CPU; then
     exit 1
 fi
 
-if ! $USE_HF && ! $USE_HF_MIRROR && ! $USE_MODELSCOPE; then
+if ! $USE_HF && ! $USE_MODELSCOPE; then
     echo -e "${ERROR}Download Source is REQUIRED"
     echo ""
     print_help
@@ -283,12 +299,6 @@ if [ "$USE_HF" = "true" ]; then
     UVR5_URL="https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/uvr5_weights.zip"
     NLTK_URL="https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/nltk_data.zip"
     PYOPENJTALK_URL="https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/open_jtalk_dic_utf_8-1.11.tar.gz"
-elif [ "$USE_HF_MIRROR" = "true" ]; then
-    echo -e "${INFO}Download Model From HuggingFace-Mirror"
-    PRETRINED_URL="https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/pretrained_models.zip"
-    UVR5_URL="https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/uvr5_weights.zip"
-    NLTK_URL="https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/nltk_data.zip"
-    PYOPENJTALK_URL="https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/open_jtalk_dic_utf_8-1.11.tar.gz"
 elif [ "$USE_MODELSCOPE" = "true" ]; then
     echo -e "${INFO}Download Model From ModelScope"
     PRETRINED_URL="https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/pretrained_models.zip"
@@ -402,12 +412,10 @@ run_quiet uv export --extra=main --extra="$EXTRA" -o pylock.toml
 
 if [ "$Sync" = true ]; then
     echo -e "${INFO}Syncing UV Environment..."
-    run_quiet uv pip sync pylock.toml --no-break-system-packages --preview-features pylock --no-binary av --compile-bytecode
+    run_quiet uv pip sync pylock.toml --no-break-system-packages --preview-features pylock --no-binary av
 else
-    run_quiet uv pip install -r pylock.toml --preview-features pylock --no-binary av --compile-bytecode
+    run_quiet uv pip install -r pylock.toml --preview-features pylock --no-binary av
 fi
-
-run_pip_quiet faster-whisper --no-deps
 
 echo -e "${SUCCESS}Python Dependencies Installed"
 

@@ -731,7 +731,8 @@ def open_slice(inp, opt_root, threshold, min_length, min_interval, hop_size, max
         return
     if ps_slice == []:
         for i_part in range(n_parts):
-            cmd = f'"{python_exec}" -s gsv_tools/slice_audio.py "{inp}" "{opt_root}" {threshold} {min_length} {min_interval} {hop_size} {max_sil_kept} {_max} {alpha} {i_part} {n_parts}'
+            cmd = f'"{python_exec}" -s gsv_tools/slice_audio.py "{inp}" "{opt_root}" {threshold} {min_length}\
+                {min_interval} {hop_size} {max_sil_kept} {_max} {alpha} {i_part} {n_parts}'
             console.print(cmd)
             p = Popen(cmd, shell=True)
             ps_slice.append(p)

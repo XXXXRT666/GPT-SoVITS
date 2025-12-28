@@ -1,5 +1,6 @@
 cn2an
 fastapi[standard]
+faster-whisper
 ffmpeg-python
 funasr
 g2pk2
@@ -8,11 +9,11 @@ jieba-fast
 kernels
 ko-pron
 modelscope
-numpy
 opencc
 peft
 py-cpuinfo
 pypinyin
+pytorch-lightning
 rich-argparse
 split-lang
 torchao
@@ -35,5 +36,3 @@ gradio<5.50
 librosa~=0.10
 matplotlib>=3.10
 pyopenjtalk>=0.4.1
-pytorch-lightning>=2.4
-torchmetrics<=1.5

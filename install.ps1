@@ -8,6 +8,12 @@ Device backend. Default: CU128
 .PARAMETER Source
 Download source. Default: HF
 
+.PARAMETER Update
+Update the GPT-SoVITS repository and UV Lock before installation
+
+.PARAMETER Verbose
+Enable verbose output during installation"
+
 .PARAMETER Sync
 Sync the uv.lock into the conda environment instead of installing from it
 
@@ -23,8 +29,12 @@ Param (
     [Parameter()][ValidateSet("CU126", "CU128", "CPU")]
     [string]$Device = "CU128",
 
-    [Parameter()][ValidateSet("HF", "HF-Mirror", "ModelScope")]
+    [Parameter()][ValidateSet("HF", "ModelScope")]
     [string]$Source = "HF",
+
+    [switch]$Update,
+
+    [switch]$Verbose,
 
     [switch]$Sync,
 
@@ -97,7 +107,16 @@ function Invoke-Conda {
         [string[]]$Args
     )
 
-    $output = & conda install -y -q -c conda-forge @Args 2>&1
+    if ($Verbose) {
+        & conda install -y -c conda-forge @Args
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            throw "Conda Install $Args Failed with exit code $exitCode"
+        }
+        return
+    }
+
+    $output = & conda install -y -c conda-forge @Args 2>&1
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -ne 0) {
@@ -123,6 +142,15 @@ function Invoke-PIP {
         [Parameter(ValueFromRemainingArguments = $true)]
         [string[]]$Args
     )
+
+    if ($Verbose) {
+        & uv pip install @Args --python "$((Get-Command python).Source)"
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            throw "Pip Install $Args Failed with exit code $exitCode"
+        }
+        return
+    }
     
     $output = & uv pip install @Args --python "$((Get-Command python).Source)" 2>&1
     $exitCode = $LASTEXITCODE
@@ -150,6 +178,15 @@ function Invoke-Command {
         [Parameter(ValueFromRemainingArguments = $true)]
         [string[]]$Args
     )
+
+    if ($Verbose) {
+        & @Args
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            throw "Command $Args Failed with exit code $exitCode"
+        }
+        return
+    }
     
     $output = & @Args 2>&1
     $exitCode = $LASTEXITCODE
@@ -205,13 +242,25 @@ function Invoke-Unzip {
     Remove-Item $ZipPath -Force
 }
 
+$install_pkg = "ffmpeg cmake uv"
+
 if ($IsWindows) {
     chcp 65001
+    $install_pkg = "$install_pkg vc14_runtime"
 }
 Set-Location $PSScriptRoot
 
+
+if ($Update) {
+    Write-Info "Updating GPT-SoVITS Repository..."
+    git pull || {
+        Write-Warning "Git Pull Failed"
+    }
+    Write-Success "Repository Updated"
+}
+
 Write-Info "Installing FFmpeg & CMake and Some Other Tools..."
-Invoke-Conda  ffmpeg cmake vc14_runtime uv
+Invoke-Conda  $install_pkg
 Write-Success "FFmpeg, CMake, VC14 Runtime, uv Installed"
 
 $PretrainedURL  = ""
@@ -226,13 +275,6 @@ switch ($Source) {
         $UVR5URL       = "https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/uvr5_weights.zip"
         $NLTKURL       = "https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/nltk_data.zip"
         $OpenJTalkURL  = "https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/open_jtalk_dic_utf_8-1.11.tar.gz"
-    }
-    "HF-Mirror" {
-        Write-Info "Download Model From HuggingFace-Mirror"
-        $PretrainedURL = "https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/pretrained_models.zip"
-        $UVR5URL       = "https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/uvr5_weights.zip"
-        $NLTKURL       = "https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/nltk_data.zip"
-        $OpenJTalkURL  = "https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/open_jtalk_dic_utf_8-1.11.tar.gz"
     }
     "ModelScope" {
         Write-Info "Download Model From ModelScope"
@@ -315,7 +357,6 @@ if ($Sync) {
     Invoke-Command uv pip install -r pylock.toml --preview-features pylock
 }
 
-Invoke-PIP faster-whisper --no-deps
 Write-Success "Python Dependencies Installed"
 
 Write-Info "Downloading NLTK Data..."

@@ -70,8 +70,6 @@ class ARModelCheckpoint(ModelCheckpoint):
                         to_save_od["weight"][key] = dictt[key].half()
                     to_save_od["config"] = self.config
                     to_save_od["info"] = f"GPT-e{trainer.current_epoch + 1}"
-                    # torch.save(
-                    # print(os.environ)
                     if os.environ.get("LOCAL_RANK", "0") == "0":
                         save(
                             to_save_od,
@@ -149,7 +147,6 @@ def main(args):
     trainer.fit(model, data_module, ckpt_path=ckpt_path)
 
 
-# srun --gpus-per-node=1 --ntasks-per-node=1 python train.py --path-to-configuration configurations/default.yaml
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -159,15 +156,6 @@ if __name__ == "__main__":
         default="configs/s1longer.yaml",
         help="path of config file",
     )
-    # args for dataset
-    # parser.add_argument('--train_semantic_path',type=str,default='/data/docker/liujing04/gpt-vits/fine_tune_dataset/xuangou/6-name2semantic.tsv')
-    # parser.add_argument('--train_phoneme_path', type=str, default='/data/docker/liujing04/gpt-vits/fine_tune_dataset/xuangou/2-name2text.txt')
-
-    # parser.add_argument('--dev_semantic_path', type=str, default='dump_mix/semantic_dev.tsv')
-    # parser.add_argument('--dev_phoneme_path', type=str, default='dump_mix/phoneme_dev.npy')
-    # parser.add_argument('--output_dir',type=str,default='/data/docker/liujing04/gpt-vits/fine_tune_dataset/xuangou/logs_s1',help='directory to save the results')
-    # parser.add_argument('--output_dir',type=str,default='/liujing04/gpt_logs/s1/xuangou_ft',help='directory to save the results')
-
     args = parser.parse_args()
     logging.info(str(args))
     main(args)
