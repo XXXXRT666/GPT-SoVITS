@@ -6,11 +6,9 @@ import flash_attn  # type: ignore
 import torch
 
 from ... import nn
-from ..structs import KVCache, T2SSession
+from ..structs import KVCache
 from ..t2s_model_abc import (
     AttentionABC,
-    CUDAGraphCacheABC,
-    CUDAGraphStateABC,
     FeedForward,
     KVCacheNHD,
     T2SDecoderABC,
@@ -93,8 +91,6 @@ class T2SDecoder(T2SDecoderABC):
         assert torch.cuda.is_available()
         super().__init__(config, max_seq_length, max_batch_size)
 
-        self.bert_proj = nn.Linear(1024, self.embedding_dim)
-        self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h: TransformerDecoderABC = TransformerDecoder(
             self.hidden_dim,
             self.n_layer,
@@ -107,48 +103,17 @@ class T2SDecoder(T2SDecoderABC):
 
         self.kv_class = KVCacheNHD
 
-        self.graph_cache_class = CUDAGraphCache
+        self.graph_applicable = True
 
-    def post_forward(self, idx: int, session: T2SSession) -> None:
-        return super().post_forward(idx, session)
+    # Flash Attn backend keeps attn handling internal, no extra buffer work needed
+    def pre_forward_slots_hook(self, slots, runner):
+        return super().pre_forward_slots_hook(slots, runner)
 
-    def pre_forward(self, session: T2SSession) -> tuple[list, dict]:
-        return super().pre_forward(session)
+    def post_forward_slots_hook(self, slots, runner) -> None:
+        return super().post_forward_slots_hook(slots, runner)
 
+    def bind_session_hook(self, session, runner) -> None:
+        return super().bind_session_hook(session, runner)
 
-class CUDAGraphState(CUDAGraphStateABC):
-    applicable: bool = True
-
-    def __init__(
-        self,
-        bsz: int,
-        decoder: T2SDecoderABC,
-    ) -> None:
-        super().__init__(bsz, decoder)
-
-    def capture(self):
-        graph = self.decoder.capture(
-            self.input_pos,
-            self.xy_pos,
-            self.xy_dec,
-            self.kv_cache,
-        )
-        self.graph = graph
-        self.stream = torch.cuda.Stream()
-
-
-class CUDAGraphCache(CUDAGraphCacheABC):
-    is_applicable = True
-
-    def __init__(
-        self,
-        decoder,
-        cache_size: int = 3,
-    ) -> None:
-        super().__init__(decoder, cache_size)
-
-    def create_graph_cache(self, bsz: int):
-        for _ in range(self.cache_size):
-            state = CUDAGraphState(bsz, self.decoder)
-            state.capture()
-            self.graph_cache[bsz].put(state)
+    def unbind_session_hook(self, session, runner) -> None:
+        return super().unbind_session_hook(session, runner)

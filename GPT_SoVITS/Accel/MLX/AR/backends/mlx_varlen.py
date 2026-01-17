@@ -3,7 +3,7 @@ from __future__ import annotations
 import mlx.core as mx
 
 from ..structs_mlx import KVCache
-from ..t2s_model_abc import (
+from ..t2s_model_abc_mlx import (
     AttentionABC,
     KVCacheHND,
     T2SDecoderABC,

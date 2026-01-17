@@ -5,9 +5,9 @@
 import torch
 from pytorch_lightning import LightningModule
 
-from ..modules.lr_schedulers import WarmupCosineLRSchedule
-from ..modules.optim import ScaledAdam
-from .t2s_model import Text2SemanticDecoder
+from GPT_SoVITS.AR.models.t2s_model import Text2SemanticDecoder
+from GPT_SoVITS.AR.modules.lr_schedulers import WarmupCosineLRSchedule
+from GPT_SoVITS.AR.modules.optim import ScaledAdam
 
 
 class Text2SemanticLightningModule(LightningModule):
@@ -52,7 +52,7 @@ class Text2SemanticLightningModule(LightningModule):
             scheduler.step()
 
         self.log(
-            "total_loss",
+            "loss",
             loss,
             on_step=True,
             on_epoch=True,
@@ -62,6 +62,7 @@ class Text2SemanticLightningModule(LightningModule):
         self.log(
             "lr",
             scheduler.get_last_lr()[0],
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
             sync_dist=True,
@@ -70,7 +71,7 @@ class Text2SemanticLightningModule(LightningModule):
             f"top_{self.top_k}_acc",
             acc,
             on_step=True,
-            on_epoch=True,
+            on_epoch=False,
             prog_bar=True,
             sync_dist=True,
         )

@@ -7,6 +7,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
+import pytorch_lightning.callbacks.progress.progress_bar
 import torch
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -31,6 +32,12 @@ if platform.system() == "Windows":
     os.environ["USE_LIBUV"] = "0"
 
 torch.set_grad_enabled(True)
+
+
+def get_standard_metrics_patch(trainer: Trainer) -> dict[str, int | str]:
+    metrics = pytorch_lightning.callbacks.progress.progress_bar.get_standard_metrics(trainer)
+    metrics.pop("v_num", None)
+    return metrics
 
 
 class ARModelCheckpoint(ModelCheckpoint):
@@ -79,6 +86,7 @@ class ARModelCheckpoint(ModelCheckpoint):
 
 
 def main(args):
+    pytorch_lightning.callbacks.progress.progress_bar.get_standard_metrics = get_standard_metrics_patch
     config = load_yaml_config(args.config_file)
 
     output_dir = Path(config["output_dir"])
@@ -127,6 +135,7 @@ def main(args):
         num_sanity_val_steps=0,
         callbacks=[ckpt_callback],
         use_distributed_sampler=False,  # 非常简单的修改，但解决了采用自定义的 bucket_sampler 下训练步数不一致的问题！
+        log_every_n_steps=1,
     )
 
     model: Text2SemanticLightningModule = Text2SemanticLightningModule(config, output_dir)

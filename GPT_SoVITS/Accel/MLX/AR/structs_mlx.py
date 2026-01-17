@@ -9,13 +9,11 @@ from dataclasses import dataclass
 from typing import Protocol, TypeAlias
 
 import mlx.core as mx
-import torch
+from rich.progress import Progress, TaskID
 
-from ...PyTorch.AR.structs import T2SRequest
-from .sample_funcs_mlx import SampleProtocolMLX, sample_naive
+from ...PyTorch.AR.structs import T2SEngineProtocol, T2SRequest, T2SRequestHandle, T2SResult, T2SStreamResponse
 
 
-Tensor = torch.Tensor
 Array = mx.array
 
 
@@ -31,6 +29,9 @@ class T2SRequestMLX:
     early_stop_num: int = -1
     temperature: float = 1.0
     repetition_penalty: float = 1.35
+    request_id: str | int = -1
+    stream_interval: int | None = None
+    return_partial: bool = True
     debug: bool = False
 
     @classmethod
@@ -88,7 +89,6 @@ class T2SSessionMLX:
         self,
         decoder: T2SDecoderProtocol,
         request_torch: T2SRequest,
-        sample_func: type[SampleProtocolMLX] = sample_naive,
         device: mx.Device = cpu,
         dtype: mx.Dtype = mx.float32,
     ):
@@ -101,19 +101,22 @@ class T2SSessionMLX:
             self.dtype = dtype
 
             bsz = len(request.x)
-            y_len: int = request.prompts.shape[-1]
+            prompt_len = request.prompts.shape[-1]
             self.bsz = bsz
-            self.y_len = y_len
 
-            # Cache
+            self.step_count = 0
+            self.request_id = request.request_id or id(self)
+            self.stream_interval = request.stream_interval if request.stream_interval is not None else 0
+            self.last_stream_step = 0
+
+            # Cache in prefill
             self.kv_cache: MutableSequence[KVCache]
-            self.sample = sample_func()
 
             # Forward args
             self.x = [i.astype(mx.int32) for i in request.x]
             self.x_lens = request.x_lens.astype(mx.int32)
-            self.y = mx.zeros((bsz, decoder.max_seq_length)).astype(mx.int32)
-            self.y[:, : request.prompts.shape[-1]] = request.prompts.astype(mx.int32)
+            self.y = request.prompts.astype(mx.int32)
+            self.prompt_len = prompt_len
             self.bert_feature = [i.astype(dtype) for i in request.bert_feature]
 
             self.prefill_len = self.x_lens + request.prompts.shape[1]
@@ -123,26 +126,27 @@ class T2SSessionMLX:
             if bsz == 1:
                 self.input_pos = self.input_pos.squeeze(0)  # 30% Performance Improvement in bsz=1
 
+            self.max_decode_steps = min(int(decoder.max_seq_length - int(self.input_pos.max().item())), 640)
+            self.max_decode_steps = max(1, self.max_decode_steps)
+
             # EOS
             self.completed = mx.array([False] * len(self.x)).astype(mx.bool_)
             self.y_results: list[Array] = [None] * len(self.x)  # type: ignore
-
-            self.xy_pos = decoder.embed(self.x, request.prompts, self.bert_feature)
 
             max_len = int(self.prefill_len.max(-1))
             attn_mask = mx.zeros(shape=(bsz, max_len, max_len), dtype=mx.bool_)
 
             for bs in range(bsz):
                 pos = int(self.x_lens[bs])
-                seq_len = pos + y_len
+                seq_len = pos + prompt_len
 
                 attn_mask[bs, :seq_len, :pos] = True
 
                 ar_mask = ~mx.triu(
                     x=mx.ones(
                         shape=(
-                            y_len,
-                            y_len,
+                            prompt_len,
+                            prompt_len,
                         ),
                         dtype=mx.bool_,
                     ),
@@ -152,3 +156,28 @@ class T2SSessionMLX:
 
             attn_mask = mx.expand_dims(attn_mask, 1)
             self.attn_mask = attn_mask
+
+            self.prefill_hidden: Array
+
+            self.start_time: float = 0.0
+            self.total_tokens: int = 0
+
+            self.progress_task: TaskID | None = None
+            self.progress: Progress | None = None
+
+            self.id: int = id(self)
+            self.slot_indices: list[int] = []
+
+
+__all__ = [
+    "T2SRequestMLX",
+    "T2SSessionMLX",
+    "KVCache",
+    "KVCacheProtocol",
+    "T2SDecoderProtocol",
+    "T2SEngineProtocol",
+    "T2SRequest",
+    "T2SRequestHandle",
+    "T2SResult",
+    "T2SStreamResponse",
+]

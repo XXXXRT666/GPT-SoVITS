@@ -432,7 +432,7 @@ def dynamo_export(model: T2SDecoderONNX, stage="embed"):
 
 @app.command()
 def export(
-    ckpt_path: Path = typer.Option(
+    ckpt_path: Path = typer.Option(  # noqa: B008
         ...,
         "--ckpt-path",
         file_okay=True,
@@ -443,7 +443,7 @@ def export(
         help="AR Checkpoint",
     ),
     dynamo: bool = typer.Option(False, is_flag=True, flag_value=True, help="Use Torch Dynamo"),
-    stages: list[Stage] = typer.Option([Stage.embed], "--stages", help="Stage to export"),
+    stages: list[Stage] = typer.Option([Stage.embed], "--stages", help="Stage to export"),  # noqa: B008
 ):
     os.makedirs("onnx_export", exist_ok=True)
     dict_s1 = torch.load(ckpt_path, "cpu", mmap=True)

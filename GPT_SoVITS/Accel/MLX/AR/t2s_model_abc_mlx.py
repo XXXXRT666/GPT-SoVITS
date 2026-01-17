@@ -6,14 +6,18 @@ from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
-from collections.abc import MutableSequence
-from typing import Literal
+from collections.abc import Callable, MutableSequence
+from typing import TYPE_CHECKING, Any, Literal
 
 import mlx.core as mx
 import mlx.nn as nn
 from mlx.core import Dtype
 
-from .structs_mlx import KVCache, KVCacheProtocol, T2SDecoderProtocol, T2SSessionMLX
+from .structs_mlx import KVCache, KVCacheProtocol, T2SSessionMLX as T2SSession
+
+
+if TYPE_CHECKING:
+    from .runner_mlx import ModelRunner
 
 
 Array = mx.array
@@ -157,7 +161,7 @@ class KVCacheHND(KVCacheProtocol):
         return (mx.zeros(cache_shape, dtype=dtype), mx.zeros(cache_shape, dtype=dtype))
 
 
-class AttentionABC(ABC, nn.Module):
+class AttentionABC(nn.Module, ABC):
     def __init__(self, n_head: int, hidden_dim: int, max_seq_length: int, *args, **kwds):
         super().__init__()
 
@@ -177,7 +181,7 @@ class AttentionABC(ABC, nn.Module):
         self.kv_class: KVCacheProtocol
 
     @abstractmethod
-    def __call__(self, x: Array, input_pos: Array, max_idx: int, kv_cache: KVCache, attn_mask: Array) -> Array: ...
+    def __call__(self, x: Array, input_pos: Array, kv_cache: KVCache, attn_mask: Array) -> Array: ...
 
     def prefill(self, x: Array, kv_cache: KVCache, attn_mask: Array):
         bsz, seqlen, _ = x.shape
@@ -214,7 +218,7 @@ class FeedForward(nn.Module):
         return self.linear2(nn.relu(self.linear1(x)))
 
 
-class TransformerBlockABC(nn.Module):
+class TransformerBlockABC(nn.Module, ABC):
     def __init__(self, n_head: int, ffn_dim: int, hidden_dim: int, max_seq_length: int, *args, **kwds) -> None:
         super().__init__()
 
@@ -227,13 +231,12 @@ class TransformerBlockABC(nn.Module):
         self.attention_norm = nn.LayerNorm(self.hidden_dim)
         self.ffn_norm = nn.LayerNorm(self.hidden_dim)
 
-    def __call__(self, x: Array, input_pos: Array, max_idx: int, kv_cache: KVCache, attn_mask: Array):
+    def __call__(self, x: Array, input_pos: Array, kv_cache: KVCache, attn_mask: Array):
         h = self.attention_norm(
             x
             + self.attention(
                 x,
                 input_pos,
-                max_idx,
                 kv_cache,
                 attn_mask,
             )
@@ -241,7 +244,7 @@ class TransformerBlockABC(nn.Module):
         out = self.ffn_norm(h + self.feed_forward(h))
         return out
 
-    def prefill(self, x: Array, attn_mask: Array, kv_cache: KVCache):
+    def prefill(self, x: Array, kv_cache: KVCache, attn_mask: Array):
         h = self.attention_norm(
             x
             + self.attention.prefill(
@@ -255,7 +258,7 @@ class TransformerBlockABC(nn.Module):
         return out
 
 
-class TransformerDecoderABC(nn.Module):
+class TransformerDecoderABC(nn.Module, ABC):
     def __init__(
         self,
         hidden_dim: int,
@@ -288,7 +291,6 @@ class TransformerDecoderABC(nn.Module):
         self,
         x: Array,
         input_pos: Array,
-        max_idx: int,
         kv_caches: MutableSequence[KVCache],
         *args,
         **kwds,
@@ -297,7 +299,6 @@ class TransformerDecoderABC(nn.Module):
             x = layer(
                 x,
                 input_pos,
-                max_idx,
                 kv_cache,
                 *args,
                 **kwds,
@@ -305,17 +306,17 @@ class TransformerDecoderABC(nn.Module):
 
         return x
 
-    def prefill(self, x: Array, mask: Array, kv_caches: MutableSequence[KVCache]):
+    def prefill(self, x: Array, kv_caches: MutableSequence[KVCache], mask: Array):
         for layer, kv_cache in zip(self.layers, kv_caches, strict=False):
             x = layer.prefill(
                 x,
-                mask,
                 kv_cache,
+                mask,
             )
         return x
 
 
-class T2SDecoderABC(nn.Module, T2SDecoderProtocol):
+class T2SDecoderABC(nn.Module, ABC):
     def __init__(
         self,
         config: dict,
@@ -368,6 +369,7 @@ class T2SDecoderABC(nn.Module, T2SDecoderProtocol):
         )
 
         self.kv_class: type[KVCacheProtocol]
+        self.extra_buffer_factory: Callable[[int, T2SDecoderABC], dict[str, Array]] = lambda *_: {}
 
         self.bits: int = -1
         self.group_size: int = -1
@@ -392,7 +394,14 @@ class T2SDecoderABC(nn.Module, T2SDecoderProtocol):
     ):
         x_len: list[int] = [i.shape[0] for i in x]
         x_len_max = max(x_len)
-        xy_pos = mx.zeros((len(x), x_len_max + y.shape[1], self.embedding_dim)).astype(bert_features[0].dtype)
+        xy_pos = mx.zeros(
+            (
+                len(x),
+                x_len_max + y.shape[1],
+                self.embedding_dim,
+            ),
+            bert_features[0].dtype,
+        )
 
         bert_features = list(map(lambda x: x.swapaxes(0, 1), bert_features))
 
@@ -411,39 +420,37 @@ class T2SDecoderABC(nn.Module, T2SDecoderProtocol):
         mx.eval(xy_pos)
         return xy_pos
 
-    def pre_forward(self, session: T2SSessionMLX):
-        attn_mask = session.attn_mask
-        return list(), dict(attn_mask=attn_mask)
+    # Slot-aware hooks for runner-managed buffers.
+    @abstractmethod
+    def pre_forward_slots_hook(self, slots: list[int], runner: ModelRunner) -> dict[str, Any]:
+        return {}
 
-    def post_forward(self, idx: int, session: T2SSessionMLX) -> None:
-        if idx == 0:
-            prefill_len = session.prefill_len
-            bsz = session.bsz
+    @abstractmethod
+    def post_forward_slots_hook(self, slots: list[int], runner: ModelRunner) -> None:
+        return
 
-            range_tensor = mx.arange(self.max_seq_length).reshape(1, 1, 1, self.max_seq_length)
-            prefill_len_expanded = prefill_len.reshape(bsz, 1, 1, 1)
-            attn_mask = range_tensor < prefill_len_expanded
+    @abstractmethod
+    def bind_session_hook(self, session: T2SSession, runner: ModelRunner) -> None:
+        return
 
-            session.attn_mask = attn_mask
+    @abstractmethod
+    def unbind_session_hook(self, session: T2SSession, runner: ModelRunner) -> None:
+        return
 
-        attn_mask = session.attn_mask
-        input_pos = session.input_pos
-        attn_mask[mx.arange(session.bsz), :, :, input_pos] = True
-
-    def quantize(self, mode: Literal["Affine", "MXFP4"] | None = None) -> None:
+    def quantize(self, mode: Literal["Affine", "MXFP8"] | None = None) -> None:
         if mode is None:
             return
-        if mode not in {"Affine", "MXFP4"}:
+        if mode not in {"Affine", "MXFP8"}:
             raise ValueError(f"Unsupported quantization mode: {mode}")
         match mode:
             case "Affine":
                 self.bits = 8
                 self.group_size = 32
                 nn.quantize(self.h, group_size=self.group_size, bits=self.bits, mode="affine")
-            case "MXFP4":
+            case "MXFP8":
                 self.bits = 4
                 self.group_size = 32
-                nn.quantize(self.h, group_size=self.group_size, bits=self.bits, mode="mxfp4")
+                nn.quantize(self.h, group_size=self.group_size, bits=self.bits, mode="mxfp8")
 
             case _:
                 raise ValueError(f"Unsupported Quantization Mode for MLX: {mode}")

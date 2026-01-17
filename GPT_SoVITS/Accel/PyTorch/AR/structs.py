@@ -4,13 +4,17 @@ Modified From https://github.com/XXXXRT666/GPT-SoVITS
 
 from __future__ import annotations
 
-from collections.abc import MutableSequence
-from dataclasses import dataclass
-from typing import Literal, Protocol, TypeAlias
+from collections.abc import Generator, MutableSequence
+from dataclasses import dataclass, field
+from queue import Empty, SimpleQueue
+from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias
 
 import torch
+from rich.progress import Progress, TaskID
 
-from .sample_funcs import SampleProtocol, sample_naive
+
+if TYPE_CHECKING:
+    from .t2s_model_abc import T2SDecoderABC
 
 
 Tensor = torch.Tensor
@@ -24,6 +28,7 @@ class T2SResult:
     infer_speed: tuple[float, float] = (0.0, 0.0)  # Speed, Time
     total_tokens: int = 0
     status: Literal["Success", "Error"] = "Success"
+    request_id: str | int | None = None
     exception: Exception | None = None
     traceback: str | None = None
 
@@ -41,10 +46,40 @@ class T2SRequest:
     temperature: float = 1.0
     repetition_penalty: float = 1.35
     use_cuda_graph: bool = False
+    request_id: str | int = -1
+    stream_interval: int | None = None
+    return_partial: bool = True
     debug: bool = False
 
 
-KVCache: TypeAlias = tuple[Tensor, ...]
+@dataclass
+class T2SStreamResponse:
+    request_id: str | int
+    step: int
+    tokens: list[Tensor] | None
+    finished: bool = False
+    result: T2SResult | None = None
+    exception: Exception | None = None
+
+
+@dataclass
+class T2SRequestHandle:
+    request_id: str | int
+    queue: SimpleQueue[T2SStreamResponse] = field(default_factory=SimpleQueue)
+    done: bool = False
+
+    def get_nowait(self) -> T2SStreamResponse | None:
+        try:
+            return self.queue.get_nowait()
+        except Empty:
+            return None
+
+    async def aget_nowait(self) -> T2SStreamResponse | None:
+        # Non-blocking coroutine wrapper for async callers.
+        return self.get_nowait()
+
+
+KVCache: TypeAlias = tuple[Tensor, Tensor]
 
 
 class KVCacheProtocol(Protocol):
@@ -66,30 +101,25 @@ class KVCacheProtocol(Protocol):
     def sync_cache(tgt: KVCache, src: KVCache) -> None: ...
 
 
-class T2SDecoderProtocol(Protocol):
-    max_seq_length: int
-    EOS: int
-    n_head: int
-
-    @property
-    def device(self) -> torch.device: ...
-
-    def embed(self, x: list[Tensor], y: Tensor, bert_features: list[Tensor]) -> Tensor: ...
-
-
 class T2SEngineProtocol(Protocol):
-    def _handle_request(self, request: T2SRequest) -> tuple[list[Tensor], float, float, int]: ...
+    def generate(self, request: T2SRequest, show_progress: bool = False) -> T2SResult: ...
 
-    def generate(self, request: T2SRequest) -> T2SResult: ...
+    def stream_generate(
+        self, request: T2SRequest, show_progress: bool = False
+    ) -> Generator[T2SStreamResponse, None, None]: ...
+
+    def shutdown(self) -> None: ...
+
+
+cpu = torch.device("cpu")
 
 
 class T2SSession:
     def __init__(
         self,
-        decoder: T2SDecoderProtocol,
+        decoder: T2SDecoderABC,
         request: T2SRequest,
-        sample_func: type[SampleProtocol] = sample_naive,
-        device: torch.device = torch.device("cpu"),
+        device: torch.device = cpu,
         dtype: torch.dtype = torch.float32,
     ):
         with device:
@@ -99,19 +129,22 @@ class T2SSession:
             self.dtype = dtype
 
             bsz = len(request.x)
-            y_len = request.prompts.size(-1)
+            prompt_len = request.prompts.size(-1)
             self.bsz = bsz
-            self.y_len = y_len
+            self.prompt_len = prompt_len
+            self.step_count = 0
+            self.request_id = request.request_id or id(self)
+            self.stream_interval = request.stream_interval if request.stream_interval is not None else 0
+            self.last_stream_step = 0
             request.prompts = request.prompts.to(device, torch.int32)
 
-            # Cache
+            # Cache in prefill
             self.kv_cache: MutableSequence[KVCache]
-            self.sample = sample_func()
 
             # Forward args
             self.x = [i.to(device) for i in request.x]
             self.x_lens = request.x_lens.to(device, torch.int32)
-            self.y = torch.zeros((bsz, decoder.max_seq_length)).to(torch.int32)
+            self.y = torch.zeros((bsz, 500), device=device, dtype=torch.int32)
             self.y[:, : request.prompts.shape[-1]] = request.prompts
             self.bert_feature = [i.to(device, dtype) for i in request.bert_feature]
 
@@ -120,33 +153,27 @@ class T2SSession:
             self.input_pos = torch.zeros_like(self.prefill_len)
             self.input_pos.add_(self.prefill_len)
             self.input_pos.squeeze_(0)
-
-            # CUDA Graph
-            self.stream: torch.cuda.Stream | None = None
-            self.graph: torch.cuda.CUDAGraph | None = None
-            self.xy_pos_: Tensor
-            self.xy_dec_: Tensor
+            self.max_decode_steps = min(int(decoder.max_seq_length - int(self.input_pos.max().item())), 640)
+            self.max_decode_steps = max(1, self.max_decode_steps)
 
             # EOS
-            self.completed = torch.Tensor([False] * len(self.x)).bool().to(device)
+            self.completed = torch.Tensor([False] * len(self.x)).bool()
             self.y_results: list[Tensor] = [None] * len(self.x)  # type: ignore
-
-            self.xy_pos = decoder.embed(self.x, request.prompts, self.bert_feature)
 
             max_len = int(self.prefill_len.max().item())
             attn_mask = torch.zeros(size=(bsz, max_len, max_len), dtype=torch.bool)
 
             for bs in range(bsz):
                 pos = int(self.x_lens[bs])
-                seq_len = pos + y_len
+                seq_len = pos + prompt_len
 
                 attn_mask[bs, :seq_len, :pos] = True
 
                 ar_mask = ~torch.triu(
                     input=torch.ones(
                         size=(
-                            y_len,
-                            y_len,
+                            prompt_len,
+                            prompt_len,
                         ),
                         dtype=torch.bool,
                     ),
@@ -154,10 +181,18 @@ class T2SSession:
                 )
                 attn_mask[bs, pos:seq_len, pos:seq_len] = ar_mask
 
-            self.attn_mask = attn_mask
             self.attn_mask = attn_mask.unsqueeze(1)
 
-            self.id: int = -1
+            # Streaming / book-keeping
+            self.start_time: float = 0.0
+            self.total_tokens: int = 0
+
+            self.prefill_hidden: Tensor
+            self.progress_task: TaskID | None = None
+            self.progress: Progress | None = None
+
+            self.id: int = id(self)
+            self.slot_indices: list[int] = []
 
             # Sage Attn & Transformer Engine Impl
             self.cu_seqlens_q: Tensor

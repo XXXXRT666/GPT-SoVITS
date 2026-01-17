@@ -8,20 +8,21 @@ import math
 import os
 import time
 from abc import ABC, abstractmethod
-from collections.abc import MutableSequence
+from collections.abc import Callable, MutableSequence
 from contextlib import nullcontext
-from queue import Queue
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 import torch.nn.functional as F
-from torch.cuda.graphs import CUDAGraph
 from torch.profiler import ExecutionTraceObserver, ProfilerAction, tensorboard_trace_handler
 
 from .. import nn
 from .quantization import replace_all_linear_with_fp8
-from .structs import KVCache, KVCacheProtocol, T2SDecoderProtocol, T2SSession
+from .structs import KVCache, KVCacheProtocol, T2SSession
 
+
+if TYPE_CHECKING:
+    from .runner import ModelRunner
 
 Tensor = torch.Tensor
 
@@ -361,7 +362,7 @@ class TransformerDecoderABC(nn.Module, ABC):
         return x
 
 
-class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
+class T2SDecoderABC(nn.Module, ABC):
     def __init__(
         self,
         config: dict,
@@ -394,13 +395,9 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
         self.EOS = EOS
         assert self.EOS == self.vocab_size - 1
 
-        self.bert_proj: nn.Linear
-        self.ar_predict_layer: nn.Linear
+        self.bert_proj = nn.Linear(1024, self.embedding_dim)
+        self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h: TransformerDecoderABC
-
-        self.kv_class: type[KVCacheProtocol]
-
-        self.GraphCache: CUDAGraphCacheABC | None
 
         self.ar_text_embedding = TokenEmbedding(self.embedding_dim, self.phoneme_vocab_size)
         self.ar_text_position = SinePositionalEmbedding(
@@ -419,7 +416,11 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
             max_seq_length=max_seq_length,
         )
 
-        self.graph_cache_class: type[CUDAGraphCacheABC]
+        self.kv_class: type[KVCacheProtocol]
+        self.device: torch.device
+
+        self.graph_applicable: bool = False
+        self.extra_buffer_factory: Callable[[int, T2SDecoderABC], dict[str, torch.Tensor]] = lambda *_: {}
 
         self.bits: int
         self.group_size: int
@@ -458,7 +459,11 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
     ):
         x_len: list[int] = [i.shape[0] for i in x]
         x_len_max = max(x_len)
-        xy_pos = torch.zeros((len(x), x_len_max + y.shape[1], self.embedding_dim)).to(bert_features[0].dtype)
+        xy_pos = torch.zeros(
+            (len(x), x_len_max + y.shape[1], self.embedding_dim),
+            device=bert_features[0].device,
+            dtype=bert_features[0].dtype,
+        )
 
         bert_features = list(map(lambda x: x.transpose(0, 1), bert_features))
 
@@ -477,8 +482,15 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
         return xy_pos
 
     def capture(
-        self, input_pos: Tensor, x: Tensor, x_dec: Tensor, kv_caches: MutableSequence[KVCache], *args, **kwds
-    ) -> CUDAGraph:
+        self,
+        input_pos: Tensor,
+        x: Tensor,
+        x_dec: Tensor,
+        kv_caches: MutableSequence[KVCache],
+        pool: torch.cuda._POOL_HANDLE | None = None,
+        *args,
+        **kwds,
+    ):
         assert torch.cuda.is_available()
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
@@ -490,19 +502,36 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
                 self.h(x, input_pos, kv_caches, *args, **kwds)
         torch.cuda.current_stream().wait_stream(s)
 
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, pool):
             x_dec.copy_(self.h(x, input_pos, kv_caches, *args, **kwds))
         torch.cuda.synchronize()
 
         return graph
 
+    # Slot-aware hooks for runner-managed buffers.
     @abstractmethod
-    def pre_forward(self, session: T2SSession) -> tuple[list[Tensor], dict[str, Tensor]]:
-        return list(), dict()
+    def pre_forward_slots_hook(self, slots: list[int], runner: ModelRunner) -> dict[str, Any]:
+        return {}
 
     @abstractmethod
-    def post_forward(self, idx: int, session: T2SSession) -> None:
+    def post_forward_slots_hook(self, slots: list[int], runner: ModelRunner) -> None:
         return
+
+    @abstractmethod
+    def bind_session_hook(self, session: T2SSession, runner: ModelRunner) -> None:
+        return
+
+    @abstractmethod
+    def unbind_session_hook(self, session: T2SSession, runner: ModelRunner) -> None:
+        return
+
+    @abstractmethod
+    def graph_capture_inputs(self, runner: ModelRunner, bsz: int) -> tuple[list, dict[str, Any]]:
+        args = [runner.input_pos_buf, runner.xy_pos_buf, runner.xy_dec_buf, runner.kv_cache_buf]
+        kwds = {}
+        if runner.extra_buffers.get("attn_mask") is not None:
+            kwds["attn_mask"] = runner.extra_buffers["attn_mask"]
+        return args, kwds
 
     def quantize(self, mode: Literal["Int8", "FP8", "FP8_E4M3FN"] | None = None) -> None:
         if mode is None:
@@ -529,83 +558,6 @@ class T2SDecoderABC(nn.Module, ABC, T2SDecoderProtocol):
 
             case _:
                 raise ValueError(f"Unsupported Quantization Mode for PyTorch: {mode}")
-
-
-class CUDAGraphStateABC(ABC):
-    def __init__(
-        self,
-        bsz: int,
-        decoder: T2SDecoderABC,
-    ) -> None:
-        self.bsz = bsz
-        self.embedding_dim = decoder.embedding_dim
-        self.dtype = decoder.bert_proj.bias.dtype
-        self.device = decoder.device
-
-        self.decoder: T2SDecoderABC = decoder
-        self.graph: torch.cuda.CUDAGraph | None = None
-        self.stream: torch.cuda.Stream | None = None
-
-        self.xy_pos = torch.rand(size=(self.bsz, 1, self.embedding_dim), device=self.device).to(self.dtype)
-        self.kv_cache: MutableSequence[KVCache] = decoder.init_cache(bsz)
-        self.kvclass = decoder.kv_class
-        self.xy_dec = self.xy_pos.clone()
-        self.input_pos = torch.tensor([10] * self.bsz, device=self.device).to(torch.int32)
-
-        self.capture()
-
-    @abstractmethod
-    def capture(self): ...
-
-    def assign_graph(self, session: T2SSession) -> CUDAGraphStateABC:
-        assert self.graph
-        session.graph = self.graph
-        session.stream = self.stream
-
-        session.xy_pos_ = self.xy_pos
-        session.xy_dec_ = self.xy_dec
-        session.input_pos = self.input_pos.copy_(session.input_pos)
-
-        for cache_t, cache_s in zip(self.kv_cache, session.kv_cache, strict=False):
-            self.kvclass.sync_cache(cache_t, cache_s)
-
-        return self
-
-
-class CUDAGraphCacheABC(ABC):
-    is_applicable: bool
-
-    def __init__(self, decoder: T2SDecoderABC, cache_size: int = 3) -> None:
-        self.decoder = decoder
-        self.max_batch_size = decoder.max_batch_size
-        self.cache_size = cache_size
-
-        self.graph_cache: dict[int, Queue[CUDAGraphStateABC]] = {}
-
-        if torch.cuda.is_available() and torch.version.cuda is not None and os.environ.get("CUDAGraph", "1") != "0":
-            self.graph_cache[1] = Queue()
-            self.create_graph_cache(1)
-
-    def __getitem__(self, bsz: int) -> CUDAGraphStateABC:
-        if self.is_applicable:
-            assert bsz <= self.max_batch_size
-            if self.graph_cache.get(bsz) is None:
-                self.graph_cache[bsz] = Queue()
-                self.create_graph_cache(bsz)
-            return self.graph_cache[bsz].get()
-        else:
-            raise RuntimeError("CUDAGraph Is Not Applicable")
-
-    @abstractmethod
-    def create_graph_cache(self, bsz: int): ...
-
-    def release_graph(self, graph_state: CUDAGraphStateABC | None):
-        if graph_state is None:
-            return
-        bsz = graph_state.bsz
-        assert bsz <= self.max_batch_size
-        assert self.graph_cache.get(bsz) is not None
-        self.graph_cache[bsz].put(graph_state)
 
 
 class TorchProfiler:

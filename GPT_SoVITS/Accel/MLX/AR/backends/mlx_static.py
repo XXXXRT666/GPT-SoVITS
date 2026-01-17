@@ -3,7 +3,7 @@ from __future__ import annotations
 import mlx.core as mx
 
 from ..structs_mlx import KVCache
-from ..t2s_model_abc import (
+from ..t2s_model_abc_mlx import (
     AttentionABC,
     KVCacheHND,
     T2SDecoderABC,
@@ -97,3 +97,34 @@ class T2SDecoder(T2SDecoderABC):
         )
 
         self.kv_class = KVCacheHND
+
+        self.extra_buffer_factory = lambda max_bs, dec: {
+            "attn_mask": mx.zeros((max_bs, dec.n_head, 1, dec.max_seq_length), dtype=mx.bool_)
+        }
+
+    def pre_forward_slots_hook(self, slots, runner):
+        attn_mask_buf = runner.extra_buffers["attn_mask_buf"]
+        max_idx = runner.input_pos_buf[slots].long().max().item()
+        return {"attn_mask": attn_mask_buf[slots], "max_idx": max_idx}
+
+    def post_forward_slots_hook(self, slots, runner) -> None:
+        attn_mask_buf = runner.extra_buffers["attn_mask_buf"]
+        pos = runner.input_pos_buf[slots].long()
+        attn_mask_buf[slots, :, :, pos] = True
+
+    def bind_session_hook(self, session, runner) -> None:
+        slots = session.slot_indices
+
+        prefill_len = session.prefill_len
+        bsz = session.bsz
+
+        range_tensor = mx.arange(self.max_seq_length).reshape(1, 1, 1, self.max_seq_length)
+        prefill_len_expanded = prefill_len.reshape(bsz, 1, 1, 1)
+        attn_mask = range_tensor < prefill_len_expanded
+
+        runner.extra_buffers["attn_mask_buf"][slots] = attn_mask
+
+    def unbind_session_hook(self, session, runner) -> None:
+        slots = session.slot_indices
+        attn_mask_buf = runner.extra_buffers["attn_mask_buf"]
+        attn_mask_buf[slots] = 0

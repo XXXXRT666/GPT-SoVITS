@@ -1,9 +1,12 @@
-import contextlib
-import gc
+from __future__ import annotations
+
 import os
+import threading
 import time
 import traceback
+from collections import deque
 from importlib import import_module
+from queue import Empty, SimpleQueue
 from typing import Literal
 
 import torch
@@ -11,17 +14,29 @@ from rich.progress import BarColumn, Progress, TextColumn
 
 from gsv_tools.logger import SpeedColumnToken, Timer, console, logger
 
-from .structs import T2SEngineProtocol, T2SRequest, T2SResult, T2SSession
-from .t2s_model_abc import (
-    CUDAGraphCacheABC,
-    T2SDecoderABC,
-    TorchProfiler,
+from .runner import ModelRunner
+from .structs import (
+    T2SEngineProtocol,
+    T2SRequest,
+    T2SRequestHandle,
+    T2SResult,
+    T2SSession,
+    T2SStreamResponse,
 )
+from .t2s_model_abc import T2SDecoderABC
 
 
 timer = Timer("T2S Engine Torch")
 
 cpu = torch.device("cpu")
+
+empty_result = T2SResult(
+    result=None,
+    infer_speed=(0.0, 0.0),
+    total_tokens=0,
+    status="Error",
+    exception=RuntimeError("Empty Result"),
+)
 
 
 def synchronize_device(device: torch.device) -> None:
@@ -44,7 +59,8 @@ class T2SEngine(T2SEngineProtocol):
         decoder_model: T2SDecoderABC,
         device: torch.device = cpu,
         dtype: torch.dtype = torch.float32,
-        cache_size: int = 3,
+        start_background: bool = True,
+        use_cuda_graph: bool | None = None,
         *args,
         **kwds,
     ) -> None:
@@ -55,199 +71,237 @@ class T2SEngine(T2SEngineProtocol):
         self.dtype = dtype
 
         self.decoder_model: T2SDecoderABC = decoder_model.to(self.device, self.dtype)
+        self.waiting_bind: deque[T2SSession] = deque()
 
-        self.graphcache: CUDAGraphCacheABC = decoder_model.graph_cache_class(self.decoder_model, cache_size)
+        graph_flag = decoder_model.graph_applicable if use_cuda_graph is None else use_cuda_graph
+        self.model_runner = ModelRunner(
+            self.decoder_model, self.device, self.dtype, use_cuda_graph=graph_flag, waiting_bind=self.waiting_bind
+        )
 
-    def _handle_request(self, request: T2SRequest):
-        with self.device:
-            decoder = self.decoder_model
-            session = T2SSession(decoder, request, device=self.device, dtype=self.dtype)
-            batch_idx = torch.arange(session.bsz)
-            debug = request.debug
+        self.pending_requests: SimpleQueue[tuple[T2SRequest, T2SRequestHandle, bool]] = SimpleQueue()
+        self.handles: dict[str | int, T2SRequestHandle] = {}
+        self._stop_event = threading.Event()
+        self._request_counter = 0
+        self._loop_thread: threading.Thread | None = None
 
-            t1 = 0.0
-            infer_speed = 0.0
-            infer_time = 0.0
-            idx = 0
-            graph_state = None
-            bsz = session.bsz
-            result: list[torch.Tensor] = []
+        if start_background:
+            self._loop_thread = threading.Thread(target=self._background_loop, daemon=True)
+            self._loop_thread.start()
 
-            torch_profiler = TorchProfiler(debug)
-            with (
-                torch_profiler.profiler(),
-                Progress(
+    def add_request(
+        self,
+        request: T2SRequest,
+        stream_interval: int | None = None,
+        show_progress: bool = False,
+    ) -> T2SRequestHandle:
+        if stream_interval is not None:
+            request.stream_interval = stream_interval
+        if request.request_id is None:
+            self._request_counter += 1
+            request.request_id = f"req-{self._request_counter}"
+
+        handle = T2SRequestHandle(request_id=request.request_id)
+        self.handles[request.request_id] = handle
+        self.pending_requests.put((request, handle, show_progress))
+
+        if self._loop_thread is None or not self._loop_thread.is_alive():
+            self._loop_thread = threading.Thread(target=self._background_loop, daemon=True)
+            self._loop_thread.start()
+
+        return handle
+
+    def stream_generate(self, request: T2SRequest, show_progress: bool = False):
+        """Generator yielding streaming responses until completion."""
+        handle = self.add_request(request, stream_interval=request.stream_interval, show_progress=show_progress)
+        while True:
+            resp = handle.queue.get()
+            yield resp
+            if resp.finished:
+                break
+
+    def generate(self, request: T2SRequest, show_progress: bool = False):
+        """Blocking generate that consumes the streaming queue until finished."""
+        final_result = empty_result
+        for response in self.stream_generate(request, show_progress=show_progress):
+            if response.finished:
+                final_result = response.result or T2SResult(
+                    status="Error",
+                    exception=response.exception,
+                    request_id=request.request_id,
+                )
+        return final_result
+
+    def shutdown(self):
+        self._stop_event.set()
+        if self._loop_thread is not None:
+            self._loop_thread.join(timeout=1.0)
+            self._loop_thread = None
+
+    def _emit_stream(
+        self,
+        session: T2SSession,
+        tokens: list[torch.Tensor] | None,
+        finished: bool = False,
+        result: T2SResult | None = None,
+        exception: Exception | None = None,
+    ):
+        handle = self.handles.get(session.request_id)
+        if handle is None:
+            return
+
+        step = -1 if finished else session.step_count
+        payload = T2SStreamResponse(
+            request_id=session.request_id,
+            step=step,
+            tokens=tokens,
+            finished=finished,
+            result=result,
+            exception=exception,
+        )
+        handle.queue.put(payload)
+        if finished:
+            handle.done = True
+            self.handles.pop(session.request_id, None)
+
+    def _maybe_stream_partial(self, session: T2SSession):
+        if session.stream_interval <= 0:
+            return
+        if session.step_count == 0 or session.step_count - session.last_stream_step < session.stream_interval:
+            return
+
+        start = session.prompt_len + session.last_stream_step
+        end = session.prompt_len + session.step_count
+        tokens = [self.model_runner.y_buf[session.slot_indices[i], start:end].clone() for i in range(session.bsz)]
+        self._emit_stream(session, tokens=tokens, finished=False)
+        session.last_stream_step = session.step_count
+
+    def _finalize_session(
+        self,
+        session: T2SSession,
+        exception: Exception | None = None,
+    ):
+        request = session.request
+        infer_time = max(time.perf_counter() - session.start_time, 1e-6)
+        infer_speed = (session.total_tokens / infer_time if session.total_tokens else 0.0, infer_time)
+        status: Literal["Success", "Error"] = "Error" if exception else "Success"
+
+        if exception:
+            logger.error(f"T2S request {session.request_id} failed: {exception}")
+            traceback.print_exc()
+
+        runner = self.model_runner
+        tokens_out = [
+            runner.y_buf[session.slot_indices[i], session.prompt_len : session.prompt_len + session.step_count].clone()
+            for i in range(min(request.valid_length, session.bsz))
+        ]
+
+        result = T2SResult(
+            result=tokens_out if not exception else None,
+            infer_speed=infer_speed,
+            total_tokens=session.total_tokens,
+            status=status,
+            exception=exception,
+            traceback=traceback.format_exc() if exception else None,
+            request_id=session.request_id,
+        )
+
+        self._emit_stream(
+            session,
+            tokens=tokens_out if result.result is not None else None,
+            finished=True,
+            result=result,
+            exception=exception,
+        )
+
+        if session.progress_task is not None and session.progress is not None:
+            try:
+                session.progress.update(
+                    session.progress_task,
+                    completed=session.progress.tasks[session.progress_task].total,
+                )
+                session.progress.remove_task(session.progress_task)
+                session.progress.stop()
+            except Exception:
+                pass
+            session.progress = None
+
+    def _drain_new_requests(self) -> bool:
+        new_added = False
+        while True:
+            try:
+                request, handle, show_progress = self.pending_requests.get_nowait()
+            except Empty:
+                break
+
+            try:
+                session = self.model_runner.prefill(request)
+            except Exception as e:
+                logger.error(f"Prefill failed for request {request.request_id}: {e}")
+                error_result = T2SResult(
+                    status="Error",
+                    exception=e,
+                    traceback=traceback.format_exc(),
+                    request_id=request.request_id,
+                )
+                handle.queue.put(
+                    T2SStreamResponse(
+                        request_id=request.request_id or "unknown",
+                        step=-1,
+                        tokens=None,
+                        finished=True,
+                        result=error_result,
+                        exception=e,
+                    )
+                )
+                handle.done = True
+                self.handles.pop(request.request_id, None)
+                continue
+
+            total_tokens = max(1, session.max_decode_steps * session.bsz)
+            if show_progress:
+                session.progress = Progress(
                     TextColumn("[cyan]{task.description}"),
                     BarColumn(),
                     TextColumn("{task.completed}/{task.total} tokens"),
                     SpeedColumnToken(show_speed=True),
                     console=console,
                     transient=True,
-                ) as progress,
-            ):
-                torch_profiler.start()
-                max_token = min(int(1024 - session.input_pos.max()), 640) * bsz
-                task = progress.add_task("T2S Decoding", total=max_token)
+                )
+                session.progress.start()
+                session.progress_task = session.progress.add_task(f"T2S[{session.request_id}]", total=total_tokens)
+            self.waiting_bind.append(session)
+            new_added = True
+        return new_added
 
-                try:
-                    for idx in range(max_token):
-                        progress.update(task, advance=bsz)
-                        if idx == 0:
-                            with torch_profiler.record("Prefill"), timer("Torch.Prefill", debug=debug):
-                                session.kv_cache = decoder.init_cache(bsz)
-                                t1 = time.perf_counter()
-                                xy_dec = decoder.h.prefill(session.xy_pos, session.kv_cache, session.attn_mask)
-                                xy_dec = xy_dec[batch_idx, None, session.input_pos - 1]
-                                if debug:
-                                    synchronize_device(session.device)
-                        else:
-                            if (
-                                idx == 1
-                                and request.use_cuda_graph
-                                and self.graphcache.is_applicable
-                                and torch.cuda.is_available()
-                                and torch.version.cuda is not None
-                                and os.environ.get("CUDAGraph", "1") != "0"
-                            ):
-                                graph_state = self.graphcache[bsz].assign_graph(session)
+    def _background_loop(self):
+        torch.set_grad_enabled(False)
+        while not self._stop_event.is_set():
+            self._drain_new_requests()
 
-                            with torch_profiler.record("Decode"), timer("Torch.Decode", debug=debug):
-                                if session.graph:
-                                    assert session.stream
-                                    session.stream.wait_stream(torch.cuda.default_stream())
-                                    with torch.cuda.stream(session.stream):
-                                        session.xy_pos_.copy_(session.xy_pos)
-                                        session.graph.replay()
-                                        xy_dec = session.xy_dec_.clone()
-                                else:
-                                    args, kwds = decoder.pre_forward(session)
-                                    xy_dec = decoder.h(
-                                        session.xy_pos,
-                                        session.input_pos,
-                                        session.kv_cache,
-                                        *args,
-                                        **kwds,
-                                    )
-                                if debug:
-                                    synchronize_device(session.device)
+            if not self.model_runner.bound_sessions:
+                if not self.waiting_bind:
+                    time.sleep(0.001)
+                    continue
 
-                        with (
-                            torch.cuda.stream(session.stream)
-                            if session.stream is not None
-                            else contextlib.nullcontext()
-                        ):
-                            decoder.post_forward(idx, session)
-                            logits = decoder.ar_predict_layer(xy_dec.squeeze(1))
+            try:
+                finished_sessions = self.model_runner.decode_step()
+            except Exception as e:
+                for session in list(self.model_runner.bound_sessions):
+                    self._finalize_session(session, exception=e)
+                    self.model_runner.unbind_session(session)
+                continue
 
-                            if idx == 0:
-                                logits[:, -1] = float("-inf")
+            for session in list(self.model_runner.bound_sessions):
+                self._maybe_stream_partial(session)
+                if session.progress_task is not None and session.progress is not None:
+                    session.progress.update(session.progress_task, advance=session.bsz)
 
-                            with torch_profiler.record("Sampling"), timer("Torch.Sampling", debug=debug):
-                                samples = session.sample(
-                                    logits=logits,
-                                    previous_tokens=session.y[:, : session.y_len + idx],
-                                    top_k=request.top_k,
-                                    top_p=request.top_p,
-                                    repetition_penalty=request.repetition_penalty,
-                                    temperature=request.temperature,
-                                )
-                                session.y[batch_idx.reshape(-1, 1), session.y_len + idx] = samples
-                                session.input_pos.add_(1)
-                                if debug:
-                                    synchronize_device(session.device)
+            if finished_sessions:
+                for session in finished_sessions:
+                    self._finalize_session(session, exception=None)
 
-                            with torch_profiler.record("EOS"), timer("Torch.EOS", debug=debug):
-                                argmax_token = torch.argmax(logits, dim=-1)
-                                sample_token = samples.squeeze(1)
-                                EOS_mask = (argmax_token == decoder.EOS) | (sample_token == decoder.EOS)
-
-                                newly_done_mask = EOS_mask & (~session.completed)
-                                newly_done_indices = batch_idx[newly_done_mask]
-
-                                if newly_done_indices.numel() > 0:
-                                    for i in newly_done_indices:
-                                        session.y_results[i] = session.y[i, session.y_len : session.y_len + idx].view(
-                                            -1
-                                        )
-                                        session.completed[newly_done_indices] = True
-                                if debug:
-                                    synchronize_device(session.device)
-
-                            if torch.all(session.completed).item():
-                                logger.info(
-                                    f"T2S Decoding EOS {session.prefill_len.tolist().__str__().strip('[]')} -> "
-                                    f"{[i.size(-1) for i in session.y_results].__str__().strip('[]')}"
-                                )
-                                logger.info(f"Infer Speed: {(idx + 1) * bsz / (time.perf_counter() - t1):.2f} token/s")
-                                infer_time = time.perf_counter() - t1
-                                infer_speed = (idx + 1) * bsz / infer_time
-                                break
-
-                            if (request.early_stop_num != -1 and idx >= request.early_stop_num) or idx == max_token - 1:
-                                for i in range(bsz):
-                                    if not session.completed[i].item():
-                                        session.y_results[i] = session.y[[i], session.y_len : session.y_len + idx].view(
-                                            -1
-                                        )
-                                        session.completed[i] = True
-                                    logger.error("Bad Full Prediction")
-                                    infer_time = time.perf_counter() - t1
-                                    infer_speed = (idx + 1) * bsz / infer_time
-                                break
-
-                            with torch_profiler.record("NextPos"), timer("Torch.NextPos", debug=debug):
-                                y_emb = decoder.ar_audio_embedding(samples)
-                                session.xy_pos = decoder.ar_audio_position(session.input_pos - session.x_lens, y_emb)
-                                if debug:
-                                    synchronize_device(session.device)
-
-                            if idx == 10:
-                                torch_profiler.end()
-
-                    if debug:
-                        timer.summary()
-                        timer.clear()
-
-                    result = session.y_results[: request.valid_length]
-
-                    return result, infer_speed, infer_time, (idx + 1) * bsz
-
-                finally:
-                    del session
-
-                    if (
-                        request.use_cuda_graph
-                        and self.graphcache.is_applicable
-                        and torch.cuda.is_available()
-                        and torch.version.cuda is not None
-                        and os.environ.get("CUDAGraph", "1") != "0"
-                    ):
-                        self.graphcache.release_graph(graph_state)
-
-                        match decoder.device.type:
-                            case "cuda":
-                                torch.cuda.empty_cache()
-                            case "mps":
-                                torch.mps.empty_cache()
-                            case "xpu":
-                                torch.xpu.empty_cache()
-                            case "mtia":
-                                torch.mtia.empty_cache()
-                            case "cpu":
-                                gc.collect(1)
-
-    def generate(self, request: T2SRequest):
-        try:
-            result, infer_speed, infer_time, total_tokens = self._handle_request(request)
-            t2s_result = T2SResult(
-                result=result,
-                infer_speed=(infer_speed, infer_time),
-                total_tokens=total_tokens,
-                status="Success",
-            )
-        except Exception as e:
-            t2s_result = T2SResult(status="Error", exception=e, traceback=traceback.format_exc())
-        return t2s_result
+    def __del__(self):
+        self.shutdown()
 
     @staticmethod
     def load_decoder(

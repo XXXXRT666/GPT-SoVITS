@@ -2,11 +2,9 @@ import torch
 from torch.nn import functional as F
 
 from ... import nn
-from ..structs import KVCache, T2SSession
+from ..structs import KVCache
 from ..t2s_model_abc import (
     AttentionABC,
-    CUDAGraphCacheABC,
-    CUDAGraphStateABC,
     FeedForward,
     KVCacheHND,
     T2SDecoderABC,
@@ -87,8 +85,6 @@ class T2SDecoder(T2SDecoderABC):
     ) -> None:
         super().__init__(config, max_seq_length, max_batch_size)
 
-        self.bert_proj = nn.Linear(1024, self.embedding_dim)
-        self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h: TransformerDecoderABC = TransformerDecoder(
             self.hidden_dim,
             self.n_layer,
@@ -101,76 +97,35 @@ class T2SDecoder(T2SDecoderABC):
 
         self.kv_class = KVCacheHND
 
-        self.graph_cache_class = CUDAGraphCache
+        self.extra_buffer_factory = lambda max_bs, dec: {
+            "attn_mask": torch.zeros((max_bs, dec.n_head, 1, dec.max_seq_length), device=dec.device, dtype=torch.bool)
+        }
 
-    def pre_forward(self, session: T2SSession):
-        attn_mask = session.attn_mask
-        return list(), dict(attn_mask=attn_mask)
+        self.graph_applicable = True
 
-    def post_forward(self, idx: int, session: T2SSession) -> None:
-        if idx == 0:
-            prefill_len = session.prefill_len
-            bsz = session.bsz
+    def pre_forward_slots_hook(self, slots, runner):
+        attn_mask_buf = runner.extra_buffers["attn_mask_buf"]
+        max_idx = runner.input_pos_buf[slots].long().max().item()
+        return {"attn_mask": attn_mask_buf[slots], "max_idx": max_idx}
 
-            range_tensor = torch.arange(self.max_seq_length).view(1, 1, 1, self.max_seq_length)
-            prefill_len_expanded = prefill_len.view(bsz, 1, 1, 1)
-            attn_mask = range_tensor < prefill_len_expanded
+    def post_forward_slots_hook(self, slots, runner) -> None:
+        attn_mask_buf = runner.extra_buffers["attn_mask_buf"]
+        pos = runner.input_pos_buf[slots].long()
+        attn_mask_buf[slots, :, :, pos] = True
 
-            session.attn_mask = attn_mask
+    def bind_session_hook(self, session, runner) -> None:
+        slots = session.slot_indices
 
-        attn_mask = session.attn_mask
-        input_pos = session.input_pos
-        attn_mask[torch.arange(session.bsz), :, :, input_pos] = True
+        prefill_len = session.prefill_len
+        bsz = session.bsz
 
+        range_tensor = torch.arange(self.max_seq_length).view(1, 1, 1, self.max_seq_length)
+        prefill_len_expanded = prefill_len.view(bsz, 1, 1, 1)
+        attn_mask = range_tensor < prefill_len_expanded
 
-class CUDAGraphState(CUDAGraphStateABC):
-    applicable: bool = False
+        runner.extra_buffers["attn_mask_buf"][slots] = attn_mask
 
-    def __init__(
-        self,
-        bsz: int,
-        decoder: T2SDecoderABC,
-    ) -> None:
-        self.attn_mask: Tensor = (
-            torch.randint(
-                0,
-                2,
-                (bsz, decoder.n_head, 1, decoder.max_seq_length),
-            )
-            .bool()
-            .to(decoder.device)
-        )
-
-        super().__init__(bsz, decoder)
-
-    def capture(self):
-        graph = self.decoder.capture(
-            self.input_pos,
-            self.xy_pos,
-            self.xy_dec,
-            self.kv_cache,
-            attn_mask=self.attn_mask,
-        )
-        self.graph = graph
-        self.stream = torch.cuda.Stream()
-
-    def assign_graph(self, session: T2SSession):
-        session.attn_mask = self.attn_mask
-        return super().assign_graph(session)
-
-
-class CUDAGraphCache(CUDAGraphCacheABC):
-    is_applicable = True
-
-    def __init__(
-        self,
-        decoder,
-        cache_size: int = 3,
-    ) -> None:
-        super().__init__(decoder, cache_size)
-
-    def create_graph_cache(self, bsz: int):
-        for _ in range(self.cache_size):
-            state = CUDAGraphState(bsz, self.decoder)
-            state.capture()
-            self.graph_cache[bsz].put(state)
+    def unbind_session_hook(self, session, runner) -> None:
+        slots = session.slot_indices
+        attn_mask_buf = runner.extra_buffers["attn_mask_buf"]
+        attn_mask_buf[slots].zero_()

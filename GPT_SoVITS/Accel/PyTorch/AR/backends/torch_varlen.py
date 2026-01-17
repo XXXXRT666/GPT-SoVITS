@@ -1,13 +1,12 @@
-from typing import NoReturn
+from collections.abc import Callable
 
 import torch
 from torch.nn import functional as F
 
 from ... import nn
-from ..structs import KVCache, T2SSession
+from ..structs import KVCache
 from ..t2s_model_abc import (
     AttentionABC,
-    CUDAGraphCacheABC,
     FeedForward,
     KVCacheHND,
     T2SDecoderABC,
@@ -92,8 +91,6 @@ class T2SDecoder(T2SDecoderABC):
     ) -> None:
         super().__init__(config, max_seq_length, max_batch_size)
 
-        self.bert_proj = nn.Linear(1024, self.embedding_dim)
-        self.ar_predict_layer = nn.Linear(self.hidden_dim, self.vocab_size, bias=False)
         self.h: TransformerDecoderABC = TransformerDecoder(
             self.hidden_dim,
             self.n_layer,
@@ -105,46 +102,51 @@ class T2SDecoder(T2SDecoderABC):
         )
 
         self.kv_class = KVCacheHND
+        self.device: torch.device
 
-        self.graph_cache_class = CUDAGraphCache
+        self.extra_buffer_factory: Callable[[int, T2SDecoderABC], dict[str, Tensor]] = lambda max_bs, dec: {
+            "attn_mask_buf": torch.zeros(
+                (
+                    max_bs,
+                    dec.n_head,
+                    1,
+                    dec.max_seq_length,
+                ),
+                device=dec.device,
+                dtype=torch.bool,
+            )
+        }
 
     def capture(
         self,
         *args,
         **kwds,
-    ) -> NoReturn:
+    ):
         raise NotImplementedError("Cuda Graph Is Not Supported For Varlen Model")
 
-    def pre_forward(self, session: T2SSession):
-        attn_mask = session.attn_mask
-        max_idx = session.input_pos.max()
-        return list(), dict(attn_mask=attn_mask, max_idx=max_idx)
+    def pre_forward_slots_hook(self, slots, runner):
+        attn_mask_buf = runner.extra_buffers["attn_mask_buf"]
+        max_idx = runner.input_pos_buf[slots].long().max().item()
+        return {"attn_mask": attn_mask_buf[slots], "max_idx": max_idx}
 
-    def post_forward(self, idx: int, session: T2SSession) -> None:
-        if idx == 0:
-            prefill_len = session.prefill_len
-            bsz = session.bsz
+    def post_forward_slots_hook(self, slots, runner) -> None:
+        attn_mask_buf = runner.extra_buffers["attn_mask_buf"]
+        pos = runner.input_pos_buf[slots].long()
+        attn_mask_buf[slots, :, :, pos] = True
 
-            range_tensor = torch.arange(self.max_seq_length).view(1, 1, 1, self.max_seq_length)
-            prefill_len_expanded = prefill_len.view(bsz, 1, 1, 1)
-            attn_mask = range_tensor < prefill_len_expanded
+    def bind_session_hook(self, session, runner) -> None:
+        slots = session.slot_indices
 
-            session.attn_mask = attn_mask
+        prefill_len = session.prefill_len
+        bsz = session.bsz
 
-        attn_mask = session.attn_mask
-        input_pos = session.input_pos
-        attn_mask[torch.arange(session.bsz), :, :, input_pos] = True
+        range_tensor = torch.arange(self.max_seq_length).view(1, 1, 1, self.max_seq_length)
+        prefill_len_expanded = prefill_len.view(bsz, 1, 1, 1)
+        attn_mask = range_tensor < prefill_len_expanded
 
+        runner.extra_buffers["attn_mask_buf"][slots] = attn_mask
 
-class CUDAGraphCache(CUDAGraphCacheABC):
-    is_applicable = False
-
-    def __init__(
-        self,
-        decoder,
-        cache_size: int,
-    ) -> None:
-        super().__init__(decoder, cache_size)
-
-    def create_graph_cache(self, bsz: int) -> NoReturn:
-        raise NotImplementedError("Cuda Graph Is Not Supported For Varlen Model")
+    def unbind_session_hook(self, session, runner) -> None:
+        slots = session.slot_indices
+        attn_mask_buf = runner.extra_buffers["attn_mask_buf"]
+        attn_mask_buf[slots].zero_()
